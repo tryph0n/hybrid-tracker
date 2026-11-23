@@ -20,6 +20,10 @@ Or run the published image: `docker run -p 8501:8501 sambot961/hybrid-tracker`.
 One CSV per source in `data/events/`, all with the same columns
 (`src/tracker/schema.py`). The app reads these files and nothing else.
 
+The same files are mirrored to the public dataset
+[sam-bot/europe-hybrid-incidents](https://huggingface.co/datasets/sam-bot/europe-hybrid-incidents)
+on Hugging Face. The app does not read it.
+
 | Source | Kind | Refresh | Licence |
 |---|---|---|---|
 | [European Observatory of Drone Incidents](https://droneobservatory.eu) | live | daily, by the pipeline | CC BY 4.0 |
@@ -84,6 +88,9 @@ and every day at 04:17 UTC:
 3. check that `docs/architecture.md` matches the code, and build the docs;
 4. on `main`: build and push the Docker image when its inputs changed, then
    deploy that exact image to Render.
+5. on `main`: mirror `data/events/` to the Hugging Face dataset, then download
+   it again and compare every file with `data/events/`: a missing or different
+   file fails the step.
 
 The image tag is a hash of the files the `Dockerfile` copies, so an unchanged
 app and data publish nothing. `latest` follows the newest image.
@@ -99,6 +106,11 @@ Actions):
 
 The image step is skipped until `DOCKER_IMAGE` is set, and the Render step
 until `RENDER_DEPLOY_HOOK_URL` is set.
+
+The mirror step needs no secret. In the GitHub repository settings, set the
+variable `HF_DATASET` (`<user>/<dataset>`). In the dataset settings on Hugging
+Face, add a Trusted Publisher for this repository, branch `main` and workflow
+`pipeline.yml`. The step does nothing while `HF_DATASET` is unset.
 
 The Render service runs on the free plan with `PORT=8501` and the health check
 path `/_stcore/health`. It sleeps after 15 minutes without visits, so the
