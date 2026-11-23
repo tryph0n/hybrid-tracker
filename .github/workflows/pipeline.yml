@@ -32,11 +32,13 @@ jobs:
           python-version: "3.13"
           cache: pip
       - name: Install
-        run: pip install -r requirements.txt -r docs/requirements.txt ruff==0.17.6 huggingface_hub==2.4.0
+        run: pip install -r requirements.txt -r docs/requirements.txt ruff==0.17.6 huggingface_hub==2.4.0 pyyaml==6.0.3
 
       # CI: checks, then data refresh on schedule or manual run.
       - name: Lint
         run: ruff check . && ruff format --check .
+      - name: Check the architecture page
+        run: python scripts/architecture.py --check
       - name: Refresh live sources
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: python -m tracker.ingest live

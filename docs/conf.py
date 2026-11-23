@@ -13,8 +13,9 @@ project = "Europe Hybrid Incidents Tracker"
 author = "Samy Antoine SAAD"
 copyright = f"2026, {author}"
 
-extensions = ["autoapi.extension", "myst_parser"]
+extensions = ["autoapi.extension", "myst_parser", "sphinxcontrib.mermaid"]
 myst_enable_extensions = ["substitution"]
+myst_fence_as_directive = ["mermaid"]
 exclude_patterns = ["_build"]
 # Docstrings use single backticks for code, as Markdown does.
 default_role = "literal"
