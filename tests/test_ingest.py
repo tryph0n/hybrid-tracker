@@ -1,4 +1,4 @@
-"""The ingest command with fetch functions replaced by sample frames."""
+"""The ingest command on sample frames, and the registry against stored files."""
 
 import dataclasses
 
@@ -64,7 +64,8 @@ def test_ingest_rejects_invalid_events(data_dir, monkeypatch, eodi_events):
 
 def test_check_rejects_an_id_shared_by_two_sources(sample_data_dir, capsys):
     ingest.check()
-    assert capsys.readouterr().out.strip().endswith("2 sources: valid")
+    expected = f"{len(sources.SOURCES)} sources: valid"
+    assert capsys.readouterr().out.strip().endswith(expected)
 
     eodi_text = (sample_data_dir / "eodi.csv").read_text(encoding="utf-8")
     (sample_data_dir / "leiden.csv").write_text(eodi_text, encoding="utf-8")
@@ -85,3 +86,14 @@ def test_main_rejects_an_unknown_target(target):
     with pytest.raises(SystemExit) as stop:
         ingest.main(target)
     assert stop.value.code == ingest.__doc__
+
+
+def test_registry_matches_the_stored_files():
+    stored = {path.stem for path in sources.DATA_DIR.glob("*.csv")}
+    assert stored == set(sources.SOURCES)
+    for name, source in sources.SOURCES.items():
+        assert source.kind in ("live", "static"), name
+        events = read_events(name)
+        assert set(events["source"]) == {name}, name
+        ids = events["event_id"].astype(str)
+        assert list(ids[~ids.str.startswith(f"{name}:")]) == [], name
