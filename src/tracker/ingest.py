@@ -2,10 +2,10 @@
 
 Usage, from the repository root with PYTHONPATH=src:
 
-- python -m tracker.ingest live: every live source (scheduled pipeline)
-- python -m tracker.ingest static: every static source (run by hand)
-- python -m tracker.ingest eodi: a single source
-- python -m tracker.ingest check: validate stored files, fetch nothing
+- `python -m tracker.ingest live`: every live source (scheduled pipeline)
+- `python -m tracker.ingest static`: every static source (run by hand)
+- `python -m tracker.ingest eodi`: a single source
+- `python -m tracker.ingest check`: validate stored files, fetch nothing
 """
 
 import sys

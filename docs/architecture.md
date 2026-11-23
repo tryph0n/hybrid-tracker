@@ -81,18 +81,18 @@ flowchart TB
     step_actions_setup_python_v7 --> step_Install
     step_Lint["Lint"]
     step_Install --> step_Lint
-    step_Check_the_architecture_page["Check the architecture page<br/>runs scripts/architecture.py"]
-    step_Lint --> step_Check_the_architecture_page
     step_Refresh_live_sources["Refresh live sources<br/>runs tracker.ingest live<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
-    step_Check_the_architecture_page --> step_Refresh_live_sources
+    step_Lint --> step_Refresh_live_sources
     step_Validate_stored_data["Validate stored data<br/>runs tracker.ingest check"]
     step_Refresh_live_sources --> step_Validate_stored_data
     step_Smoke_test_the_app["Smoke-test the app<br/>runs src/streamlit_app.py"]
     step_Validate_stored_data --> step_Smoke_test_the_app
     step_Commit_refreshed_data["Commit refreshed data<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
     step_Smoke_test_the_app --> step_Commit_refreshed_data
+    step_Check_the_architecture_page["Check the architecture page<br/>runs scripts/architecture.py"]
+    step_Commit_refreshed_data --> step_Check_the_architecture_page
     step_Build_docs["Build docs"]
-    step_Commit_refreshed_data --> step_Build_docs
+    step_Check_the_architecture_page --> step_Build_docs
     step_Publish_Docker_image["Publish Docker image<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.DOCKER_IMAGE != ''"]:::conditional
     step_Build_docs --> step_Publish_Docker_image
     step_Deploy_to_Hugging_Face_Space["Deploy to Hugging Face Space<br/>runs scripts/deploy_space.py<br/>if: steps.image.outputs.image != '' #amp;#amp; vars.HF_SPACE_ID != ''"]:::conditional

@@ -60,6 +60,8 @@ over time follow each source's coverage period.
 1. Write `src/tracker/<name>.py` with a `fetch()` returning the unified schema.
 2. Register it in `src/tracker/sources.py` as `static` or `live`.
 3. Run `python -m tracker.ingest <name>` and commit the CSV.
+4. Run `PYTHONPATH=src python scripts/architecture.py` and commit
+   `docs/architecture.md`: CI fails while the page does not match the code.
 
 ## Documentation
 
@@ -80,7 +82,8 @@ and every day at 04:17 UTC:
 
 1. lint and validate the stored data;
 2. on the daily or a manual run: refresh live sources and commit the changes;
-3. on `main`: build and push the Docker image when its inputs changed, then
+3. check that `docs/architecture.md` matches the code, and build the docs;
+4. on `main`: build and push the Docker image when its inputs changed, then
    point the Hugging Face Space at that image.
 
 The image tag is a hash of the files the `Dockerfile` copies, so an unchanged

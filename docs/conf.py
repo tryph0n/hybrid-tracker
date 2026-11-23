@@ -16,9 +16,13 @@ copyright = f"2026, {author}"
 extensions = ["autoapi.extension", "myst_parser", "sphinxcontrib.mermaid"]
 myst_enable_extensions = ["substitution"]
 myst_fence_as_directive = ["mermaid"]
+# The sphinxcontrib-mermaid default (11.12.1) cuts long subgraph titles.
+mermaid_version = "11.14.0"
 exclude_patterns = ["_build"]
 # Docstrings use single backticks for code, as Markdown does.
 default_role = "literal"
+# Keep the straight quotes of docstrings and comments, as in the code.
+smartquotes = False
 
 # AutoAPI parses the source without importing it: the docs need none of the
 # app dependencies. Only the tracker package: the Streamlit page is a script.
