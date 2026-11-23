@@ -1,0 +1,11 @@
+IncidentYear,IncidentMonth,IncidentDateRange,IncidentDateStart,IncidentDateEnd,What,Where,EventCategory,EventCategory2,ApparentGoal1,ApparentGoal2,TargetType,TargetType2,DisposableAgentsInvolved,For discussion,Note
+2022,January,Yes,2022-01-01,2022-12-31,Ongoing attempt to map offshore comms/energy infrastructure in North Sea / Baltic,North Sea; Baltic Sea,Reconnaissance,Does not apply,Preparation for potential sabotage,Does not apply,Energy / communications infrastructure,Does not apply,,No,Ongoing for years.
+2022,March,Yes,2022-03-01,2022-08-30,"Following Ru invasion, Marsalek-led Bulgarian spyring began a disinfo operation in Austria and Germany with stickers and graffiti.",Austria; Germany,Influence operation,Does not apply,Disrupt (military) aid to Ukraine,Does not apply,Public space: Shopping centre / Memorial / Landmark / Company / School,Does not apply,Yes,No,
+2022,April,No,DNA,DNA,Spraypainting 'KILLNET HACKED YOU' on Cyber Defence Centre,Estonia,Vandalism,Does not apply,Disrupt daily life,Does not apply,Military / weapons production infrastructure,Does not apply,,No,
+2023,Unknown,No,DNA,DNA,Sabotage of a rail signalling cabinet near Utrecht (fictitious sample),The Netherlands,Sabotage,Does not apply,Disrupt (military) aid to Ukraine,Does not apply,Transport infrastructure,Does not apply,,No,Month not given by the author.
+2024,November,No,DNA,DNA,Arson at a warehouse in Berlin (fictitious sample) ,Germany; ,Arson,Does not apply,Disrupt daily life,Does not apply,Company,Does not apply,Yes,No,
+2025,May,No,DNA,DNA,Migrants pushed across the border (fictitious sample),Czechia; United Kingdom; Germany,Disruptive immigration,Does not apply,Disrupt daily life,Does not apply,Border,Does not apply,,No,
+2025,December,Yes,2025-12-01,2025-12-20,Preparation of an attack on a pipeline (fictitious sample),Poland; Baltic Sea; Germany,Sabotage (preparation),Does not apply,Preparation for potential sabotage,Does not apply,Energy / communications infrastructure,Does not apply,,Yes,
+,,,,,,,,,,,,,,,
+,,,,,ToDo 8 January 2026,,,,,,,,,,
+,,,,,Consider schema developed in article under link.,,,,,,,,,,

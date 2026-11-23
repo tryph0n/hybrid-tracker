@@ -85,10 +85,10 @@ flowchart TB
     step_Lint --> step_Refresh_live_sources
     step_Validate_stored_data["Validate stored data<br/>runs tracker.ingest check"]
     step_Refresh_live_sources --> step_Validate_stored_data
-    step_Smoke_test_the_app["Smoke-test the app<br/>runs src/streamlit_app.py"]
-    step_Validate_stored_data --> step_Smoke_test_the_app
+    step_Run_the_tests["Run the tests"]
+    step_Validate_stored_data --> step_Run_the_tests
     step_Commit_refreshed_data["Commit refreshed data<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
-    step_Smoke_test_the_app --> step_Commit_refreshed_data
+    step_Run_the_tests --> step_Commit_refreshed_data
     step_Check_the_architecture_page["Check the architecture page<br/>runs scripts/architecture.py"]
     step_Commit_refreshed_data --> step_Check_the_architecture_page
     step_Build_docs["Build docs"]

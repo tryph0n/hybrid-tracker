@@ -1,0 +1,139 @@
+{
+  "licencia": {
+    "nombre": "CC BY 4.0",
+    "url": "https://creativecommons.org/licenses/by/4.0/",
+    "titular": "European Observatory of Drone Incidents"
+  },
+  "incidentes": [
+    {
+      "id": "EODI-2025-00140",
+      "tipo": "sobrevuelo",
+      "estado": {
+        "actual": "notificado",
+        "historial": []
+      },
+      "presencia_dron": "no_confirmada",
+      "titulo": {
+        "en": "Residents report several possible drone sightings over Arna, Norway, to police",
+        "es": "Vecinos avisan a la policía de varios avistamientos de posibles drones sobre Arna, en Noruega"
+      },
+      "tiempo": {
+        "inicio": {
+          "precision": "dia",
+          "valor": "2025-02-12T00:00Z"
+        }
+      },
+      "lugar": {
+        "localidad": "Arna",
+        "nivel": "localidad",
+        "pais": "NO",
+        "region": "Vestland"
+      },
+      "nombres": {
+        "localidad": {
+          "en": "Arna",
+          "es": "Arna"
+        },
+        "lugar": {
+          "en": "Arna, Norway",
+          "es": "Arna, Noruega"
+        },
+        "region": {
+          "en": "Vestland",
+          "es": "Vestland"
+        }
+      },
+      "zona": {
+        "grupo": "interior",
+        "motivo": "lejos_de_la_frontera"
+      },
+      "fuentes": []
+    },
+    {
+      "id": "EODI-2025-00212",
+      "tipo": "incursion",
+      "estado": {
+        "actual": "confirmado",
+        "historial": []
+      },
+      "presencia_dron": "confirmada",
+      "titulo": {
+        "en": "Two drones crash in Moldova after airspace violation",
+        "es": "Dos drones se estrellan en Moldavia tras violar su espacio aéreo"
+      },
+      "tiempo": {
+        "inicio": {
+          "precision": "dia",
+          "valor": "2025-02-13T00:00Z"
+        }
+      },
+      "lugar": {
+        "centro_region": {
+          "lat": 46.191,
+          "lon": 28.639
+        },
+        "nivel": "localidad",
+        "pais": "MD",
+        "region": "Gagauzia"
+      },
+      "nombres": {
+        "localidad": {
+          "en": "Gagauzia",
+          "es": "Gagauzia"
+        },
+        "lugar": {
+          "en": "Gagauzia, Moldova",
+          "es": "Gagauzia, Moldavia"
+        },
+        "region": {
+          "en": "Gagauzia",
+          "es": "Gagauzia"
+        }
+      },
+      "zona": {
+        "grupo": "frontera",
+        "motivo": "ataque"
+      },
+      "fuentes": []
+    },
+    {
+      "id": "EODI-2025-00222",
+      "tipo": "incursion",
+      "estado": {
+        "actual": "confirmado",
+        "historial": []
+      },
+      "presencia_dron": "confirmada",
+      "titulo": {
+        "en": "Drone violates Moldova's airspace from Ukraine",
+        "es": "Dron viola el espacio aéreo de Moldavia procedente de Ucrania"
+      },
+      "tiempo": {
+        "duracion_min": 15,
+        "fin": {
+          "precision": "minuto",
+          "valor": "2025-02-02T22:45Z"
+        },
+        "inicio": {
+          "precision": "minuto",
+          "valor": "2025-02-02T22:30Z"
+        }
+      },
+      "lugar": {
+        "nivel": "pais",
+        "pais": "MD"
+      },
+      "nombres": {
+        "lugar": {
+          "en": "Moldova",
+          "es": "Moldavia"
+        }
+      },
+      "zona": {
+        "grupo": "frontera",
+        "motivo": "ataque"
+      },
+      "fuentes": []
+    }
+  ]
+}

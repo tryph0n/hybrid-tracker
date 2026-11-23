@@ -55,6 +55,13 @@ over time follow each source's coverage period.
    `PYTHONPATH=src python scripts/architecture.py` and commit
    `docs/architecture.md`: CI fails while the page does not match the code.
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Documentation
 
 `docs/` holds the Sphinx documentation: this README, a data dictionary and an
@@ -72,7 +79,7 @@ sphinx-build -W --keep-going -b html docs docs/_build/html
 `.github/workflows/pipeline.yml` runs on pushes to `main`, on pull requests,
 and every day at 04:17 UTC:
 
-1. lint and validate the stored data;
+1. lint, validate the stored data and run the tests;
 2. on the daily or a manual run: refresh live sources and commit the changes;
 3. check that `docs/architecture.md` matches the code, and build the docs;
 4. on `main`: build and push the Docker image when its inputs changed, then
