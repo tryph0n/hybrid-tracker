@@ -21,7 +21,7 @@ extensions = [
 ]
 myst_enable_extensions = ["substitution"]
 myst_fence_as_directive = ["mermaid"]
-# The sphinxcontrib-mermaid default (11.12.1) cuts long subgraph titles.
+# Pinned so that the diagrams render the same way at each build.
 mermaid_version = "11.14.0"
 exclude_patterns = ["_build"]
 # Docstrings use single backticks for code, as Markdown does.

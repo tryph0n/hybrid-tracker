@@ -20,167 +20,94 @@ The pipeline fails while the page is out of date.
 
 ## Overview
 
-Where the events come from, where they are stored, and how the app is published. Edge labels name the workflow steps that do the work.
+Where the events come from, where they are stored, and where they go. Rounded boxes are outside the repository. Edge labels name the pipeline job or the manual step that moves the data. The Docker image holds `requirements.txt`, `.streamlit/`, `src/`, `data/`.
 
 ```mermaid
----
-config: {"flowchart": {"wrappingWidth": 400}}
----
 flowchart TB
-  subgraph sources["Open datasets: tracker.sources"]
-    source_eodi["European Observatory of Drone Incidents<br/>eodi: live, CC BY 4.0<br/>https://droneobservatory.eu<br/>https://droneobservatory.eu/datos/incidentes.csv<br/>https://droneobservatory.eu/datos/incidentes_sin_ubicacion.json<br/>https://droneobservatory.eu/{id}"]
-    source_leiden["Russian Operations Against Europe Dataset, 2022-2025<br/>leiden: static, CC BY 4.0<br/>https://doi.org/10.7910/DVN/TQ0FMQ<br/>https://dataverse.harvard.edu/api/access/datafile/13350817"]
-  end
-  ingest["tracker.ingest<br/>Fetch sources and store them as data/events/#lt;source#gt;.csv."]
-  source_eodi -- "pipeline.yml: Refresh live sources" --> ingest
-  source_leiden -- "by hand: tracker.ingest static" --> ingest
-  subgraph events["data/events/"]
-    events_eodi[("eodi.csv")]
-    events_leiden[("leiden.csv")]
-  end
-  ingest --> events_eodi
-  ingest --> events_leiden
-  app["src/streamlit_app.py<br/>Dashboard: maps and charts of the unified hybrid-incident dataset."]
+  source_eodi("eodi<br/>live")
+  source_leiden("leiden<br/>static")
+  ingest["tracker.ingest"]
+  events[("data/events/")]
+  app["streamlit_app.py"]
+  service_Docker_Hub("Docker Hub")
+  service_Render("Render")
+  service_Hugging_Face("Hugging Face")
+  source_eodi -->|"Data job"| ingest
+  source_leiden -->|"by hand"| ingest
+  ingest --> events
   events --> app
-  image[["Docker image: Dockerfile<br/>FROM python:3.13-slim<br/>COPY requirements.txt, .streamlit/, src/, data/<br/>EXPOSE 8501"]]
-  app --> image
-  events --> image
-  subgraph delivery["Workflow steps that use secrets or variables"]
-    step_image_Publish_Docker_image(["pipeline.yml: Publish Docker image<br/>uses vars.DOCKER_IMAGE, secrets.DOCKERHUB_TOKEN"])
-    step_deploy_Deploy_to_Render(["pipeline.yml: Deploy to Render<br/>uses secrets.RENDER_DEPLOY_HOOK_URL"])
-    step_mirror_Mirror_the_data_to_Hugging_Face(["pipeline.yml: Mirror the data to Hugging Face<br/>uses vars.HF_DATASET"])
-  end
-  image --> step_image_Publish_Docker_image
-  events --> step_mirror_Mirror_the_data_to_Hugging_Face
-  step_image_Publish_Docker_image -.->|image| step_deploy_Deploy_to_Render
+  app -->|"Docker image job"| service_Docker_Hub
+  service_Docker_Hub -->|"Deploy to Render job"| service_Render
+  events -->|"Hugging Face mirror job"| service_Hugging_Face
 ```
+
+| Source | Name | Kind | Licence | Stored as |
+| --- | --- | --- | --- | --- |
+| `eodi` | [European Observatory of Drone Incidents](https://droneobservatory.eu) | live | CC BY 4.0 | `data/events/eodi.csv` |
+| `leiden` | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | static | CC BY 4.0 | `data/events/leiden.csv` |
 
 ## Pipeline
 
-Each workflow in `.github/workflows/`: its triggers and settings, then one box per job, from left to right along the `needs` of the jobs. A box gives the job settings, then its steps in order. An arrow label names the job outputs that the next job reads. Dashed jobs and steps run only when their `if` condition holds. A step that uses secrets or variables names them: they are set in the repository settings (Secrets and variables, Actions).
+The jobs of each workflow in `.github/workflows/`. Jobs run from left to right: a job starts when the jobs it needs have passed. Dashed jobs run only when their `if` condition holds. Edge labels name the job outputs that the next job reads. Secrets and variables are set in the repository settings (Secrets and variables, Actions). The steps table leaves out the steps without a name, and shows "a script" for a `run` of several lines.
+
+`pipeline.yml` runs on `push` (`branches: main`), `pull_request`, `schedule` (`cron: 17 4 * * *`), `workflow_dispatch`.
 
 ```mermaid
----
-config: {"flowchart": {"wrappingWidth": 400}}
----
 flowchart LR
   classDef conditional stroke-dasharray: 6 4
-  subgraph workflow_pipeline_yml_box[".github/workflows/pipeline.yml"]
-    direction LR
-    on_pipeline_yml_push(["push<br/>branches: main"])
-    on_pipeline_yml_push --> workflow_pipeline_yml
-    on_pipeline_yml_pull_request(["pull_request"])
-    on_pipeline_yml_pull_request --> workflow_pipeline_yml
-    on_pipeline_yml_schedule(["schedule<br/>cron: 17 4 * * *"])
-    on_pipeline_yml_schedule --> workflow_pipeline_yml
-    on_pipeline_yml_workflow_dispatch(["workflow_dispatch"])
-    on_pipeline_yml_workflow_dispatch --> workflow_pipeline_yml
-    workflow_pipeline_yml["workflow pipeline<br/>concurrency: group: ${{ github.event_name == 'pull_request' #amp;#amp; github.ref || 'pipeline' }}, cancel-in-progress: false<br/>permissions: contents: read<br/>env: PYTHONPATH: src, PYTHONDONTWRITEBYTECODE: 1"]
-    subgraph job_pipeline_yml_lint["Lint"]
-      direction TB
-      job_pipeline_yml_lint_settings["job lint<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 10"]
-      step_lint_actions_checkout_v7["actions/checkout@v7"]
-      job_pipeline_yml_lint_settings --> step_lint_actions_checkout_v7
-      step_lint_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
-      step_lint_actions_checkout_v7 --> step_lint_actions_setup_python_v7
-      step_lint_Install["Install"]
-      step_lint_actions_setup_python_v7 --> step_lint_Install
-      step_lint_Lint["Lint"]
-      step_lint_Install --> step_lint_Lint
-    end
-    subgraph job_pipeline_yml_data["Data"]
-      direction TB
-      job_pipeline_yml_data_settings["job data<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 15<br/>permissions: contents: write<br/>outputs: sha: ${{ steps.commit.outputs.sha || github.sha }}"]
-      step_data_actions_checkout_v7["actions/checkout@v7"]
-      job_pipeline_yml_data_settings --> step_data_actions_checkout_v7
-      step_data_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
-      step_data_actions_checkout_v7 --> step_data_actions_setup_python_v7
-      step_data_Install["Install"]
-      step_data_actions_setup_python_v7 --> step_data_Install
-      step_data_Refresh_live_sources["Refresh live sources<br/>runs tracker.ingest live<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
-      step_data_Install --> step_data_Refresh_live_sources
-      step_data_Validate_stored_data["Validate stored data<br/>runs tracker.ingest check"]
-      step_data_Refresh_live_sources --> step_data_Validate_stored_data
-      step_data_Run_the_tests["Run the tests"]
-      step_data_Validate_stored_data --> step_data_Run_the_tests
-      step_data_Commit_refreshed_data["Commit refreshed data<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
-      step_data_Run_the_tests --> step_data_Commit_refreshed_data
-    end
-    subgraph job_pipeline_yml_docs["Docs"]
-      direction TB
-      job_pipeline_yml_docs_settings["job docs<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 10"]
-      step_docs_actions_checkout_v7["actions/checkout@v7"]
-      job_pipeline_yml_docs_settings --> step_docs_actions_checkout_v7
-      step_docs_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
-      step_docs_actions_checkout_v7 --> step_docs_actions_setup_python_v7
-      step_docs_Install["Install"]
-      step_docs_actions_setup_python_v7 --> step_docs_Install
-      step_docs_Check_the_architecture_page["Check the architecture page<br/>runs scripts/architecture.py"]
-      step_docs_Install --> step_docs_Check_the_architecture_page
-      step_docs_Build_docs["Build docs"]
-      step_docs_Check_the_architecture_page --> step_docs_Build_docs
-    end
-    subgraph job_pipeline_yml_image["Docker image"]
-      direction TB
-      job_pipeline_yml_image_settings["job image<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 10<br/>outputs: image: ${{ steps.image.outputs.image }}<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.DOCKER_IMAGE != ''"]
-      step_image_actions_checkout_v7["actions/checkout@v7<br/>ref: ${{ needs.data.outputs.sha }}"]
-      job_pipeline_yml_image_settings --> step_image_actions_checkout_v7
-      step_image_Publish_Docker_image["Publish Docker image<br/>uses vars.DOCKER_IMAGE, secrets.DOCKERHUB_TOKEN"]
-      step_image_actions_checkout_v7 --> step_image_Publish_Docker_image
-    end
-    subgraph job_pipeline_yml_deploy["Deploy to Render"]
-      direction TB
-      job_pipeline_yml_deploy_settings["job deploy<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 5<br/>if: needs.image.outputs.image != ''"]
-      step_deploy_Deploy_to_Render["Deploy to Render<br/>uses secrets.RENDER_DEPLOY_HOOK_URL"]
-      job_pipeline_yml_deploy_settings --> step_deploy_Deploy_to_Render
-    end
-    subgraph job_pipeline_yml_mirror["Hugging Face mirror"]
-      direction TB
-      job_pipeline_yml_mirror_settings["job mirror<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 10<br/>permissions: contents: read, id-token: write<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.HF_DATASET != ''"]
-      step_mirror_actions_checkout_v7["actions/checkout@v7<br/>ref: ${{ needs.data.outputs.sha }}"]
-      job_pipeline_yml_mirror_settings --> step_mirror_actions_checkout_v7
-      step_mirror_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
-      step_mirror_actions_checkout_v7 --> step_mirror_actions_setup_python_v7
-      step_mirror_Install["Install"]
-      step_mirror_actions_setup_python_v7 --> step_mirror_Install
-      step_mirror_Mirror_the_data_to_Hugging_Face["Mirror the data to Hugging Face<br/>uses vars.HF_DATASET"]
-      step_mirror_Install --> step_mirror_Mirror_the_data_to_Hugging_Face
-    end
-    workflow_pipeline_yml --> job_pipeline_yml_lint
-    job_pipeline_yml_lint --> job_pipeline_yml_data
-    job_pipeline_yml_lint --> job_pipeline_yml_docs
-    job_pipeline_yml_data -->|sha| job_pipeline_yml_image
-    job_pipeline_yml_docs --> job_pipeline_yml_image
-    job_pipeline_yml_image -->|image| job_pipeline_yml_deploy
-    job_pipeline_yml_data -->|sha| job_pipeline_yml_mirror
-  end
-  class job_pipeline_yml_image conditional
-  class job_pipeline_yml_deploy conditional
-  class job_pipeline_yml_mirror conditional
+  job_lint["Lint"]
+  job_data["Data"]
+  job_docs["Docs"]
+  job_image["Docker image"]:::conditional
+  job_deploy["Deploy to Render"]:::conditional
+  job_mirror["Hugging Face mirror"]:::conditional
+  job_lint --> job_data
+  job_lint --> job_docs
+  job_data -->|sha| job_image
+  job_docs --> job_image
+  job_image -->|image| job_deploy
+  job_data -->|sha| job_mirror
 ```
+
+| Job | Runs if | Secrets and variables |
+| --- | --- | --- |
+| Lint |  |  |
+| Data |  |  |
+| Docs |  |  |
+| Docker image | `github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''` | `DOCKERHUB_TOKEN` (secret), `DOCKER_IMAGE` (variable) |
+| Deploy to Render | `needs.image.outputs.image != ''` | `RENDER_DEPLOY_HOOK_URL` (secret) |
+| Hugging Face mirror | `github.ref == 'refs/heads/main' && vars.HF_DATASET != ''` | `HF_DATASET` (variable) |
+
+| Job | Step | Runs if | Runs |
+| --- | --- | --- | --- |
+| Lint | Install |  | `pip install -r requirements-dev.txt` |
+| Lint | Lint |  | `ruff check . && ruff format --check .` |
+| Data | Install |  | `pip install -r requirements-dev.txt` |
+| Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `python -m tracker.ingest live` |
+| Data | Validate stored data |  | `python -m tracker.ingest check` |
+| Data | Run the tests |  | `pytest` |
+| Data | Commit refreshed data | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | a script |
+| Docs | Install |  | `pip install -r requirements-dev.txt -r docs/requirements.txt` |
+| Docs | Check the architecture page |  | `python scripts/architecture.py --check` |
+| Docs | Build docs |  | `sphinx-build -W --keep-going -b html docs docs/_build/html` |
+| Docker image | Publish Docker image |  | a script |
+| Deploy to Render | Deploy to Render |  | a script |
+| Hugging Face mirror | Install |  | `pip install -r requirements-dev.txt` |
+| Hugging Face mirror | Mirror the data to Hugging Face |  | a script |
 
 ## Modules
 
-Python files and their imports: an arrow points to the imported module. Each box gives the module docstring and its third-party imports.
+Python files and their imports: an arrow points to the imported module.
 
 ```mermaid
----
-config: {"flowchart": {"wrappingWidth": 400}}
----
 flowchart TB
-  subgraph folder_src["src/"]
-    module_streamlit_app_py["streamlit_app.py<br/>Dashboard: maps and charts of the unified hybrid-incident dataset.<br/>imports pandas, plotly, pycountry, streamlit"]
-  end
-  subgraph folder_src_tracker["src/tracker/: Ingestion and storage of hybrid-incident events from open datasets."]
-    module_tracker_eodi["tracker.eodi<br/>European Observatory of Drone Incidents (EODI) - live source.<br/>imports pandas"]
-    module_tracker_ingest["tracker.ingest<br/>Fetch sources and store them as data/events/#lt;source#gt;.csv."]
-    module_tracker_leiden["tracker.leiden<br/>Russian Operations Against Europe Dataset (Leiden University) - static source.<br/>imports pandas, pycountry"]
-    module_tracker_schema["tracker.schema<br/>Unified event schema shared by every source adapter.<br/>imports pandas"]
-    module_tracker_sources["tracker.sources<br/>Registry of data sources and access to their stored events.<br/>imports pandas"]
-  end
-  subgraph folder_scripts["scripts/"]
-    module_architecture_py["architecture.py<br/>Generate docs/architecture.md, the architecture diagrams, from the code.<br/>imports yaml"]
-  end
+  module_streamlit_app_py["streamlit_app.py"]
+  module_tracker_eodi["tracker.eodi"]
+  module_tracker_ingest["tracker.ingest"]
+  module_tracker_leiden["tracker.leiden"]
+  module_tracker_schema["tracker.schema"]
+  module_tracker_sources["tracker.sources"]
+  module_architecture_py["architecture.py"]
   module_streamlit_app_py --> module_tracker_schema
   module_streamlit_app_py --> module_tracker_sources
   module_tracker_eodi --> module_tracker_schema
@@ -191,3 +118,13 @@ flowchart TB
   module_tracker_sources --> module_tracker_leiden
   module_architecture_py --> module_tracker_sources
 ```
+
+| Module | File | Purpose | Third-party imports |
+| --- | --- | --- | --- |
+| `streamlit_app.py` | `src/streamlit_app.py` | Dashboard: maps and charts of the unified hybrid-incident dataset. | pandas, plotly, pycountry, streamlit |
+| `tracker.eodi` | `src/tracker/eodi.py` | European Observatory of Drone Incidents (EODI) - live source. | pandas |
+| `tracker.ingest` | `src/tracker/ingest.py` | Fetch sources and store them as data/events/\<source\>.csv. |  |
+| `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | pandas, pycountry |
+| `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
+| `tracker.sources` | `src/tracker/sources.py` | Registry of data sources and access to their stored events. | pandas |
+| `architecture.py` | `scripts/architecture.py` | Generate docs/architecture.md, the architecture diagrams, from the code. | yaml |
