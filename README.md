@@ -3,6 +3,9 @@
 Maps and charts of drone incidents, sabotage and other hybrid operations in
 Europe since 2022, compiled from open datasets into one event table.
 
+Live dashboard: [hybrid-tracker.onrender.com](https://hybrid-tracker.onrender.com).
+It sleeps when nobody visits, so the first page load can take about a minute.
+
 ## Run locally
 
 ```bash
