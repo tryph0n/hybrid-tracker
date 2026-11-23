@@ -5,7 +5,9 @@
 2. `python -m tracker.ingest` validates the result and stores it as
    `data/events/<source>.csv`, committed to the repository.
 3. The Streamlit page `src/streamlit_app.py` reads these files and nothing else.
-4. The pipeline refreshes the live sources every day and publishes the app.
+4. The pipeline refreshes the live sources every day, publishes the app and
+   mirrors `data/events/` to a public Hugging Face dataset. The app does not
+   read the mirror.
 
 This page is generated from the code by `scripts/architecture.py`: do not edit
 it by hand. After a change, run this command and commit the result:
@@ -46,8 +48,10 @@ flowchart TB
   subgraph delivery["Workflow steps that use secrets or variables"]
     step_Publish_Docker_image(["pipeline.yml: Publish Docker image<br/>uses vars.DOCKER_IMAGE, secrets.DOCKERHUB_TOKEN"])
     step_Deploy_to_Render(["pipeline.yml: Deploy to Render<br/>uses secrets.RENDER_DEPLOY_HOOK_URL"])
+    step_Mirror_the_data_to_Hugging_Face(["pipeline.yml: Mirror the data to Hugging Face<br/>uses vars.HF_DATASET"])
   end
   image --> step_Publish_Docker_image
+  events --> step_Mirror_the_data_to_Hugging_Face
   step_Publish_Docker_image -.->|image| step_Deploy_to_Render
 ```
 
@@ -70,7 +74,7 @@ flowchart TB
     on_pipeline_yml_schedule --> workflow_pipeline_yml
     on_pipeline_yml_workflow_dispatch(["workflow_dispatch"])
     on_pipeline_yml_workflow_dispatch --> workflow_pipeline_yml
-    workflow_pipeline_yml["workflow pipeline<br/>concurrency: group: ${{ github.event_name == 'pull_request' #amp;#amp; github.ref || 'pipeline' }}, cancel-in-progress: false<br/>permissions: contents: write<br/>env: PYTHONPATH: src, PYTHONDONTWRITEBYTECODE: 1"]
+    workflow_pipeline_yml["workflow pipeline<br/>concurrency: group: ${{ github.event_name == 'pull_request' #amp;#amp; github.ref || 'pipeline' }}, cancel-in-progress: false<br/>permissions: contents: write, id-token: write<br/>env: PYTHONPATH: src, PYTHONDONTWRITEBYTECODE: 1"]
     job_pipeline_yml_pipeline["job pipeline<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 15"]
     workflow_pipeline_yml --> job_pipeline_yml_pipeline
     step_actions_checkout_v7["actions/checkout@v7"]
@@ -97,16 +101,20 @@ flowchart TB
     step_Build_docs --> step_Publish_Docker_image
     step_Deploy_to_Render["Deploy to Render<br/>if: steps.image.outputs.image != ''"]:::conditional
     step_Publish_Docker_image --> step_Deploy_to_Render
+    step_Mirror_the_data_to_Hugging_Face["Mirror the data to Hugging Face<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.HF_DATASET != ''"]:::conditional
+    step_Deploy_to_Render --> step_Mirror_the_data_to_Hugging_Face
   end
   step_Publish_Docker_image -.->|image| step_Deploy_to_Render
   subgraph settings["Repository settings: Secrets and variables, Actions"]
     secrets_DOCKERHUB_TOKEN{{"secret DOCKERHUB_TOKEN"}}
     secrets_RENDER_DEPLOY_HOOK_URL{{"secret RENDER_DEPLOY_HOOK_URL"}}
     vars_DOCKER_IMAGE[/"variable DOCKER_IMAGE"/]
+    vars_HF_DATASET[/"variable HF_DATASET"/]
   end
   step_Publish_Docker_image -.-> secrets_DOCKERHUB_TOKEN
   step_Deploy_to_Render -.-> secrets_RENDER_DEPLOY_HOOK_URL
   step_Publish_Docker_image -.-> vars_DOCKER_IMAGE
+  step_Mirror_the_data_to_Hugging_Face -.-> vars_HF_DATASET
 ```
 
 ## Modules

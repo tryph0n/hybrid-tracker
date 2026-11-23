@@ -16,6 +16,7 @@ concurrency:
 
 permissions:
   contents: write # the refresh commits data/events
+  id-token: write # the Hugging Face mirror signs in with the run OIDC token
 
 env:
   PYTHONPATH: src
@@ -89,3 +90,18 @@ jobs:
           fi
           # The exact tag of this run, not whatever latest points to.
           curl -fsS --get --data-urlencode "imgURL=docker.io/$IMAGE" -o /dev/null "$RENDER_DEPLOY_HOOK_URL"
+      - name: Mirror the data to Hugging Face
+        if: github.ref == 'refs/heads/main' && vars.HF_DATASET != ''
+        env:
+          HF_DATASET: ${{ vars.HF_DATASET }}
+          HF_OIDC_RESOURCE: datasets/${{ vars.HF_DATASET }}
+        run: |
+          url=$(hf upload "$HF_DATASET" data/events . --repo-type dataset --commit-message "data: mirror $(git rev-parse --short HEAD)" --quiet)
+          echo "$url"
+          # Read back the commit of this run (the latest commit when nothing changed), not whatever main points to.
+          copy=$(mktemp -d)
+          hf download "$HF_DATASET" --repo-type dataset --revision "${url##*/}" --local-dir "$copy" > /dev/null
+          for file in data/events/*; do
+            cmp -s "$file" "$copy/$(basename "$file")" || { echo "Mirror check failed: $(basename "$file") is missing or differs on $HF_DATASET"; exit 1; }
+          done
+          echo "Mirror check passed: $HF_DATASET matches data/events"

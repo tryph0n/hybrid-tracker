@@ -34,7 +34,9 @@ INTRO = f"""\
 2. `python -m tracker.ingest` validates the result and stores it as
    `data/events/<source>.csv`, committed to the repository.
 3. The Streamlit page `src/streamlit_app.py` reads these files and nothing else.
-4. The pipeline refreshes the live sources every day and publishes the app.
+4. The pipeline refreshes the live sources every day, publishes the app and
+   mirrors `data/events/` to a public Hugging Face dataset. The app does not
+   read the mirror.
 
 This page is generated from the code by `scripts/architecture.py`: do not edit
 it by hand. After a change, run this command and commit the result:
@@ -216,8 +218,11 @@ def overview(steps: list[dict]) -> list[str]:
         lines.append(f"    {step['id']}([{text}])")
     lines.append("  end")
     for step in delivery:
-        if re.search(r"docker (buildx )?(build|push)", step["spec"].get("run", "")):
+        run = step["spec"].get("run", "")
+        if re.search(r"docker (buildx )?(build|push)", run):
             lines.append(f"  image --> {step['id']}")
+        if rel(DATA_DIR) in run:
+            lines.append(f"  events --> {step['id']}")
     return lines + output_edges(steps, delivery)
 
 
