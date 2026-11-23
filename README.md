@@ -21,8 +21,8 @@ One CSV file per source, all with the same columns.
 
 | Source | Content | Updates | Licence |
 |---|---|---|---|
-| [European Observatory of Drone Incidents](https://droneobservatory.eu) | Drone incidents in Europe | Daily | CC BY 4.0 |
-| [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | Operations attributed to Russia | Frozen snapshot | CC BY 4.0 |
+| [European Observatory of Drone Incidents](https://droneobservatory.eu) | Drone incidents in Europe | Daily refresh | CC BY 4.0 |
+| [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | Operations that the author judges Russian | Frozen snapshot | CC BY 4.0 |
 
 Each day at 04:17 UTC, the pipeline gets the live source, checks every row,
 commits the files, then updates the dashboard and the dataset. See the
@@ -39,7 +39,8 @@ attribution. Two fields keep these questions apart:
   the source's analysts, `none`)?
 
 Known limits: sources are not de-duplicated against each other, and counts
-over time follow each source's coverage period.
+over time follow each source's coverage period (see the Sources table of the
+dashboard).
 
 All columns and values are in the
 [data dictionary](https://hybrid-tracker.readthedocs.io/en/latest/data-dictionary.html).
@@ -51,6 +52,8 @@ With Docker:
 ```bash
 docker run -p 8501:8501 sambot961/hybrid-tracker
 ```
+
+Then open http://localhost:8501.
 
 With Python 3.13:
 
@@ -67,8 +70,9 @@ Issues are welcome. Pull requests are not accepted.
 
 To report a wrong mapping, such as a category, a country or a status that does
 not match the source, [open an issue](https://github.com/tryph0n/hybrid-tracker/issues).
-Report an error in the source data to that source. The next refresh brings the
-fix.
+Report an error in the source data to that source. For a daily source, the
+next refresh brings the fix. A frozen snapshot changes only with a new version
+of the source.
 
 The [maintainer guide](https://hybrid-tracker.readthedocs.io/en/latest/maintainer.html)
 covers the checks, the pipeline and the settings.
