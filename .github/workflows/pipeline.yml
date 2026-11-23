@@ -1,0 +1,91 @@
+name: pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * *" # every day at 04:17 UTC
+  workflow_dispatch:
+
+# One run at a time: a data refresh and a code push must not race.
+# Pull requests get their own group so they never cancel a pending main run.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && github.ref || 'pipeline' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # the refresh commits data/events
+
+env:
+  PYTHONPATH: src
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # a stalled download must not hold the group for hours
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt -r docs/requirements.txt ruff==0.17.6 pyyaml==6.0.3
+
+      # CI: checks, then data refresh on schedule or manual run.
+      - name: Lint
+        run: ruff check . && ruff format --check .
+      - name: Refresh live sources
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python -m tracker.ingest live
+      - name: Validate stored data
+        run: python -m tracker.ingest check
+      - name: Smoke-test the app
+        run: python -c "from streamlit.testing.v1 import AppTest; at = AppTest.from_file('src/streamlit_app.py', default_timeout=60); at.run(); assert not at.exception, at.exception"
+      - name: Commit refreshed data
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/events
+          git diff --cached --quiet || (git commit -m "data: refresh live sources" && git pull --rebase && git push)
+
+      # After the data commit, so a stale page or broken docs never block a refresh.
+      - name: Check the architecture page
+        run: python scripts/architecture.py --check
+      - name: Build docs
+        run: sphinx-build -W --keep-going -b html docs docs/_build/html
+
+      # CD, from main only. Each step does nothing until its variable or secret is set.
+      - name: Publish Docker image
+        id: image
+        if: github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''
+        env:
+          DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          # Same image inputs (the files the Dockerfile copies), same tag.
+          tag=$(git ls-tree HEAD Dockerfile requirements.txt .streamlit src data | sha256sum | cut -c1-12)
+          echo "image=$DOCKER_IMAGE:$tag" >> "$GITHUB_OUTPUT"
+          echo "$DOCKERHUB_TOKEN" | docker login -u "${DOCKER_IMAGE%%/*}" --password-stdin
+          if docker manifest inspect "$DOCKER_IMAGE:$tag" > /dev/null 2>&1; then
+            echo "$DOCKER_IMAGE:$tag is already published"
+          else
+            docker build -t "$DOCKER_IMAGE:$tag" -t "$DOCKER_IMAGE:latest" .
+            docker push --all-tags "$DOCKER_IMAGE"
+          fi
+      - name: Deploy to Render
+        if: steps.image.outputs.image != ''
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          # A secret cannot gate a step: skip here until it is set.
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL is not set, deploy skipped"
+            exit 0
+          fi
+          # The exact tag of this run, not whatever latest points to.
+          curl -fsS --get --data-urlencode "imgURL=docker.io/$IMAGE" -o /dev/null "$RENDER_DEPLOY_HOOK_URL"
