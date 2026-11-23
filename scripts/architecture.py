@@ -61,10 +61,12 @@ OVERVIEW = (
     "published. Edge labels name the workflow steps that do the work."
 )
 PIPELINE = (
-    "Each workflow in `.github/workflows/`: its triggers, settings and jobs, then "
-    "the steps in order. Dashed steps run only when their `if` condition holds. "
-    "Dotted arrows point to the secrets and variables a step uses: they are "
-    "set in the repository settings."
+    "Each workflow in `.github/workflows/`: its triggers and settings, then one "
+    "box per job, from left to right along the `needs` of the jobs. A box gives "
+    "the job settings, then its steps in order. An arrow label names the job "
+    "outputs that the next job reads. Dashed jobs and steps run only when their "
+    "`if` condition holds. A step that uses secrets or variables names them: "
+    "they are set in the repository settings (Secrets and variables, Actions)."
 )
 MODULES = (
     "Python files and their imports: an arrow points to the imported module. "
@@ -109,14 +111,25 @@ def references(spec, kind: str) -> list[str]:
     return sorted(set(re.findall(rf"\b{kind}\.(\w+)", str(spec))))
 
 
+def uses(spec) -> str:
+    """The variables and secrets that a workflow object uses, on one line."""
+    names = [
+        f"{kind}.{name}"
+        for kind in ("vars", "secrets")
+        for name in references(spec, kind)
+    ]
+    return "uses " + ", ".join(names) if names else ""
+
+
 def load_steps(workflows: dict) -> list[dict]:
-    """Every step of every job, with a unique node id."""
+    """Every step of every job, with a node id unique in the page."""
     steps, seen = [], {}
     for file, workflow in workflows.items():
         for job, spec in workflow["jobs"].items():
             for step in spec.get("steps", []):
                 title = step.get("name") or step.get("uses") or step["run"]
-                key = node_id("step", title)
+                # Jobs repeat steps such as the checkout: the job keeps them apart.
+                key = node_id("step", job, title)
                 seen[key] = seen.get(key, 0) + 1
                 steps.append(
                     {
@@ -130,24 +143,55 @@ def load_steps(workflows: dict) -> list[dict]:
     return steps
 
 
-def output_edges(steps: list[dict], shown: list[dict]) -> list[str]:
-    """Edges from a shown step to the shown steps that read its outputs."""
-    edges = []
-    for step in shown:
-        for source, output in re.findall(
-            r"steps\.([\w-]+)\.outputs\.([\w-]+)", str(step["spec"])
-        ):
-            for producer in steps:
-                if (
-                    producer in shown
-                    and producer["job"] == step["job"]
-                    and producer["spec"].get("id") == source
-                ):
-                    edges.append(f"  {producer['id']} -.->|{output}| {step['id']}")
+def step_outputs(text: str) -> list[tuple[str, str]]:
+    """(step id, output name) of each `steps.<id>.outputs.<name>` in a text."""
+    return re.findall(r"steps\.([\w-]+)\.outputs\.([\w-]+)", text)
+
+
+def job_outputs(spec, job: str) -> list[str]:
+    """Names of the outputs of a needed job that a workflow object reads."""
+    pattern = rf"needs\.{re.escape(job)}\.outputs\.([\w-]+)"
+    return sorted(set(re.findall(pattern, str(spec))))
+
+
+def output_links(workflows: dict, steps: list[dict]) -> list[tuple[dict, str, dict]]:
+    """(producer, output, reader) for each step that reads the output of a step.
+
+    A step reads an output of an earlier step of its job, or an output of a job
+    it needs, which the job takes from one of its own steps.
+    """
+    links = []
+    for reader in steps:
+        jobs = workflows[reader["file"]]["jobs"]
+        sources = [
+            (reader["job"], source, output)
+            for source, output in step_outputs(str(reader["spec"]))
+        ]
+        for job in jobs:
+            for output in job_outputs(reader["spec"], job):
+                value = str(jobs[job].get("outputs", {}).get(output, ""))
+                sources += [(job, source, output) for source, _ in step_outputs(value)]
+        for job, source, output in sources:
+            links += [
+                (producer, output, reader)
+                for producer in steps
+                if producer["file"] == reader["file"]
+                and producer["job"] == job
+                and producer["spec"].get("id") == source
+            ]
+    return links
+
+
+def output_edges(links: list[tuple[dict, str, dict]]) -> list[str]:
+    """Dotted edges from a step to the steps that read its outputs."""
+    edges = [
+        f"  {producer['id']} -.->|{output}| {reader['id']}"
+        for producer, output, reader in links
+    ]
     return list(dict.fromkeys(edges))
 
 
-def overview(steps: list[dict]) -> list[str]:
+def overview(workflows: dict, steps: list[dict]) -> list[str]:
     lines = ["flowchart TB"]
     lines.append(f"  subgraph sources[{label('Open datasets: tracker.sources')}]")
     for key, source in SOURCES.items():
@@ -201,20 +245,11 @@ def overview(steps: list[dict]) -> list[str]:
         if DATA_DIR.is_relative_to(ROOT / path):
             lines.append("  events --> image")
 
-    delivery = [
-        step
-        for step in steps
-        if references(step["spec"], "secrets") or references(step["spec"], "vars")
-    ]
+    delivery = [step for step in steps if uses(step["spec"])]
     title = label("Workflow steps that use secrets or variables")
     lines.append(f"  subgraph delivery[{title}]")
     for step in delivery:
-        names = [
-            f"{kind}.{name}"
-            for kind in ("vars", "secrets")
-            for name in references(step["spec"], kind)
-        ]
-        text = label(f"{step['file']}: {step['title']}", "uses " + ", ".join(names))
+        text = label(f"{step['file']}: {step['title']}", uses(step["spec"]))
         lines.append(f"    {step['id']}([{text}])")
     lines.append("  end")
     for step in delivery:
@@ -223,7 +258,10 @@ def overview(steps: list[dict]) -> list[str]:
             lines.append(f"  image --> {step['id']}")
         if rel(DATA_DIR) in run:
             lines.append(f"  events --> {step['id']}")
-    return lines + output_edges(steps, delivery)
+    links = output_links(workflows, steps)
+    return lines + output_edges(
+        [link for link in links if link[0] in delivery and link[2] in delivery]
+    )
 
 
 def step_node(step: dict) -> str:
@@ -245,17 +283,47 @@ def step_node(step: dict) -> str:
             for key, value in spec.items()
             if key not in shown
         ),
+        uses(spec),
         f"if: {spec['if']}" if "if" in spec else "",
     )
-    return f"    {step['id']}[{text}]" + (":::conditional" if "if" in spec else "")
+    return f"{step['id']}[{text}]" + (":::conditional" if "if" in spec else "")
+
+
+def job_box(file: str, job: str, spec: dict, steps: list[dict]) -> list[str]:
+    """A job as a box: its settings, then its steps in order."""
+    box = node_id("job", file, job)
+    # The jobs run left to right, the steps of a job top to bottom.
+    lines = [
+        f"    subgraph {box}[{label(spec.get('name', job))}]",
+        "      direction TB",
+    ]
+    text = label(
+        "job " + job,
+        *(
+            f"{key}: {describe(value)}"
+            for key, value in spec.items()
+            if key not in ("name", "needs", "if", "steps")
+        ),
+        f"if: {spec['if']}" if "if" in spec else "",
+    )
+    lines.append(f"      {box}_settings[{text}]")
+    previous = f"{box}_settings"
+    for step in steps:
+        if step["file"] == file and step["job"] == job:
+            lines.append(f"      {step_node(step)}")
+            lines.append(f"      {previous} --> {step['id']}")
+            previous = step["id"]
+    lines.append("    end")
+    return lines
 
 
 def pipeline(workflows: dict, steps: list[dict]) -> list[str]:
-    lines = ["flowchart TB", "  classDef conditional stroke-dasharray: 6 4"]
-    used = {}
+    lines = ["flowchart LR", "  classDef conditional stroke-dasharray: 6 4"]
+    conditional = []
     for file, workflow in workflows.items():
         flow = node_id("workflow", file)
         lines.append(f"  subgraph {flow}_box[{label('.github/workflows/' + file)}]")
+        lines.append("    direction LR")
         # PyYAML follows YAML 1.1, where the `on` key reads as True.
         triggers = workflow.get("on", workflow.get(True))
         if isinstance(triggers, str):
@@ -273,48 +341,33 @@ def pipeline(workflows: dict, steps: list[dict]) -> list[str]:
         ]
         text = label("workflow " + workflow.get("name", file), *settings)
         lines.append(f"    {flow}[{text}]")
+        # After every box: a needs edge must not create a job before its box.
+        edges = []
         for job, spec in workflow["jobs"].items():
-            job_node = node_id("job", file, job)
-            details = [
-                f"{key}: {describe(value)}"
-                for key, value in spec.items()
-                if key not in ("name", "steps")
-            ]
-            text = label("job " + spec.get("name", job), *details)
-            lines.append(f"    {job_node}[{text}]")
+            box = node_id("job", file, job)
+            lines += job_box(file, job, spec, steps)
+            if "if" in spec:
+                # Mermaid styles a box only from a class line outside every box.
+                conditional.append(f"  class {box} conditional")
             needs = spec.get("needs", [])
             for needed in [needs] if isinstance(needs, str) else needs:
-                lines.append(f"    {node_id('job', file, needed)} --> {job_node}")
+                outputs = ", ".join(job_outputs(spec, needed))
+                arrow = f"-->|{outputs}|" if outputs else "-->"
+                edges.append(f"    {node_id('job', file, needed)} {arrow} {box}")
             if not needs:
-                lines.append(f"    {flow} --> {job_node}")
-            previous = job_node
-            for step in steps:
-                if step["file"] == file and step["job"] == job:
-                    lines.append(step_node(step))
-                    lines.append(f"    {previous} --> {step['id']}")
-                    previous = step["id"]
-                    for kind in ("secrets", "vars"):
-                        for name in references(step["spec"], kind):
-                            used.setdefault((kind, name), []).append(step["id"])
+                edges.append(f"    {flow} --> {box}")
+        lines += edges
         lines.append("  end")
-    lines += output_edges(steps, steps)
-
-    if used:
-        title = label("Repository settings: Secrets and variables, Actions")
-        lines.append(f"  subgraph settings[{title}]")
-        for kind, name in sorted(used):
-            if kind == "secrets":
-                lines.append(
-                    f"    {node_id(kind, name)}{{{{{label('secret ' + name)}}}}}"
-                )
-            else:
-                lines.append(
-                    f"    {node_id(kind, name)}[/{label('variable ' + name)}/]"
-                )
-        lines.append("  end")
-        for (kind, name), users in sorted(used.items()):
-            lines += [f"  {user} -.-> {node_id(kind, name)}" for user in users]
-    return lines
+    # Mermaid keeps the top to bottom direction of a job box only while its
+    # edges stay inside it or go to the boxes and nodes beside it. Hence output
+    # edges inside a job only (the needs edges name the job outputs), and step
+    # labels that name the secrets and variables instead of edges to them.
+    links = output_links(workflows, steps)
+    return (
+        lines
+        + conditional
+        + output_edges([link for link in links if link[0]["job"] == link[2]["job"]])
+    )
 
 
 def module_name(path: Path) -> str:
@@ -387,7 +440,7 @@ def render() -> str:
     }
     steps = load_steps(workflows)
     views = [
-        ("Overview", OVERVIEW, overview(steps)),
+        ("Overview", OVERVIEW, overview(workflows, steps)),
         ("Pipeline", PIPELINE, pipeline(workflows, steps)),
         ("Modules", MODULES, modules()),
     ]

@@ -46,26 +46,27 @@ flowchart TB
   app --> image
   events --> image
   subgraph delivery["Workflow steps that use secrets or variables"]
-    step_Publish_Docker_image(["pipeline.yml: Publish Docker image<br/>uses vars.DOCKER_IMAGE, secrets.DOCKERHUB_TOKEN"])
-    step_Deploy_to_Render(["pipeline.yml: Deploy to Render<br/>uses secrets.RENDER_DEPLOY_HOOK_URL"])
-    step_Mirror_the_data_to_Hugging_Face(["pipeline.yml: Mirror the data to Hugging Face<br/>uses vars.HF_DATASET"])
+    step_image_Publish_Docker_image(["pipeline.yml: Publish Docker image<br/>uses vars.DOCKER_IMAGE, secrets.DOCKERHUB_TOKEN"])
+    step_deploy_Deploy_to_Render(["pipeline.yml: Deploy to Render<br/>uses secrets.RENDER_DEPLOY_HOOK_URL"])
+    step_mirror_Mirror_the_data_to_Hugging_Face(["pipeline.yml: Mirror the data to Hugging Face<br/>uses vars.HF_DATASET"])
   end
-  image --> step_Publish_Docker_image
-  events --> step_Mirror_the_data_to_Hugging_Face
-  step_Publish_Docker_image -.->|image| step_Deploy_to_Render
+  image --> step_image_Publish_Docker_image
+  events --> step_mirror_Mirror_the_data_to_Hugging_Face
+  step_image_Publish_Docker_image -.->|image| step_deploy_Deploy_to_Render
 ```
 
 ## Pipeline
 
-Each workflow in `.github/workflows/`: its triggers, settings and jobs, then the steps in order. Dashed steps run only when their `if` condition holds. Dotted arrows point to the secrets and variables a step uses: they are set in the repository settings.
+Each workflow in `.github/workflows/`: its triggers and settings, then one box per job, from left to right along the `needs` of the jobs. A box gives the job settings, then its steps in order. An arrow label names the job outputs that the next job reads. Dashed jobs and steps run only when their `if` condition holds. A step that uses secrets or variables names them: they are set in the repository settings (Secrets and variables, Actions).
 
 ```mermaid
 ---
 config: {"flowchart": {"wrappingWidth": 400}}
 ---
-flowchart TB
+flowchart LR
   classDef conditional stroke-dasharray: 6 4
   subgraph workflow_pipeline_yml_box[".github/workflows/pipeline.yml"]
+    direction LR
     on_pipeline_yml_push(["push<br/>branches: main"])
     on_pipeline_yml_push --> workflow_pipeline_yml
     on_pipeline_yml_pull_request(["pull_request"])
@@ -74,47 +75,88 @@ flowchart TB
     on_pipeline_yml_schedule --> workflow_pipeline_yml
     on_pipeline_yml_workflow_dispatch(["workflow_dispatch"])
     on_pipeline_yml_workflow_dispatch --> workflow_pipeline_yml
-    workflow_pipeline_yml["workflow pipeline<br/>concurrency: group: ${{ github.event_name == 'pull_request' #amp;#amp; github.ref || 'pipeline' }}, cancel-in-progress: false<br/>permissions: contents: write, id-token: write<br/>env: PYTHONPATH: src, PYTHONDONTWRITEBYTECODE: 1"]
-    job_pipeline_yml_pipeline["job pipeline<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 15"]
-    workflow_pipeline_yml --> job_pipeline_yml_pipeline
-    step_actions_checkout_v7["actions/checkout@v7"]
-    job_pipeline_yml_pipeline --> step_actions_checkout_v7
-    step_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
-    step_actions_checkout_v7 --> step_actions_setup_python_v7
-    step_Install["Install"]
-    step_actions_setup_python_v7 --> step_Install
-    step_Lint["Lint"]
-    step_Install --> step_Lint
-    step_Refresh_live_sources["Refresh live sources<br/>runs tracker.ingest live<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
-    step_Lint --> step_Refresh_live_sources
-    step_Validate_stored_data["Validate stored data<br/>runs tracker.ingest check"]
-    step_Refresh_live_sources --> step_Validate_stored_data
-    step_Run_the_tests["Run the tests"]
-    step_Validate_stored_data --> step_Run_the_tests
-    step_Commit_refreshed_data["Commit refreshed data<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
-    step_Run_the_tests --> step_Commit_refreshed_data
-    step_Check_the_architecture_page["Check the architecture page<br/>runs scripts/architecture.py"]
-    step_Commit_refreshed_data --> step_Check_the_architecture_page
-    step_Build_docs["Build docs"]
-    step_Check_the_architecture_page --> step_Build_docs
-    step_Publish_Docker_image["Publish Docker image<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.DOCKER_IMAGE != ''"]:::conditional
-    step_Build_docs --> step_Publish_Docker_image
-    step_Deploy_to_Render["Deploy to Render<br/>if: steps.image.outputs.image != ''"]:::conditional
-    step_Publish_Docker_image --> step_Deploy_to_Render
-    step_Mirror_the_data_to_Hugging_Face["Mirror the data to Hugging Face<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.HF_DATASET != ''"]:::conditional
-    step_Deploy_to_Render --> step_Mirror_the_data_to_Hugging_Face
+    workflow_pipeline_yml["workflow pipeline<br/>concurrency: group: ${{ github.event_name == 'pull_request' #amp;#amp; github.ref || 'pipeline' }}, cancel-in-progress: false<br/>permissions: contents: read<br/>env: PYTHONPATH: src, PYTHONDONTWRITEBYTECODE: 1"]
+    subgraph job_pipeline_yml_lint["Lint"]
+      direction TB
+      job_pipeline_yml_lint_settings["job lint<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 10"]
+      step_lint_actions_checkout_v7["actions/checkout@v7"]
+      job_pipeline_yml_lint_settings --> step_lint_actions_checkout_v7
+      step_lint_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
+      step_lint_actions_checkout_v7 --> step_lint_actions_setup_python_v7
+      step_lint_Install["Install"]
+      step_lint_actions_setup_python_v7 --> step_lint_Install
+      step_lint_Lint["Lint"]
+      step_lint_Install --> step_lint_Lint
+    end
+    subgraph job_pipeline_yml_data["Data"]
+      direction TB
+      job_pipeline_yml_data_settings["job data<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 15<br/>permissions: contents: write<br/>outputs: sha: ${{ steps.commit.outputs.sha || github.sha }}"]
+      step_data_actions_checkout_v7["actions/checkout@v7"]
+      job_pipeline_yml_data_settings --> step_data_actions_checkout_v7
+      step_data_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
+      step_data_actions_checkout_v7 --> step_data_actions_setup_python_v7
+      step_data_Install["Install"]
+      step_data_actions_setup_python_v7 --> step_data_Install
+      step_data_Refresh_live_sources["Refresh live sources<br/>runs tracker.ingest live<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
+      step_data_Install --> step_data_Refresh_live_sources
+      step_data_Validate_stored_data["Validate stored data<br/>runs tracker.ingest check"]
+      step_data_Refresh_live_sources --> step_data_Validate_stored_data
+      step_data_Run_the_tests["Run the tests"]
+      step_data_Validate_stored_data --> step_data_Run_the_tests
+      step_data_Commit_refreshed_data["Commit refreshed data<br/>if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]:::conditional
+      step_data_Run_the_tests --> step_data_Commit_refreshed_data
+    end
+    subgraph job_pipeline_yml_docs["Docs"]
+      direction TB
+      job_pipeline_yml_docs_settings["job docs<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 10"]
+      step_docs_actions_checkout_v7["actions/checkout@v7"]
+      job_pipeline_yml_docs_settings --> step_docs_actions_checkout_v7
+      step_docs_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
+      step_docs_actions_checkout_v7 --> step_docs_actions_setup_python_v7
+      step_docs_Install["Install"]
+      step_docs_actions_setup_python_v7 --> step_docs_Install
+      step_docs_Check_the_architecture_page["Check the architecture page<br/>runs scripts/architecture.py"]
+      step_docs_Install --> step_docs_Check_the_architecture_page
+      step_docs_Build_docs["Build docs"]
+      step_docs_Check_the_architecture_page --> step_docs_Build_docs
+    end
+    subgraph job_pipeline_yml_image["Docker image"]
+      direction TB
+      job_pipeline_yml_image_settings["job image<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 10<br/>outputs: image: ${{ steps.image.outputs.image }}<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.DOCKER_IMAGE != ''"]
+      step_image_actions_checkout_v7["actions/checkout@v7<br/>ref: ${{ needs.data.outputs.sha }}"]
+      job_pipeline_yml_image_settings --> step_image_actions_checkout_v7
+      step_image_Publish_Docker_image["Publish Docker image<br/>uses vars.DOCKER_IMAGE, secrets.DOCKERHUB_TOKEN"]
+      step_image_actions_checkout_v7 --> step_image_Publish_Docker_image
+    end
+    subgraph job_pipeline_yml_deploy["Deploy to Render"]
+      direction TB
+      job_pipeline_yml_deploy_settings["job deploy<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 5<br/>if: needs.image.outputs.image != ''"]
+      step_deploy_Deploy_to_Render["Deploy to Render<br/>uses secrets.RENDER_DEPLOY_HOOK_URL"]
+      job_pipeline_yml_deploy_settings --> step_deploy_Deploy_to_Render
+    end
+    subgraph job_pipeline_yml_mirror["Hugging Face mirror"]
+      direction TB
+      job_pipeline_yml_mirror_settings["job mirror<br/>runs-on: ubuntu-latest<br/>timeout-minutes: 10<br/>permissions: contents: read, id-token: write<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.HF_DATASET != ''"]
+      step_mirror_actions_checkout_v7["actions/checkout@v7<br/>ref: ${{ needs.data.outputs.sha }}"]
+      job_pipeline_yml_mirror_settings --> step_mirror_actions_checkout_v7
+      step_mirror_actions_setup_python_v7["actions/setup-python@v7<br/>python-version: 3.13<br/>cache: pip"]
+      step_mirror_actions_checkout_v7 --> step_mirror_actions_setup_python_v7
+      step_mirror_Install["Install"]
+      step_mirror_actions_setup_python_v7 --> step_mirror_Install
+      step_mirror_Mirror_the_data_to_Hugging_Face["Mirror the data to Hugging Face<br/>uses vars.HF_DATASET"]
+      step_mirror_Install --> step_mirror_Mirror_the_data_to_Hugging_Face
+    end
+    workflow_pipeline_yml --> job_pipeline_yml_lint
+    job_pipeline_yml_lint --> job_pipeline_yml_data
+    job_pipeline_yml_lint --> job_pipeline_yml_docs
+    job_pipeline_yml_data -->|sha| job_pipeline_yml_image
+    job_pipeline_yml_docs --> job_pipeline_yml_image
+    job_pipeline_yml_image -->|image| job_pipeline_yml_deploy
+    job_pipeline_yml_data -->|sha| job_pipeline_yml_mirror
   end
-  step_Publish_Docker_image -.->|image| step_Deploy_to_Render
-  subgraph settings["Repository settings: Secrets and variables, Actions"]
-    secrets_DOCKERHUB_TOKEN{{"secret DOCKERHUB_TOKEN"}}
-    secrets_RENDER_DEPLOY_HOOK_URL{{"secret RENDER_DEPLOY_HOOK_URL"}}
-    vars_DOCKER_IMAGE[/"variable DOCKER_IMAGE"/]
-    vars_HF_DATASET[/"variable HF_DATASET"/]
-  end
-  step_Publish_Docker_image -.-> secrets_DOCKERHUB_TOKEN
-  step_Deploy_to_Render -.-> secrets_RENDER_DEPLOY_HOOK_URL
-  step_Publish_Docker_image -.-> vars_DOCKER_IMAGE
-  step_Mirror_the_data_to_Hugging_Face -.-> vars_HF_DATASET
+  class job_pipeline_yml_image conditional
+  class job_pipeline_yml_deploy conditional
+  class job_pipeline_yml_mirror conditional
 ```
 
 ## Modules
