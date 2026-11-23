@@ -61,7 +61,8 @@ over time follow each source's coverage period.
 
 ## Pipeline
 
-`.github/workflows/pipeline.yml` runs on every push, and every day at 04:17 UTC:
+`.github/workflows/pipeline.yml` runs on pushes to `main`, on pull requests,
+and every day at 04:17 UTC:
 
 1. lint and validate the stored data;
 2. on the daily or a manual run: refresh live sources and commit the changes;
