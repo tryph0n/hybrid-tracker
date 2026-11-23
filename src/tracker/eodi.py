@@ -31,6 +31,15 @@ EVENT_STATUS = {
     "descartada": "dismissed",
 }
 
+# EODI "inicio_precision", as its incident pages label it: "dia" day only,
+# "hora" approximate time, "minuto" exact time, "aproximada" approximate date.
+DATE_PRECISION = {
+    "dia": "day",
+    "hora": "day",
+    "minuto": "day",
+    "aproximada": "approximate",
+}
+
 # EODI gives the attributed actor in the language of the attributing authority.
 # True means Russia. Listed explicitly because guessing from the spelling is
 # unsafe ("Belarus" contains "rus"). An unknown name stops the ingestion.
@@ -81,6 +90,7 @@ def fetch_unlocated() -> pd.DataFrame:
                 "presencia_dron": incident["presencia_dron"],
                 "titulo_en": incident["titulo"]["en"],
                 "inicio": incident["tiempo"]["inicio"]["valor"],
+                "inicio_precision": incident["tiempo"]["inicio"]["precision"],
                 "pais": incident["lugar"]["pais"],
                 "lugar_en": incident["nombres"]["lugar"]["en"],
                 "enlace": INCIDENT_PAGE.format(id=incident["id"]),
@@ -96,7 +106,7 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
             "event_id": "eodi:" + raw["id"],
             "source": "eodi",
             "date": raw["inicio"].str[:10],
-            "date_precision": "day",
+            "date_precision": raw["inicio_precision"].map(date_precision),
             "countries": raw["pais"],
             "place": raw["lugar_en"],
             "lat": raw["latitud"],
@@ -110,6 +120,13 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
         }
     )
     return events[COLUMNS]
+
+
+def date_precision(value) -> str:
+    """Translate EODI's date precision into a DATE_PRECISIONS value."""
+    if value not in DATE_PRECISION:
+        raise ValueError(f"Unknown date precision {value!r}: add it to DATE_PRECISION")
+    return DATE_PRECISION[value]
 
 
 def russia_link(actor) -> str:

@@ -32,9 +32,8 @@ def events(monkeypatch) -> pd.DataFrame:
 
 def test_normalize_follows_schema(events):
     validate(events)
-    assert len(events) == 8 + 3
+    assert len(events) == 9 + 3
     assert (events["source"] == "eodi").all()
-    assert (events["date_precision"] == "day").all()
 
 
 @pytest.mark.parametrize(
@@ -57,7 +56,14 @@ def test_normalize_follows_schema(events):
         ("EODI-2025-00233", {"russia_link": "official", "countries": "PL"}),
         ("EODI-2026-00140", {"russia_link": "none", "category": "airspace_incursion"}),
         ("EODI-2026-00148", {"event_status": "unconfirmed", "date": "2026-09-26"}),
-        ("EODI-2025-00042", {"event_status": "unconfirmed", "date": "2025-09-22"}),
+        (
+            "EODI-2025-00042",
+            {
+                "event_status": "unconfirmed",
+                "date": "2025-09-22",
+                "date_precision": "day",
+            },
+        ),
         ("EODI-2025-00112", {"event_status": "dismissed", "date": "2025-10-04"}),
         (
             "EODI-2025-00140",
@@ -75,6 +81,12 @@ def test_normalize_follows_schema(events):
             },
         ),
         ("EODI-2025-00222", {"date": "2025-02-02", "countries": "MD"}),
+        ("EODI-2024-00003", {"date_precision": "day"}),
+        ("EODI-2026-00148", {"date_precision": "day"}),
+        (
+            "EODI-2025-00010",
+            {"date_precision": "approximate", "date": "2025-09-13", "countries": "PL"},
+        ),
     ],
 )
 def test_normalize_maps_values(events, native_id, expected):
@@ -98,6 +110,13 @@ def test_unknown_actor_stops_the_ingestion():
     located = pd.read_csv(LOCATED)
     located.loc[0, "atribucion_actor"] = "Belarus"
     with pytest.raises(ValueError, match="ACTOR_IS_RUSSIA"):
+        eodi.normalize(located)
+
+
+def test_unknown_date_precision_stops_the_ingestion():
+    located = pd.read_csv(LOCATED)
+    located.loc[0, "inicio_precision"] = "semana"
+    with pytest.raises(ValueError, match="DATE_PRECISION"):
         eodi.normalize(located)
 
 

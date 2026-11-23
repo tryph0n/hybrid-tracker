@@ -54,6 +54,14 @@ def lat_out_of_range(events):
     return events
 
 
+def set_countries(value):
+    def change(events):
+        events.loc[events.index[0], "countries"] = value
+        return events
+
+    return change
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
@@ -65,8 +73,17 @@ def lat_out_of_range(events):
         (bad_date, "doesn't match format"),
         (lat_without_lon, "both set or both empty"),
         (lat_out_of_range, "lat out of range"),
+        (set_countries("Germany"), r"Invalid countries values: \['Germany'\]"),
+        (set_countries("de"), r"Invalid countries values: \['de'\]"),
+        (set_countries("DE,FR"), r"Invalid countries values: \['DE,FR'\]"),
+        (set_countries("DE;"), r"Invalid countries values: \['DE;'\]"),
     ],
 )
 def test_validate_rejects(events, change, message):
     with pytest.raises(ValueError, match=message):
         validate(change(events.copy()))
+
+
+def test_validate_accepts_several_country_codes(events):
+    events.loc[events.index[0], "countries"] = "DE;PL"
+    validate(events)
