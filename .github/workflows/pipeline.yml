@@ -52,10 +52,28 @@ jobs:
           git add data/events
           git diff --cached --quiet || (git commit -m "data: refresh live sources" && git pull --rebase && git push)
 
-      # CD: publish app + data from main only. Skipped until HF_SPACE_ID is configured.
+      # CD, from main only. Each step is skipped until its variable is set.
+      - name: Publish Docker image
+        id: image
+        if: github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''
+        env:
+          DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          # Same image inputs (the files the Dockerfile copies), same tag.
+          tag=$(git ls-tree HEAD Dockerfile requirements.txt .streamlit src data | sha256sum | cut -c1-12)
+          echo "image=$DOCKER_IMAGE:$tag" >> "$GITHUB_OUTPUT"
+          echo "$DOCKERHUB_TOKEN" | docker login -u "${DOCKER_IMAGE%%/*}" --password-stdin
+          if docker manifest inspect "$DOCKER_IMAGE:$tag" > /dev/null 2>&1; then
+            echo "$DOCKER_IMAGE:$tag is already published"
+          else
+            docker build -t "$DOCKER_IMAGE:$tag" -t "$DOCKER_IMAGE:latest" .
+            docker push --all-tags "$DOCKER_IMAGE"
+          fi
       - name: Deploy to Hugging Face Space
-        if: github.ref == 'refs/heads/main' && vars.HF_SPACE_ID != ''
+        if: steps.image.outputs.image != '' && vars.HF_SPACE_ID != ''
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE_ID: ${{ vars.HF_SPACE_ID }}
+          IMAGE: ${{ steps.image.outputs.image }}
         run: python scripts/deploy_space.py

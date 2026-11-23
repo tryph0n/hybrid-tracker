@@ -22,6 +22,8 @@ pip install -r requirements.txt
 streamlit run src/streamlit_app.py
 ```
 
+Or run the published image: `docker run -p 8501:8501 sambot961/hybrid-tracker`.
+
 ## Data
 
 One CSV per source in `data/events/`, all with the same columns
@@ -66,15 +68,22 @@ and every day at 04:17 UTC:
 
 1. lint and validate the stored data;
 2. on the daily or a manual run: refresh live sources and commit the changes;
-3. deploy the app and data to the Hugging Face Space.
+3. on `main`: build and push the Docker image when its inputs changed, then
+   point the Hugging Face Space at that image.
+
+The image tag is a hash of the files the `Dockerfile` copies, so an unchanged
+app and data publish nothing. `latest` follows the newest image.
 
 Deployment needs, in the GitHub repository settings (Secrets and variables,
 Actions):
 
-- secret `HF_TOKEN`: a Hugging Face token with write access;
-- variable `HF_SPACE_ID`: `<user>/<space-name>`.
+- variable `DOCKER_IMAGE`: public Docker Hub repository, `<user>/<repository>`;
+- secret `DOCKERHUB_TOKEN`: a Docker Hub access token with write access;
+- variable `HF_SPACE_ID`: `<user>/<space-name>`;
+- secret `HF_TOKEN`: a Hugging Face token with write access.
 
-The deploy step is skipped until `HF_SPACE_ID` is set.
+The image step is skipped until `DOCKER_IMAGE` is set, and the Space step
+until both variables are set.
 
 ## Licence
 
