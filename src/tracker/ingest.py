@@ -20,7 +20,21 @@ MAX_SHRINK = 0.05
 
 
 def ingest(name: str) -> None:
-    """Fetch one source, validate it and replace its stored file."""
+    """Fetch one source, validate it and replace its stored file.
+
+    Writes `data/events/<name>.csv` sorted by `event_id` (the folder is created
+    if needed) and prints "<name>: N events". Nothing is written if the fetch,
+    `validate` or the shrink check fails. Errors of the source's `fetch` pass
+    through.
+
+    Args:
+        name: Key of `SOURCES`.
+
+    Raises:
+        KeyError: `name` is not a source.
+        ValueError: The events fail `validate`, or the fetch loses more than
+            the `MAX_SHRINK` share of the stored events.
+    """
     events = SOURCES[name].fetch().sort_values("event_id")
     validate(events)
 
@@ -43,7 +57,11 @@ def check() -> None:
 
 
 def main(target: str) -> None:
-    """Run one command: a source name, `live`, `static` or `check`."""
+    """Run one command: a source name, `live`, `static` or `check`.
+
+    Raises:
+        SystemExit: `target` is not a command. The message is the usage text.
+    """
     if target == "check":
         check()
     elif target in SOURCES:
