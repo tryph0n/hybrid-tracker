@@ -11,7 +11,7 @@ COLUMNS = [
     "countries",  # ISO 3166-1 alpha-2 codes joined by ";", empty for open sea
     "place",  # free-text location as given by the source
     "lat",  # decimal degrees, empty when the source has no coordinates
-    "lon",
+    "lon",  # decimal degrees, empty when the source has no coordinates
     "category",  # one of CATEGORIES
     "subcategory",  # the source's own label, untouched
     "title",  # one-line description in English

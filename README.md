@@ -61,6 +61,18 @@ over time follow each source's coverage period.
 2. Register it in `src/tracker/sources.py` as `static` or `live`.
 3. Run `python -m tracker.ingest <name>` and commit the CSV.
 
+## Documentation
+
+`docs/` holds the Sphinx documentation: this README, a data dictionary and an
+API reference read from the docstrings of `src/tracker/`. Build it with:
+
+```bash
+pip install -r docs/requirements.txt
+sphinx-build -W --keep-going -b html docs docs/_build/html
+```
+
+`docs/architecture.md` has diagrams of the sources, the pipeline and the modules.
+
 ## Pipeline
 
 `.github/workflows/pipeline.yml` runs on pushes to `main`, on pull requests,

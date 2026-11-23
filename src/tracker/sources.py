@@ -13,9 +13,13 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "events"
 
 @dataclass(frozen=True)
 class Source:
+    """A data source: its metadata and the function that fetches its events.
+
+    `kind` is "static" for a frozen historical snapshot, re-ingested by hand,
+    or "live" for a source refreshed by the scheduled pipeline.
+    """
+
     title: str
-    # "static": frozen historical snapshot, re-ingested by hand.
-    # "live": refreshed by the scheduled pipeline.
     kind: str
     homepage: str
     licence: str
@@ -50,6 +54,7 @@ SOURCES = {
 
 
 def events_path(name: str) -> Path:
+    """Path of the stored CSV file of one source."""
     return DATA_DIR / f"{name}.csv"
 
 
