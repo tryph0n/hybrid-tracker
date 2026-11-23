@@ -7,7 +7,7 @@ COLUMNS = [
     "event_id",  # "<source>:<native id>", unique across the whole dataset
     "source",  # key of tracker.sources.SOURCES
     "date",  # event start, YYYY-MM-DD (UTC date when the source gives a time)
-    "date_precision",  # "day", or "month" (date is then the 1st of that month)
+    "date_precision",  # "day", "approximate" (day marked approximate), "month" (on the 1st)
     "countries",  # ISO 3166-1 alpha-2 codes joined by ";", empty for open sea
     "place",  # free-text location as given by the source
     "lat",  # decimal degrees, empty when the source has no coordinates
@@ -38,7 +38,7 @@ EVENT_STATUSES = ["confirmed", "unconfirmed", "dismissed"]
 # "none": nobody attributed the event to Russia.
 RUSSIA_LINKS = ["official", "assessed", "none"]
 
-DATE_PRECISIONS = ["day", "month"]
+DATE_PRECISIONS = ["day", "approximate", "month"]
 
 REQUIRED = [
     "event_id",
@@ -51,6 +51,8 @@ REQUIRED = [
     "russia_link",
     "url",
 ]
+
+COUNTRIES_PATTERN = r"[A-Z]{2}(;[A-Z]{2})*"
 
 ALLOWED_VALUES = {
     "category": CATEGORIES,
@@ -79,6 +81,13 @@ def validate(events: pd.DataFrame) -> None:
         unknown = set(events[column]) - set(allowed)
         if unknown:
             raise ValueError(f"Unknown {column} values: {sorted(unknown)}")
+
+    countries = events["countries"].dropna().astype(str)
+    bad_countries = countries[
+        (countries != "") & ~countries.str.fullmatch(COUNTRIES_PATTERN)
+    ]
+    if not bad_countries.empty:
+        raise ValueError(f"Invalid countries values: {sorted(set(bad_countries))}")
 
     # Raises on anything that is not a YYYY-MM-DD date.
     pd.to_datetime(events["date"], format="%Y-%m-%d")
