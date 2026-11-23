@@ -45,10 +45,10 @@ flowchart TB
   events --> image
   subgraph delivery["Workflow steps that use secrets or variables"]
     step_Publish_Docker_image(["pipeline.yml: Publish Docker image<br/>uses vars.DOCKER_IMAGE, secrets.DOCKERHUB_TOKEN"])
-    step_Deploy_to_Hugging_Face_Space(["pipeline.yml: Deploy to Hugging Face Space<br/>uses vars.HF_SPACE_ID, secrets.HF_TOKEN"])
+    step_Deploy_to_Render(["pipeline.yml: Deploy to Render<br/>uses secrets.RENDER_DEPLOY_HOOK_URL"])
   end
   image --> step_Publish_Docker_image
-  step_Publish_Docker_image -.->|image| step_Deploy_to_Hugging_Face_Space
+  step_Publish_Docker_image -.->|image| step_Deploy_to_Render
 ```
 
 ## Pipeline
@@ -95,20 +95,18 @@ flowchart TB
     step_Check_the_architecture_page --> step_Build_docs
     step_Publish_Docker_image["Publish Docker image<br/>if: github.ref == 'refs/heads/main' #amp;#amp; vars.DOCKER_IMAGE != ''"]:::conditional
     step_Build_docs --> step_Publish_Docker_image
-    step_Deploy_to_Hugging_Face_Space["Deploy to Hugging Face Space<br/>runs scripts/deploy_space.py<br/>if: steps.image.outputs.image != '' #amp;#amp; vars.HF_SPACE_ID != ''"]:::conditional
-    step_Publish_Docker_image --> step_Deploy_to_Hugging_Face_Space
+    step_Deploy_to_Render["Deploy to Render<br/>if: steps.image.outputs.image != ''"]:::conditional
+    step_Publish_Docker_image --> step_Deploy_to_Render
   end
-  step_Publish_Docker_image -.->|image| step_Deploy_to_Hugging_Face_Space
+  step_Publish_Docker_image -.->|image| step_Deploy_to_Render
   subgraph settings["Repository settings: Secrets and variables, Actions"]
     secrets_DOCKERHUB_TOKEN{{"secret DOCKERHUB_TOKEN"}}
-    secrets_HF_TOKEN{{"secret HF_TOKEN"}}
+    secrets_RENDER_DEPLOY_HOOK_URL{{"secret RENDER_DEPLOY_HOOK_URL"}}
     vars_DOCKER_IMAGE[/"variable DOCKER_IMAGE"/]
-    vars_HF_SPACE_ID[/"variable HF_SPACE_ID"/]
   end
   step_Publish_Docker_image -.-> secrets_DOCKERHUB_TOKEN
-  step_Deploy_to_Hugging_Face_Space -.-> secrets_HF_TOKEN
+  step_Deploy_to_Render -.-> secrets_RENDER_DEPLOY_HOOK_URL
   step_Publish_Docker_image -.-> vars_DOCKER_IMAGE
-  step_Deploy_to_Hugging_Face_Space -.-> vars_HF_SPACE_ID
 ```
 
 ## Modules
@@ -132,7 +130,6 @@ flowchart TB
   end
   subgraph folder_scripts["scripts/"]
     module_architecture_py["architecture.py<br/>Generate docs/architecture.md, the architecture diagrams, from the code.<br/>imports yaml"]
-    module_deploy_space_py["deploy_space.py<br/>Point the Hugging Face Space at the published Docker image.<br/>imports huggingface_hub"]
   end
   module_streamlit_app_py --> module_tracker_schema
   module_streamlit_app_py --> module_tracker_sources

@@ -1,4 +1,4 @@
-# Image published to Docker Hub and run by the Hugging Face Space (port 8501).
+# Image published to Docker Hub and run by Render (port 8501).
 # The pipeline tags it with a hash of the files copied below: keep that list
 # in .github/workflows/pipeline.yml in step with the COPY lines.
 FROM python:3.13-slim

@@ -1,19 +1,7 @@
----
-title: Europe Hybrid Incidents Tracker
-colorFrom: blue
-colorTo: gray
-sdk: docker
-app_port: 8501
-pinned: false
-short_description: Drone incidents and sabotage in Europe, from open data
----
-
 # Europe Hybrid Incidents Tracker
 
 Maps and charts of drone incidents, sabotage and other hybrid operations in
 Europe since 2022, compiled from open datasets into one event table.
-
-The block above this title is the Hugging Face Space configuration.
 
 ## Run locally
 
@@ -84,7 +72,7 @@ and every day at 04:17 UTC:
 2. on the daily or a manual run: refresh live sources and commit the changes;
 3. check that `docs/architecture.md` matches the code, and build the docs;
 4. on `main`: build and push the Docker image when its inputs changed, then
-   point the Hugging Face Space at that image.
+   deploy that exact image to Render.
 
 The image tag is a hash of the files the `Dockerfile` copies, so an unchanged
 app and data publish nothing. `latest` follows the newest image.
@@ -94,11 +82,15 @@ Actions):
 
 - variable `DOCKER_IMAGE`: public Docker Hub repository, `<user>/<repository>`;
 - secret `DOCKERHUB_TOKEN`: a Docker Hub access token with write access;
-- variable `HF_SPACE_ID`: `<user>/<space-name>`;
-- secret `HF_TOKEN`: a Hugging Face token with write access.
+- secret `RENDER_DEPLOY_HOOK_URL`: the deploy hook (Settings, Deploy Hook) of
+  a Render web service created from that image.
 
-The image step is skipped until `DOCKER_IMAGE` is set, and the Space step
-until both variables are set.
+The image step is skipped until `DOCKER_IMAGE` is set, and the Render step
+until `RENDER_DEPLOY_HOOK_URL` is set.
+
+The Render service runs on the free plan with `PORT=8501` and the health check
+path `/_stcore/health`. It sleeps after 15 minutes without visits, so the
+next visit waits about a minute for it to start.
 
 ## Licence
 
