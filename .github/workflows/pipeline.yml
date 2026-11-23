@@ -14,18 +14,20 @@ concurrency:
   group: ${{ github.event_name == 'pull_request' && github.ref || 'pipeline' }}
   cancel-in-progress: false
 
+# A job that needs more sets its own permissions, which replace these.
 permissions:
-  contents: write # the refresh commits data/events
-  id-token: write # the Hugging Face mirror signs in with the run OIDC token
+  contents: read
 
 env:
   PYTHONPATH: src
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
-  pipeline:
+  # CI: checks, then data refresh on schedule or manual run.
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # a stalled download must not hold the group for hours
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -33,11 +35,29 @@ jobs:
           python-version: "3.13"
           cache: pip
       - name: Install
-        run: pip install -r requirements-dev.txt -r docs/requirements.txt
-
-      # CI: checks, then data refresh on schedule or manual run.
+        run: pip install -r requirements-dev.txt
       - name: Lint
         run: ruff check . && ruff format --check .
+
+  data:
+    name: Data
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # a stalled download must not hold the group for hours
+    permissions:
+      contents: write # the refresh commits data/events
+    outputs:
+      # The commit that the image and the mirror use: the data commit when the
+      # refresh pushed one, else the commit this run checked out.
+      sha: ${{ steps.commit.outputs.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements-dev.txt
       - name: Refresh live sources
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: python -m tracker.ingest live
@@ -46,23 +66,50 @@ jobs:
       - name: Run the tests
         run: pytest
       - name: Commit refreshed data
+        id: commit
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/events
           git diff --cached --quiet || (git commit -m "data: refresh live sources" && git pull --rebase && git push)
+          # After the push: the rebase can move HEAD.
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # After the data commit, so a stale page or broken docs never block a refresh.
+  # Beside the data job, so a stale page or broken docs never block a refresh.
+  docs:
+    name: Docs
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements-dev.txt -r docs/requirements.txt
       - name: Check the architecture page
         run: python scripts/architecture.py --check
       - name: Build docs
         run: sphinx-build -W --keep-going -b html docs docs/_build/html
 
-      # CD, from main only. Each step does nothing until its variable or secret is set.
+  # CD, from main only. Each job does nothing until its variable or secret is set.
+  image:
+    name: Docker image
+    needs: [data, docs]
+    if: github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.data.outputs.sha }}
       - name: Publish Docker image
         id: image
-        if: github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''
         env:
           DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -77,11 +124,18 @@ jobs:
             docker build -t "$DOCKER_IMAGE:$tag" -t "$DOCKER_IMAGE:latest" .
             docker push --all-tags "$DOCKER_IMAGE"
           fi
+
+  deploy:
+    name: Deploy to Render
+    needs: image
+    if: needs.image.outputs.image != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
       - name: Deploy to Render
-        if: steps.image.outputs.image != ''
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-          IMAGE: ${{ steps.image.outputs.image }}
+          IMAGE: ${{ needs.image.outputs.image }}
         run: |
           # A secret cannot gate a step: skip here until it is set.
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
@@ -90,8 +144,27 @@ jobs:
           fi
           # The exact tag of this run, not whatever latest points to.
           curl -fsS --get --data-urlencode "imgURL=docker.io/$IMAGE" -o /dev/null "$RENDER_DEPLOY_HOOK_URL"
+
+  mirror:
+    name: Hugging Face mirror
+    needs: data
+    if: github.ref == 'refs/heads/main' && vars.HF_DATASET != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # the Hugging Face mirror signs in with the run OIDC token
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.data.outputs.sha }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements-dev.txt
       - name: Mirror the data to Hugging Face
-        if: github.ref == 'refs/heads/main' && vars.HF_DATASET != ''
         env:
           HF_DATASET: ${{ vars.HF_DATASET }}
           HF_OIDC_RESOURCE: datasets/${{ vars.HF_DATASET }}

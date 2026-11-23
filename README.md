@@ -81,16 +81,19 @@ sphinx-build -W --keep-going -b html docs docs/_build/html
 ## Pipeline
 
 `.github/workflows/pipeline.yml` runs on pushes to `main`, on pull requests,
-and every day at 04:17 UTC:
+and every day at 04:17 UTC. Its jobs:
 
-1. lint, validate the stored data and run the tests;
-2. on the daily or a manual run: refresh live sources and commit the changes;
-3. check that `docs/architecture.md` matches the code, and build the docs;
-4. on `main`: build and push the Docker image when its inputs changed, then
-   deploy that exact image to Render.
-5. on `main`: mirror `data/events/` to the Hugging Face dataset, then download
-   it again and compare every file with `data/events/`: a missing or different
-   file fails the step.
+1. Lint: check the code style;
+2. Data, after Lint: on the daily or a manual run, refresh live sources; then
+   validate the stored data, run the tests, and on that run commit the changes;
+3. Docs, after Lint, beside Data: check that `docs/architecture.md` matches the
+   code, and build the docs;
+4. Docker image, then Deploy to Render, on `main` after Data and Docs: build
+   and push the Docker image when its inputs changed, then deploy that exact
+   image to Render;
+5. Hugging Face mirror, on `main` after Data: mirror `data/events/` to the
+   Hugging Face dataset, then download it again and compare every file with
+   `data/events/`: a missing or different file fails the job.
 
 The image tag is a hash of the files the `Dockerfile` copies, so an unchanged
 app and data publish nothing. `latest` follows the newest image.
@@ -104,13 +107,13 @@ Actions):
   a Render web service created from the image
   `docker.io/<user>/<repository>:latest`.
 
-The image step is skipped until `DOCKER_IMAGE` is set, and the Render step
-until `RENDER_DEPLOY_HOOK_URL` is set.
+The image and deploy jobs are skipped until `DOCKER_IMAGE` is set, and the
+Render step does nothing until `RENDER_DEPLOY_HOOK_URL` is set.
 
-The mirror step needs no secret. In the GitHub repository settings, set the
+The mirror job needs no secret. In the GitHub repository settings, set the
 variable `HF_DATASET` (`<user>/<dataset>`). In the dataset settings on Hugging
 Face, add a Trusted Publisher for this repository, branch `main` and workflow
-`pipeline.yml`. The step does nothing while `HF_DATASET` is unset.
+`pipeline.yml`. The job is skipped while `HF_DATASET` is unset.
 
 The Render service runs on the free plan with `PORT=8501` and the health check
 path `/_stcore/health`. It sleeps after 15 minutes without visits, so the
