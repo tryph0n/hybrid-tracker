@@ -6,7 +6,7 @@ import pandas as pd
 COLUMNS = [
     "event_id",  # "<source>:<native id>", unique across the whole dataset
     "source",  # key of tracker.sources.SOURCES
-    "date",  # event start, YYYY-MM-DD
+    "date",  # event start, YYYY-MM-DD (UTC date when the source gives a time)
     "date_precision",  # "day", or "month" (date is then the 1st of that month)
     "countries",  # ISO 3166-1 alpha-2 codes joined by ";", empty for open sea
     "place",  # free-text location as given by the source

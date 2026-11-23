@@ -13,8 +13,9 @@ from tracker.schema import validate
 from tracker.sources import SOURCES, events_path, read_all_events, read_events
 
 # A refresh that loses more than this share of the stored events is rejected:
-# it is more likely an upstream outage than a real correction.
-MAX_SHRINK = 0.2
+# it is more likely an upstream outage than a real correction. Kept small
+# because one missing upstream file can be only ~15% of a source.
+MAX_SHRINK = 0.05
 
 
 def ingest(name: str) -> None:
