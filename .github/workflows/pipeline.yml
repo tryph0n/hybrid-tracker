@@ -1,0 +1,57 @@
+name: pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * *" # every day at 04:17 UTC
+  workflow_dispatch:
+
+# One run at a time: a data refresh and a code push must not race.
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write # the refresh commits data/events
+
+env:
+  PYTHONPATH: src
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt ruff huggingface_hub
+
+      # CI: checks, then data refresh on schedule or manual run.
+      - name: Lint
+        run: ruff check . && ruff format --check .
+      - name: Refresh live sources
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python -m tracker.ingest live
+      - name: Validate stored data
+        run: python -m tracker.ingest check
+      - name: Commit refreshed data
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/events
+          git diff --cached --quiet || (git commit -m "data: refresh live sources" && git push)
+
+      # CD: publish app + data. Skipped until HF_SPACE_ID is configured.
+      - name: Deploy to Hugging Face Space
+        if: github.event_name != 'pull_request' && vars.HF_SPACE_ID != ''
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ vars.HF_SPACE_ID }}
+        run: python scripts/deploy_space.py
