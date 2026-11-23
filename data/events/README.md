@@ -18,7 +18,7 @@ refresh of the stored data.
 
 - Code and pipeline: [github.com/tryph0n/hybrid-tracker](https://github.com/tryph0n/hybrid-tracker)
 - Live dashboard: [hybrid-tracker.onrender.com](https://hybrid-tracker.onrender.com)
-- Columns and values: the column list, with one comment per column, in [`schema.py`](https://github.com/tryph0n/hybrid-tracker/blob/main/src/tracker/schema.py)
+- Columns and values: see the [data dictionary](https://hybrid-tracker.readthedocs.io/en/latest/data-dictionary.html).
 
 ## Sources and licence
 
