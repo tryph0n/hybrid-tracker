@@ -67,13 +67,38 @@ ACTOR_IS_RUSSIA = {
 
 
 def fetch() -> pd.DataFrame:
-    """Download the register and return it in the unified schema."""
+    """Download the register and return it in the unified schema.
+
+    Returns:
+        Located incidents (CSV) and unlocated ones (JSON), mapped by `normalize`.
+
+    Raises:
+        OSError: A download failed.
+        KeyError: A column is missing (see `normalize`) or a JSON field is
+            missing (see `fetch_unlocated`).
+        ValueError: An unknown date precision, an unknown actor or an attributed
+            unlocated incident (see `normalize` and `fetch_unlocated`).
+    """
     located = pd.read_csv(LOCATED_URL, storage_options=HEADERS)
     return normalize(pd.concat([located, fetch_unlocated()], ignore_index=True))
 
 
 def fetch_unlocated() -> pd.DataFrame:
-    """Incidents without exact coordinates, reshaped like the CSV rows."""
+    """Incidents without exact coordinates, reshaped like the CSV rows.
+
+    Downloads the JSON file (60 s timeout). The frame has no `latitud`,
+    `longitud` or `atribucion_actor` column: after the concat in `fetch` those
+    cells are empty.
+
+    Returns:
+        One row per incident, with the CSV column names the other rows use.
+
+    Raises:
+        OSError: The download failed.
+        KeyError: A JSON field is missing.
+        ValueError: An incident has the state "atribuido": its actor is not
+            parsed yet, so the ingestion stops.
+    """
     request = urllib.request.Request(UNLOCATED_URL, headers=HEADERS)
     with urllib.request.urlopen(request, timeout=60) as response:
         incidents = json.load(response)["incidentes"]
@@ -81,7 +106,6 @@ def fetch_unlocated() -> pd.DataFrame:
     rows = []
     for incident in incidents:
         if incident["estado"]["actual"] == "atribuido":
-            # The attributed actor is not parsed from this file yet.
             raise ValueError(f"Attributed unlocated incident: {incident['id']}")
         rows.append(
             {
@@ -100,7 +124,22 @@ def fetch_unlocated() -> pd.DataFrame:
 
 
 def normalize(raw: pd.DataFrame) -> pd.DataFrame:
-    """Map EODI columns to the unified schema."""
+    """Map EODI columns to the unified schema.
+
+    Args:
+        raw: EODI rows with the columns `id`, `inicio`, `inicio_precision`,
+            `pais`, `lugar_en`, `latitud`, `longitud`, `tipo`, `titulo_en`,
+            `presencia_dron`, `atribucion_actor` and `enlace`.
+
+    Returns:
+        The rows with exactly the columns of `tracker.schema.COLUMNS`. An
+        unknown `tipo` or `presencia_dron` leaves `category` or `event_status`
+        empty, which `validate` rejects.
+
+    Raises:
+        KeyError: A column of `raw` is missing.
+        ValueError: An unknown date precision or actor.
+    """
     events = pd.DataFrame(
         {
             "event_id": "eodi:" + raw["id"],
@@ -123,14 +162,32 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def date_precision(value) -> str:
-    """Translate EODI's date precision into a DATE_PRECISIONS value."""
+    """Translate EODI's date precision into a DATE_PRECISIONS value.
+
+    Args:
+        value: The `inicio_precision` text, a key of `DATE_PRECISION`.
+
+    Raises:
+        ValueError: `value` is not a key of `DATE_PRECISION`.
+    """
     if value not in DATE_PRECISION:
         raise ValueError(f"Unknown date precision {value!r}: add it to DATE_PRECISION")
     return DATE_PRECISION[value]
 
 
 def russia_link(actor) -> str:
-    """Translate EODI's attributed actor into a RUSSIA_LINKS value."""
+    """Translate EODI's attributed actor into a RUSSIA_LINKS value.
+
+    Args:
+        actor: The `atribucion_actor` name, or NaN when nobody is attributed.
+
+    Returns:
+        "official" for a name of Russia, "none" for NaN or for an actor mapped
+        to False.
+
+    Raises:
+        ValueError: `actor` is not a key of `ACTOR_IS_RUSSIA`.
+    """
     if pd.isna(actor):
         return "none"
     if actor not in ACTOR_IS_RUSSIA:

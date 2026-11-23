@@ -39,14 +39,41 @@ COUNTRY_ALIASES = {"The Netherlands": "Netherlands"}
 
 
 def fetch() -> pd.DataFrame:
-    """Download the pinned spreadsheet and return it in the unified schema."""
+    """Download the pinned spreadsheet and return it in the unified schema.
+
+    Raises:
+        OSError: The download failed.
+        KeyError: A column is missing (see `normalize`).
+        ValueError: A year or a month name cannot be read, or the sheet
+            `EventData` is missing.
+        LookupError: A country name is unknown (see `to_iso2`).
+    """
     raw = pd.read_excel(FILE_URL, sheet_name="EventData", storage_options=HEADERS)
     return normalize(raw)
 
 
 def normalize(raw: pd.DataFrame) -> pd.DataFrame:
-    """Map the EventData sheet to the unified schema."""
-    # Rows below the events hold the author's notes and have no year.
+    """Map the EventData sheet to the unified schema.
+
+    Args:
+        raw: The EventData sheet with the columns `IncidentYear`,
+            `IncidentMonth`, `Where`, `EventCategory` and `What`. Keep the
+            default index: the row id is the index plus 2 (the spreadsheet
+            row, as the header is row 1), so the ids move if rows are
+            dropped and the index is then renumbered (for example with
+            `reset_index(drop=True)`).
+
+    Returns:
+        The rows with an `IncidentYear` (the author's notes below the events
+        have none and are dropped), with exactly the columns of
+        `tracker.schema.COLUMNS`. An unknown `EventCategory` leaves `category`
+        empty, which `validate` rejects.
+
+    Raises:
+        KeyError: A column of `raw` is missing.
+        ValueError: A year or a month name cannot be read.
+        LookupError: A country name is unknown.
+    """
     raw = raw.dropna(subset=["IncidentYear"])
 
     # Dates are known to the month only. One event has no month: use January.
@@ -54,7 +81,7 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
     month = raw["IncidentMonth"].replace("Unknown", "January")
     date = pd.to_datetime(year + " " + month, format="%Y %B")
 
-    # The file has no identifier: use the spreadsheet row (header is row 1).
+    # The file has no identifier: use the spreadsheet row.
     row_number = (raw.index + 2).astype(str).str.zfill(3)
 
     events = pd.DataFrame(
@@ -80,14 +107,25 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def to_iso2(where: str) -> str:
-    """Turn "Poland; Baltic Sea; Germany" into "PL;DE"."""
+    """Turn "Poland; Baltic Sea; Germany" into "PL;DE".
+
+    Args:
+        where: Country names separated by ";". Names in `NOT_A_COUNTRY` are
+            skipped, and `COUNTRY_ALIASES` are applied before the lookup.
+
+    Returns:
+        The alpha-2 codes joined by ";", in order, without duplicates. Empty
+        when no name is a country.
+
+    Raises:
+        LookupError: A name is neither skipped nor a known country.
+    """
     codes = []
     for name in where.split(";"):
         name = name.strip()
         if name in NOT_A_COUNTRY:
             continue
         name = COUNTRY_ALIASES.get(name, name)
-        # Raises LookupError on an unknown country name.
         code = pycountry.countries.lookup(name).alpha_2
         if code not in codes:
             codes.append(code)

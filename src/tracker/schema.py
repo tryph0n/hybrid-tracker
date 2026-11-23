@@ -63,7 +63,22 @@ ALLOWED_VALUES = {
 
 
 def validate(events: pd.DataFrame) -> None:
-    """Raise ValueError if `events` does not follow the schema."""
+    """Raise ValueError if `events` does not follow the schema.
+
+    Checks, in order: the columns and their order are exactly `COLUMNS`; there
+    is at least one row; no `REQUIRED` cell is missing (NaN or None; an empty
+    string passes here, but it is stored as an empty cell, so `check` rejects
+    it later); `event_id` is unique; `ALLOWED_VALUES` columns hold allowed
+    values; non-empty `countries` match `COUNTRIES_PATTERN`; `date` parses with
+    `pd.to_datetime` and `%Y-%m-%d` (so "2025-1-5" passes); `lat` and `lon` are
+    both set or both missing, and in range when set.
+
+    Args:
+        events: The events of one source or of all sources.
+
+    Raises:
+        ValueError: A check fails.
+    """
     if list(events.columns) != COLUMNS:
         raise ValueError(f"Unexpected columns: {list(events.columns)}")
     if events.empty:
@@ -89,7 +104,7 @@ def validate(events: pd.DataFrame) -> None:
     if not bad_countries.empty:
         raise ValueError(f"Invalid countries values: {sorted(set(bad_countries))}")
 
-    # Raises on anything that is not a YYYY-MM-DD date.
+    # Raises ValueError on a date that does not parse with %Y-%m-%d.
     pd.to_datetime(events["date"], format="%Y-%m-%d")
 
     if (events["lat"].isna() != events["lon"].isna()).any():

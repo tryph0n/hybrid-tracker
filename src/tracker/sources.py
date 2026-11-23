@@ -13,18 +13,29 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "events"
 
 @dataclass(frozen=True)
 class Source:
-    """A data source: its metadata and the function that fetches its events.
-
-    `kind` is "static" for a frozen historical snapshot, re-ingested by hand,
-    or "live" for a source refreshed by the scheduled pipeline.
-    """
+    """A data source: its metadata and the function that fetches its events."""
 
     title: str
+    """Name shown in the app."""
+
     kind: str
+    """Either "live", for a source refreshed by the scheduled pipeline, or "static",
+    for a frozen historical snapshot, re-ingested by hand."""
+
     homepage: str
+    """Page of the dataset, shown as a link. It must appear in the README and in
+    the dataset card."""
+
     licence: str
+    """Licence name, for example "CC BY 4.0". It must appear in the README."""
+
     citation: str
+    """Credit line. It must appear word for word in the README and in the dataset
+    card."""
+
     fetch: Callable[[], pd.DataFrame]
+    """Downloads the source and returns its events in the unified schema. Define
+    it in the adapter module of the source."""
 
 
 SOURCES = {
@@ -59,8 +70,18 @@ def events_path(name: str) -> Path:
 
 
 def read_events(name: str) -> pd.DataFrame:
-    """Load the stored events of one source."""
-    # Only empty cells are missing values: keeps codes such as "NA" (Namibia).
+    """Load the stored events of one source.
+
+    Args:
+        name: Key of `SOURCES`.
+
+    Returns:
+        The stored rows. Only empty cells are missing values, so a code such
+        as "NA" (Namibia) is kept. Dates stay strings.
+
+    Raises:
+        FileNotFoundError: The source has no stored file.
+    """
     return pd.read_csv(events_path(name), keep_default_na=False, na_values=[""])
 
 

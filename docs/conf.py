@@ -13,7 +13,12 @@ project = "Europe Hybrid Incidents Tracker"
 author = "Samy Antoine SAAD"
 copyright = f"2026, {author}"
 
-extensions = ["autoapi.extension", "myst_parser", "sphinxcontrib.mermaid"]
+extensions = [
+    "autoapi.extension",
+    "myst_parser",
+    "sphinx.ext.napoleon",
+    "sphinxcontrib.mermaid",
+]
 myst_enable_extensions = ["substitution"]
 myst_fence_as_directive = ["mermaid"]
 # The sphinxcontrib-mermaid default (11.12.1) cuts long subgraph titles.
