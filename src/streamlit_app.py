@@ -329,8 +329,8 @@ weekly = days is not None and days <= 90
 st.subheader(f"Events per {'week' if weekly else 'month'}")
 st.plotly_chart(timeline_chart(events, colors, weekly, surface))
 st.caption(
-    "Counts follow source coverage, not only reality: the drone register starts "
-    "in late 2024 and the sabotage dataset stops in December 2025."
+    "Counts follow source coverage, not only reality: each source covers its own "
+    "period (see the Sources table)."
 )
 
 st.subheader("Where")
@@ -393,7 +393,8 @@ st.dataframe(
     column_config={"Link": st.column_config.LinkColumn("Link")},
 )
 st.caption(
-    "Sources are not yet de-duplicated against each other: a few late-2025 drone "
-    "incidents appear in both. "
+    "Sources are not yet de-duplicated against each other: an incident reported "
+    "by more than one source can appear more than once where source periods "
+    "overlap (see the Sources table). "
     + " ".join(f"{source.citation} {source.licence}." for source in SOURCES.values())
 )
