@@ -48,7 +48,8 @@ over time follow each source's coverage period.
 1. Write `src/tracker/<name>.py` with a `fetch()` returning the unified schema.
 2. Register it in `src/tracker/sources.py` as `static` or `live`.
 3. Run `python -m tracker.ingest <name>` and commit the CSV.
-4. Run `PYTHONPATH=src python scripts/architecture.py` and commit
+4. With `docs/requirements.txt` installed, run
+   `PYTHONPATH=src python scripts/architecture.py` and commit
    `docs/architecture.md`: CI fails while the page does not match the code.
 
 ## Documentation
@@ -83,7 +84,8 @@ Actions):
 - variable `DOCKER_IMAGE`: public Docker Hub repository, `<user>/<repository>`;
 - secret `DOCKERHUB_TOKEN`: a Docker Hub access token with write access;
 - secret `RENDER_DEPLOY_HOOK_URL`: the deploy hook (Settings, Deploy Hook) of
-  a Render web service created from that image.
+  a Render web service created from the image
+  `docker.io/<user>/<repository>:latest`.
 
 The image step is skipped until `DOCKER_IMAGE` is set, and the Render step
 until `RENDER_DEPLOY_HOOK_URL` is set.

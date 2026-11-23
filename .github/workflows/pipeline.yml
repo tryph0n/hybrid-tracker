@@ -58,7 +58,7 @@ jobs:
       - name: Build docs
         run: sphinx-build -W --keep-going -b html docs docs/_build/html
 
-      # CD, from main only. Each step is skipped until its setting is set.
+      # CD, from main only. Each step does nothing until its variable or secret is set.
       - name: Publish Docker image
         id: image
         if: github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''
