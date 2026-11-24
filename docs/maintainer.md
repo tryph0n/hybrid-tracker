@@ -44,8 +44,10 @@ If the drop is a real correction, delete `data/events/<name>.csv`, run
 
 When a new version of a static source is published, follow the docstring of
 its module (`src/tracker/leiden.py`): update the file URL, ingest, read the
-diff of the CSV, and update the version in the citation and in the credits.
-Change the pinned version in the docstring too. The `event_id` values are
+diff of the CSV, and update the version in the `citation` of
+`src/tracker/sources.py`, in the README credits and in the dataset card
+(`data/events/README.md`). If the years change, also update the `title` and the
+README source table. Change the pinned version in the docstring too. The `event_id` values are
 spreadsheet rows, so they can move in a new version.
 
 ## Add a source
@@ -66,8 +68,11 @@ spreadsheet rows, so they can move in a new version.
    `static`.
 4. Add any new package to `requirements.txt`, pinned.
 5. For a new category, status or link value: add it to `src/tracker/schema.py`
-   and to the labels and colours of `src/streamlit_app.py`.
-6. Run `python -m tracker.ingest <name>`, then `python -m tracker.ingest check`.
+   and to the labels of `src/streamlit_app.py` (for a category, also the two
+   colour lists, in the same order). For a status or link value, also update
+   the list in `README.md`, "Reading the data".
+6. If the source needs a secret, export it locally first. Run
+   `python -m tracker.ingest <name>`, then `python -m tracker.ingest check`.
    Commit `data/events/<name>.csv`.
 7. Add `tests/fixtures/events/<name>.csv`: a few rows in the stored format. Add
    `tests/test_<name>.py` with a recorded upstream sample in
@@ -80,9 +85,9 @@ spreadsheet rows, so they can move in a new version.
    the intro of the card. If it passes the year 2022, also update the README
    description, the card intro and the app caption (`src/streamlit_app.py`).
    `tests/test_attribution.py` checks the credits.
-9. Run `python scripts/architecture.py` and commit `docs/architecture.md`.
-10. A live source that needs a secret: add `env:` to the "Refresh live
-    sources" step and set the secret in the repository.
+9. A live source that needs a secret: add `env:` to the "Refresh live
+   sources" step and set the secret in the repository.
+10. Run `python scripts/architecture.py` and commit `docs/architecture.md`.
 11. Run the checks below. After the merge of a live source, run the pipeline
     by hand (see "Run the pipeline by hand"): a pull request does not run the
     refresh.
@@ -94,6 +99,8 @@ A new or renamed column changes every stored file. Update every adapter, run
 (network needed), and update `tests/fixtures/events/`. `docs/conf.py` reads
 `schema.py` without importing it: keep `COLUMNS`, `REQUIRED` and the lists of
 `ALLOWED_VALUES` as literal lists, and one comment on each column line.
+A renamed column also changes `src/streamlit_app.py`, and for `event_status`
+or `russia_link`, the "Reading the data" section of `README.md`.
 
 ## Run the checks
 
@@ -171,8 +178,8 @@ The Render service is a web service created from the image
 minutes without visits.
 
 The mirror needs no secret. In the Hugging Face dataset settings, add a
-Trusted Publisher for this repository, branch `main` and workflow
-`pipeline.yml`. Renaming the repository, the branch or the workflow file breaks
+Trusted Publisher with repository `tryph0n/hybrid-tracker`, branch `main` and
+workflow `pipeline.yml`. Create the public dataset on Hugging Face first. Renaming the repository, the branch or the workflow file breaks
 the trust: delete the Trusted Publisher and add it again with the new values.
 
 The docs are built on Read the Docs (project `hybrid-tracker`) from the `docs/`
@@ -186,16 +193,16 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Failed job | Likely cause | Action |
 |---|---|---|
 | Lint | Style error | Run `ruff check --fix . && ruff format .` and commit. |
-| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `python -m tracker.ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. If the drop is a real correction, delete `data/events/<name>.csv`, run `python -m tracker.ingest <name>`, read the diff and commit. |
+| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `python -m tracker.ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
 | Data, validate or tests | A hand edit of a CSV, or an adapter bug. The error names the column. | Find the cause, fix it, push. |
 | Data, commit | A push to main during the run changed the same data file, so the rebase stopped; or a branch rule on main blocks the bot | Run the pipeline again. Keep main open to pushes from github-actions[bot]. |
 | Docs, architecture | The page does not match the code | Run `python scripts/architecture.py` and commit the page. |
 | Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `sphinx-build` command above and read the warning. |
-| Docker image | A broken `Dockerfile` or `requirements.txt` (the build runs only on `main`), an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
+| Docker image | A broken `Dockerfile` (the build runs only on `main`), an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
 | Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Then run the job again. |
-| Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
-| Hugging Face mirror | "Mirror check failed": it happens after a good upload | Run the job again, then compare the files on the Hub. |
-| Read the Docs | A warning or error in the docs build on Read the Docs | `latest` stays on the previous version. Fix the docs and push. |
+| Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match, or `HF_DATASET` names another dataset; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
+| Hugging Face mirror | "Mirror check failed": the downloaded dataset commit does not hold the same bytes as `data/events/`: a file that the upload skipped, or a download error | Run the job again, then compare the files on the Hub. |
+| Read the Docs | A warning or error in the docs build on Read the Docs. On a pull request it shows as a failed check; for `latest`, see Builds in the Read the Docs project. | `latest` stays on the previous version. Fix the docs and push. |
 
 A green Deploy job means only that Render accepted the deploy. If the dashboard
 does not start, read the deploy logs in Render and check `PORT` and the health
@@ -215,6 +222,8 @@ check path.
 - App: deploy an earlier image. Copy the hook URL from Render (Settings,
   Deploy Hook), take an earlier tag from Docker Hub, and run:
   `curl -fsS --get --data-urlencode "imgURL=docker.io/<user>/<repository>:<tag>" "<deploy hook URL>"`.
+  The tag of a commit is the output of
+  `git ls-tree <commit> Dockerfile requirements.txt .streamlit src data | sha256sum | cut -c1-12`.
   This lasts until the next `main` run, at the latest the daily run at 04:17
   UTC. To keep the earlier version, `git revert` the bad change on `main`.
 - Data: `git revert` the commit on `main`. For a live source, the next refresh

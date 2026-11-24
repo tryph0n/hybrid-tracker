@@ -24,7 +24,7 @@ One CSV file per source, all with the same columns.
 | [European Observatory of Drone Incidents](https://droneobservatory.eu) | Drone incidents in Europe | Daily refresh | CC BY 4.0 |
 | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | Operations that the author judges Russian | Frozen snapshot | CC BY 4.0 |
 
-Each day at 04:17 UTC, the pipeline gets the live source, checks every row,
+Each day at 04:17 UTC, the pipeline downloads each daily source again, checks every row,
 commits the files, then updates the dashboard and the dataset. See the
 [architecture page](https://hybrid-tracker.readthedocs.io/en/latest/architecture.html).
 
