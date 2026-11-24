@@ -113,6 +113,12 @@ def test_unknown_actor_stops_the_ingestion():
         eodi.normalize(located)
 
 
+def test_polish_name_of_russia_is_an_official_attribution():
+    located = pd.read_csv(LOCATED)
+    located.loc[0, "atribucion_actor"] = "Federacja Rosyjska"
+    assert eodi.normalize(located).loc[0, "russia_link"] == "official"
+
+
 def test_unknown_date_precision_stops_the_ingestion():
     located = pd.read_csv(LOCATED)
     located.loc[0, "inicio_precision"] = "semana"

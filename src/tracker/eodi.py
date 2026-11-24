@@ -45,6 +45,7 @@ DATE_PRECISION = {
 # unsafe ("Belarus" contains "rus"). An unknown name stops the ingestion.
 ACTOR_IS_RUSSIA = {
     "Rosja": True,
+    "Federacja Rosyjska": True,
     "Federația Rusă": True,
     "Russland": True,
     "Ryssland": True,
