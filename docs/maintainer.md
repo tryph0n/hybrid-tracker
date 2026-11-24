@@ -139,7 +139,8 @@ does.
   `requirements.txt`, `.streamlit`, `src` and `data`. A change to
   any of them, the dataset card included, gives a new tag. A new `COPY` line in
   the `Dockerfile` must also go in the `git ls-tree` line of the Docker image
-  job: `tests/test_image.py` checks it. The same inputs give
+  job (`tests/test_image.py` checks it) and in the tag command of
+  [Roll back](#roll-back). The same inputs give
   the same tag, and nothing is pushed to Docker Hub. `latest` moves only when a
   new tag is built. After a revert to an earlier tag, `latest` stays on the
   newer image.
@@ -170,7 +171,7 @@ In the GitHub repository settings, Secrets and variables, Actions:
 | Name | Kind | Value |
 |---|---|---|
 | `DOCKER_IMAGE` | variable | Public Docker Hub repository, `<user>/<repository>`. The namespace must be the Docker Hub login: the job logs in with it. |
-| `DOCKERHUB_TOKEN` | secret | Docker Hub access token with Read & Write scope |
+| `DOCKERHUB_TOKEN` | secret | Docker Hub access token with Repo Read & Write scope |
 | `RENDER_DEPLOY_HOOK_URL` | secret | Deploy hook of the Render service (Settings, Deploy Hook). The service image must be the repository in `DOCKER_IMAGE`: Render rejects an image from another repository. |
 | `HF_DATASET` | variable | `<user>/<dataset>` on Hugging Face |
 
@@ -185,7 +186,7 @@ The mirror needs no secret. Create the public dataset on Hugging Face first. In
 its settings, add a Trusted Publisher with repository `tryph0n/hybrid-tracker`,
 branch `main` and workflow `pipeline.yml`. Renaming the repository, the branch
 or the workflow file breaks the trust: delete the Trusted Publisher and add it
-again with the new values.
+again with the new values. Then set `HF_DATASET`.
 
 The docs are built on Read the Docs (project `hybrid-tracker`) from the `docs/`
 folder, with `.readthedocs.yaml`. It sets `fail_on_warning`, so a warning fails
@@ -199,12 +200,12 @@ A failed run shows a red job in Actions. Read the log of that job first.
 |---|---|---|
 | Lint | Style error | Run `ruff check --fix . && ruff format .` and commit. |
 | Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `python -m tracker.ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
-| Data, validate or tests | A hand edit of a CSV, or an adapter bug. The error names the column. | Find the cause, fix it, push. |
+| Data, validate or tests | A hand edit of a CSV, or an adapter bug. The error usually names the column. | Find the cause, fix it, push. |
 | Data, commit | A push to main during the run changed the same data file, so the rebase stopped; or a branch rule on main blocks the bot | Run the pipeline again. Keep main open to pushes from github-actions[bot]. |
 | Docs, architecture | The page does not match the code | Run `python scripts/architecture.py` and commit the page. |
 | Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `sphinx-build` command above and read the warning. |
 | Docker image | A broken `Dockerfile` (the build runs only on `main`), an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
-| Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Then run the job again. |
+| Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended or the workspace cannot deploy | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Then run the job again. |
 | Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match, or `HF_DATASET` names another dataset; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
 | Hugging Face mirror | "Mirror check failed": the downloaded dataset commit does not hold the same bytes as `data/events/`: a file that the upload skipped, or that differs on the Hub | Run the job again, then compare the files on the Hub. |
 | Read the Docs | A warning or error in the docs build on Read the Docs. On a pull request it shows as a failed check; for `latest`, see Builds in the Read the Docs project. | `latest` stays on the previous version. Fix the docs and push. |
@@ -215,7 +216,7 @@ check path.
 
 ## Rotate a credential
 
-- Docker Hub token: create a new token with Read & Write scope, run
+- Docker Hub token: create a new token with Repo Read & Write scope, run
   `gh secret set DOCKERHUB_TOKEN` (it prompts for the value), then delete the
   old token.
 - Render hook: in Render, Settings, Deploy Hook, click Regenerate Hook. The old
@@ -229,8 +230,8 @@ check path.
   `curl -fsS --get --data-urlencode "imgURL=docker.io/<user>/<repository>:<tag>" "<deploy hook URL>"`.
   The tag of a commit is the output of
   `git ls-tree <commit> Dockerfile requirements.txt .streamlit src data | sha256sum | cut -c1-12`.
-  This lasts until the next `main` run, at the latest the daily run at 04:17
-  UTC. To keep the earlier version, `git revert` the bad change on `main`.
+  This lasts until the next `main` run that reaches the Deploy job, usually
+  the daily run at 04:17 UTC. To keep the earlier version, `git revert` the bad change on `main`.
 - Data: `git revert` the commit on `main`. For a live source, the next refresh
   fetches the upstream again, so the revert lasts only until the next
   scheduled or manual run.
