@@ -24,9 +24,12 @@ def drop_all_rows(events):
     return events.iloc[0:0]
 
 
-def blank_title(events):
-    events.loc[events.index[0], "title"] = None
-    return events
+def set_blank(column, value):
+    def change(events):
+        events.loc[events.index[0], column] = value
+        return events
+
+    return change
 
 
 def duplicate_id(events):
@@ -67,7 +70,11 @@ def set_countries(value):
     [
         (reorder_columns, "Unexpected columns"),
         (drop_all_rows, "No events"),
-        (blank_title, "without title"),
+        (set_blank("title", None), "without title"),
+        (set_blank("title", ""), "without title"),
+        (set_blank("title", "\t"), "without title"),
+        (set_blank("url", "  "), "without url"),
+        (set_blank("date", ""), "without date"),
         (duplicate_id, "Duplicate event_id"),
         (unknown_category, "Unknown category"),
         (bad_date, "doesn't match format"),

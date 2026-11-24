@@ -62,6 +62,17 @@ def test_ingest_rejects_invalid_events(data_dir, monkeypatch, eodi_events):
     assert not (data_dir / "eodi.csv").exists()
 
 
+def test_ingest_rejects_a_blank_required_cell(data_dir, monkeypatch, eodi_events):
+    serve(monkeypatch, "eodi", eodi_events)
+    ingest.ingest("eodi")
+    before = (data_dir / "eodi.csv").read_bytes()
+
+    serve(monkeypatch, "eodi", eodi_events.assign(title=" "))
+    with pytest.raises(ValueError, match="without title"):
+        ingest.ingest("eodi")
+    assert (data_dir / "eodi.csv").read_bytes() == before
+
+
 def test_check_rejects_an_id_shared_by_two_sources(sample_data_dir, capsys):
     ingest.check()
     expected = f"{len(sources.SOURCES)} sources: valid"

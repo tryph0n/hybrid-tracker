@@ -66,12 +66,12 @@ def validate(events: pd.DataFrame) -> None:
     """Raise ValueError if `events` does not follow the schema.
 
     Checks, in order: the columns and their order are exactly `COLUMNS`; there
-    is at least one row; no `REQUIRED` cell is missing (NaN or None; an empty
-    string passes here, but it is stored as an empty cell, so `check` rejects
-    it later); `event_id` is unique; `ALLOWED_VALUES` columns hold allowed
-    values; non-empty `countries` match `COUNTRIES_PATTERN`; `date` parses with
-    `pd.to_datetime` and `%Y-%m-%d` (so "2025-1-5" passes); `lat` and `lon` are
-    both set or both missing, and in range when set.
+    is at least one row; no `REQUIRED` cell is missing (NaN, None, or an empty
+    or whitespace-only string); `event_id` is unique; `ALLOWED_VALUES`
+    columns hold allowed values; non-empty `countries` match
+    `COUNTRIES_PATTERN`; `date` parses with `pd.to_datetime` and `%Y-%m-%d`
+    (so "2025-1-5" passes); `lat` and `lon` are both set or both missing, and
+    in range when set.
 
     Args:
         events: The events of one source or of all sources.
@@ -85,7 +85,8 @@ def validate(events: pd.DataFrame) -> None:
         raise ValueError("No events")
 
     for column in REQUIRED:
-        missing = events[column].isna().sum()
+        blank = events[column].astype(str).str.strip() == ""
+        missing = (events[column].isna() | blank).sum()
         if missing:
             raise ValueError(f"{missing} rows without {column}")
 
