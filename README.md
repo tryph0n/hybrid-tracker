@@ -38,6 +38,10 @@ attribution. Two fields keep these questions apart:
 - `russia_link`: who links it to Russia (`official` authority, `assessed` by
   the source's analysts, `none`)?
 
+The dashboard hides `dismissed` events by default: add "Dismissed by the
+source" to the Event status filter to show them. The Sources table counts all
+stored events, whatever the filters.
+
 Known limits: sources are not de-duplicated against each other, and counts
 over time follow each source's coverage period (see the Sources table of the
 dashboard).

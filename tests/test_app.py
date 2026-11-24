@@ -1,12 +1,17 @@
 """The dashboard run headless with AppTest, on the stored data and on samples."""
 
+import base64
+
+import numpy as np
+import pandas as pd
+import plotly.io as pio
 import pytest
 import streamlit as st
 from conftest import APP
 from streamlit.testing.v1 import AppTest
 
 from tracker.schema import CATEGORIES
-from tracker.sources import SOURCES, read_all_events
+from tracker.sources import SOURCES, events_path, read_all_events, read_events
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +34,40 @@ def metrics(at: AppTest) -> dict[str, str]:
 def expected_events(events):
     """Rows shown with the default filters: every status except dismissed."""
     return events[events["event_status"] != "dismissed"]
+
+
+def chart(at: AppTest, index: int):
+    return pio.from_json(at.get("plotly_chart")[index].proto.spec)
+
+
+def captions(at: AppTest) -> str:
+    return " ".join(caption.value for caption in at.caption)
+
+
+def counts(bar) -> list[int]:
+    """Bar lengths: Plotly 7 sends numeric arrays as base64."""
+    return np.frombuffer(
+        base64.b64decode(bar.x["bdata"]), dtype=bar.x["dtype"]
+    ).tolist()
+
+
+def open_sea_rows(copies: int):
+    """Write `copies` events with no country and no coordinates as the Leiden file."""
+    events = read_all_events()
+    template = events[events["lat"].isna() & events["countries"].isna()].iloc[0]
+    rows = [template.to_dict() | {"event_id": f"leiden:S-{n}"} for n in range(copies)]
+    pd.DataFrame(rows).to_csv(events_path("leiden"), index=False)
+
+
+def share_places(count: int):
+    """Move `count` shown, located EODI events and the dismissed ones to one place."""
+    eodi = read_events("eodi")
+    located = eodi[eodi["lat"].notna()]
+    shown = expected_events(located)
+    dismissed = located[located["event_status"] == "dismissed"]
+    place = shown.iloc[0][["lat", "lon"]].tolist()
+    eodi.loc[shown.index[:count].append(dismissed.index), ["lat", "lon"]] = place
+    eodi.to_csv(events_path("eodi"), index=False)
 
 
 def test_runs_on_the_stored_data():
@@ -88,3 +127,114 @@ def test_countries_view(sample_data_dir):
     assert not at.exception
     assert not at.info
     assert len(at.get("plotly_chart")) == 3
+
+
+def test_country_filter_restricts_kpi_and_bar(sample_data_dir):
+    at = run_app()
+    at.sidebar.multiselect[4].set_value(["DE"]).run()
+    assert not at.exception
+    assert metrics(at)["Countries"] == "1"
+    assert chart(at, 2).data[0].y == ("Germany",)
+    at.segmented_control[0].set_value("Countries").run()
+    assert chart(at, 1).data[0].locations == ("DEU",)
+
+
+def test_multi_country_events_count_for_each_selected_country(sample_data_dir):
+    at = run_app()
+    at.sidebar.multiselect[4].set_value(["AT", "DE"]).run()
+    assert not at.exception
+    assert metrics(at)["Countries"] == "2"
+    bars = chart(at, 2).data[0]
+    assert dict(zip(bars.y, counts(bars))) == {"Germany": 4, "Austria": 1}
+
+
+@pytest.mark.parametrize(
+    "copies, note",
+    [
+        (1, "1 event has no country (open sea) and is on no map."),
+        (3, "3 events have no country (open sea) and are on no map."),
+    ],
+)
+def test_events_on_no_map_are_counted(sample_data_dir, copies, note):
+    open_sea_rows(copies)
+    at = run_app()
+    assert note in captions(at)
+    at.segmented_control[0].set_value("Countries").run()
+    assert note in captions(at)
+    at.sidebar.multiselect[0].set_value(["leiden"]).run()
+    assert not at.exception
+    at.segmented_control[0].set_value("Incidents").run()
+    assert note in at.info[0].value
+
+
+def test_one_located_event_gets_a_singular_caption(sample_data_dir):
+    eodi = read_events("eodi")
+    eodi[eodi["lat"].notna()].head(1).to_csv(events_path("eodi"), index=False)
+    at = run_app()
+    at.sidebar.multiselect[0].set_value(["eodi"]).run()
+    assert "1 of 1 selected events has coordinates." in captions(at)
+
+
+def test_no_map_note_is_absent_without_open_sea_events(sample_data_dir):
+    at = run_app()
+    at.sidebar.multiselect[0].set_value(["eodi"]).run()
+    assert "no country" not in captions(at)
+    at.segmented_control[0].set_value("Countries").run()
+    assert "no country" not in captions(at)
+
+
+def test_markers_say_how_many_events_are_at_their_place(sample_data_dir):
+    share_places(3)
+    at = run_app()
+    traces = chart(at, 1).data
+    assert all("Events here=" in trace.hovertemplate for trace in traces)
+    on_markers = sorted(row[2] for trace in traces for row in trace.customdata)
+    assert on_markers == [1, 1, 1, 1, 3, 3, 3]
+
+
+def test_caption_counts_events_sharing_their_place(sample_data_dir):
+    assert "share their place" not in captions(run_app())
+    share_places(3)
+    st.cache_data.clear()
+    at = run_app()
+    assert "3 of them share their place with other events" in captions(at)
+    at.sidebar.multiselect[2].set_value(["confirmed", "unconfirmed", "dismissed"]).run()
+    assert "4 of them share their place with other events" in captions(at)
+    at.sidebar.multiselect[1].set_value(["airspace_incursion"]).run()
+    assert "selected events have coordinates" in captions(at)
+    assert "share their place" not in captions(at)
+
+
+def test_status_filter_says_dismissed_events_are_hidden(sample_data_dir):
+    at = run_app()
+    status = at.sidebar.multiselect[2]
+    assert status.label == "Event status"
+    assert "dismissed" in status.help.lower()
+    assert "dismissed" not in status.value
+
+
+def test_country_bar_keeps_the_countries_tied_at_the_cut(sample_data_dir):
+    events = read_all_events()
+    template = read_events("eodi").iloc[0]
+    codes = [f"{a}{b}" for a in "ABC" for b in "DEFGHI"][:17]
+    # 14 countries with 2 events and 3 with 1: the 3 tie for place 15.
+    countries = codes[:14] * 2 + codes[14:]
+    tied = pd.DataFrame(
+        [
+            template.to_dict()
+            | {"event_id": f"eodi:T-{n}", "countries": code, "place": code}
+            for n, code in enumerate(countries)
+        ]
+    )
+    tied.to_csv(events_path("eodi"), index=False)
+    # One Leiden row keeps both sources present without adding a country.
+    events[events["event_id"] == "leiden:002"].to_csv(
+        events_path("leiden"), index=False
+    )
+    at = run_app()
+    bars = chart(at, 2).data[0]
+    assert len(bars.y) == 17
+    assert sorted(counts(bars)) == [1] * 3 + [2] * 14
+    assert "Most affected countries (top 15, ties kept)" in [
+        h.value for h in at.subheader
+    ]
