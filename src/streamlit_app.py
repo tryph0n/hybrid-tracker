@@ -130,7 +130,10 @@ def timeline_chart(events: pd.DataFrame, colors: dict, weekly: bool, surface: st
 
 
 def points_map(located: pd.DataFrame, colors: dict, dark: bool):
-    located = located.assign(day=located["date"].dt.strftime("%Y-%m-%d"))
+    located = located.assign(
+        day=located["date"].dt.strftime("%Y-%m-%d"),
+        here=located.groupby(["lat", "lon"])["lat"].transform("size"),
+    )
     fig = px.scatter_map(
         located,
         lat="lat",
@@ -140,13 +143,19 @@ def points_map(located: pd.DataFrame, colors: dict, dark: bool):
         hover_data={
             "day": True,
             "place": True,
+            "here": True,
             "lat": False,
             "lon": False,
             "category_label": False,
         },
         category_orders={"category_label": list(colors)},
         color_discrete_map=colors,
-        labels={"category_label": "", "day": "Date", "place": "Place"},
+        labels={
+            "category_label": "",
+            "day": "Date",
+            "place": "Place",
+            "here": "Events here",
+        },
         opacity=0.75,
         zoom=2.7,
         center=EUROPE_CENTER,
@@ -188,7 +197,7 @@ def countries_map(counts: pd.DataFrame, dark: bool):
 
 
 def countries_bar(counts: pd.DataFrame, color: str):
-    top = counts.head(15)
+    top = counts.nlargest(15, "events", keep="all")
     fig = px.bar(
         top,
         x="events",
@@ -262,6 +271,7 @@ with st.sidebar:
         EVENT_STATUSES,
         default=["confirmed", "unconfirmed"],
         format_func=EVENT_STATUS_LABELS.get,
+        help="Dismissed events (the source found no incident) are hidden by default.",
     )
     links = st.multiselect(
         "Link to Russia",
@@ -303,6 +313,8 @@ if events.empty:
     st.stop()
 
 by_country = count_by_country(events)
+if countries:
+    by_country = by_country[by_country["code"].isin(countries)]
 last_30 = (scoped["date"] > today - pd.Timedelta(days=30)).sum()
 previous_30 = (
     (scoped["date"] > today - pd.Timedelta(days=60))
@@ -341,21 +353,49 @@ map_view = st.segmented_control(
     label_visibility="collapsed",
 )
 located = events.dropna(subset=["lat", "lon"])
+on_no_map = int((events["lat"].isna() & events["countries"].isna()).sum())
+if on_no_map == 1:
+    no_map_note = " 1 event has no country (open sea) and is on no map."
+elif on_no_map:
+    no_map_note = f" {on_no_map:,} events have no country (open sea) and are on no map."
+else:
+    no_map_note = ""
 if map_view == "Countries":
     st.plotly_chart(countries_map(by_country, dark))
     st.caption(
-        "Events per country, Europe only. An event spanning two countries counts in both."
+        "Events per country, Europe only. An event spanning several countries "
+        "counts once in each country shown." + no_map_note
     )
 elif located.empty:
-    st.info("None of the selected events has coordinates. Try the Countries view.")
+    st.info(
+        "None of the selected events has coordinates. Try the Countries view."
+        + no_map_note
+    )
 else:
+    stacked = int(located.duplicated(["lat", "lon"], keep=False).sum())
+    if stacked:
+        stacked_note = (
+            f" {stacked:,} of them share their place with other events: "
+            "hover over a marker to see how many are there. "
+            "The Events table lists them all."
+        )
+    else:
+        stacked_note = ""
+    if len(located) == 1:
+        located_note = f"1 of {len(events):,} selected events has coordinates."
+    else:
+        located_note = (
+            f"{len(located):,} of {len(events):,} selected events have coordinates."
+        )
     st.plotly_chart(points_map(located, colors, dark))
     st.caption(
-        f"{len(located):,} of {len(events):,} selected events have coordinates. "
-        "The others appear in the Countries view."
+        located_note
+        + stacked_note
+        + " Events with a country appear in the Countries view."
+        + no_map_note
     )
 
-st.subheader("Most affected countries")
+st.subheader("Most affected countries (top 15, ties kept)")
 st.plotly_chart(countries_bar(by_country, colors["Drone overflight"]))
 
 st.subheader("Events")
