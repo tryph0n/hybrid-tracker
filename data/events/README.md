@@ -3,8 +3,6 @@ license: cc-by-4.0
 pretty_name: Europe Hybrid Incidents
 language:
   - en
-size_categories:
-  - n<1K
 ---
 
 # Europe Hybrid Incidents

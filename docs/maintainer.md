@@ -81,8 +81,8 @@ spreadsheet rows, so they can move in a new version.
 8. Credit the source in `README.md`: a row in the source table, with the
    homepage, and a line in "Licence and credits", with the citation and the
    licence. Add the citation and the homepage to the dataset card,
-   `data/events/README.md`. If the scope grows, update `size_categories` and
-   the intro of the card. If it passes the year 2022, also update the README
+   `data/events/README.md`. If the scope grows, update the intro of the card.
+   If its events start before 2022, also update "since 2022" in the README
    description, the card intro and the app caption (`src/streamlit_app.py`).
    `tests/test_attribution.py` checks the credits.
 9. A live source that needs a secret: add `env:` to the "Refresh live
@@ -96,7 +96,8 @@ spreadsheet rows, so they can move in a new version.
 
 A new or renamed column changes every stored file. Update every adapter, run
 `python -m tracker.ingest live` and `python -m tracker.ingest static`
-(network needed), and update `tests/fixtures/events/`. `docs/conf.py` reads
+(network needed), and update `tests/fixtures/events/` and the `HEADER` in
+`tests/test_ingest.py`. `docs/conf.py` reads
 `schema.py` without importing it: keep `COLUMNS`, `REQUIRED` and the lists of
 `ALLOWED_VALUES` as literal lists, and one comment on each column line.
 A renamed column also changes `src/streamlit_app.py`, and for `event_status`
@@ -134,13 +135,14 @@ does.
   tests the data, and commits the changes to `data/events`. The commit does not
   start a new run: the image and the mirror use that commit in the same run.
 - The daily commits come from a bot. Pull before you create a branch.
-- The image tag is a hash of the files that the `Dockerfile` copies:
-  `Dockerfile`, `requirements.txt`, `.streamlit`, `src` and `data`. A change to
+- The image tag is a hash of the `Dockerfile` and of the files it copies:
+  `requirements.txt`, `.streamlit`, `src` and `data`. A change to
   any of them, the dataset card included, gives a new tag. A new `COPY` line in
   the `Dockerfile` must also go in the `git ls-tree` line of the Docker image
   job: `tests/test_image.py` checks it. The same inputs give
-  the same tag, and nothing is pushed to Docker Hub. `latest` follows the newest
-  image.
+  the same tag, and nothing is pushed to Docker Hub. `latest` moves only when a
+  new tag is built. After a revert to an earlier tag, `latest` stays on the
+  newer image.
 - The mirror job uploads `data/events/` to the dataset, then downloads that
   dataset commit and compares each file. A missing or different file fails the
   job.
@@ -168,19 +170,22 @@ In the GitHub repository settings, Secrets and variables, Actions:
 | Name | Kind | Value |
 |---|---|---|
 | `DOCKER_IMAGE` | variable | Public Docker Hub repository, `<user>/<repository>`. The namespace must be the Docker Hub login: the job logs in with it. |
-| `DOCKERHUB_TOKEN` | secret | Docker Hub access token with Read and Write scope |
+| `DOCKERHUB_TOKEN` | secret | Docker Hub access token with Read & Write scope |
 | `RENDER_DEPLOY_HOOK_URL` | secret | Deploy hook of the Render service (Settings, Deploy Hook). The service image must be the repository in `DOCKER_IMAGE`: Render rejects an image from another repository. |
 | `HF_DATASET` | variable | `<user>/<dataset>` on Hugging Face |
 
 The Render service is a web service created from the image
 `docker.io/<user>/<repository>:latest`. It runs on the free plan, with
 `PORT=8501` and the health check path `/_stcore/health`. It sleeps after 15
-minutes without visits.
+minutes without visits. Set `DOCKER_IMAGE` and `DOCKERHUB_TOKEN`, and let one
+`main` run push the image, before you create the service. Then set
+`RENDER_DEPLOY_HOOK_URL`.
 
-The mirror needs no secret. In the Hugging Face dataset settings, add a
-Trusted Publisher with repository `tryph0n/hybrid-tracker`, branch `main` and
-workflow `pipeline.yml`. Create the public dataset on Hugging Face first. Renaming the repository, the branch or the workflow file breaks
-the trust: delete the Trusted Publisher and add it again with the new values.
+The mirror needs no secret. Create the public dataset on Hugging Face first. In
+its settings, add a Trusted Publisher with repository `tryph0n/hybrid-tracker`,
+branch `main` and workflow `pipeline.yml`. Renaming the repository, the branch
+or the workflow file breaks the trust: delete the Trusted Publisher and add it
+again with the new values.
 
 The docs are built on Read the Docs (project `hybrid-tracker`) from the `docs/`
 folder, with `.readthedocs.yaml`. It sets `fail_on_warning`, so a warning fails
@@ -201,7 +206,7 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Docker image | A broken `Dockerfile` (the build runs only on `main`), an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
 | Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Then run the job again. |
 | Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match, or `HF_DATASET` names another dataset; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
-| Hugging Face mirror | "Mirror check failed": the downloaded dataset commit does not hold the same bytes as `data/events/`: a file that the upload skipped, or a download error | Run the job again, then compare the files on the Hub. |
+| Hugging Face mirror | "Mirror check failed": the downloaded dataset commit does not hold the same bytes as `data/events/`: a file that the upload skipped, or that differs on the Hub | Run the job again, then compare the files on the Hub. |
 | Read the Docs | A warning or error in the docs build on Read the Docs. On a pull request it shows as a failed check; for `latest`, see Builds in the Read the Docs project. | `latest` stays on the previous version. Fix the docs and push. |
 
 A green Deploy job means only that Render accepted the deploy. If the dashboard
@@ -210,7 +215,7 @@ check path.
 
 ## Rotate a credential
 
-- Docker Hub token: create a new token with Read and Write scope, run
+- Docker Hub token: create a new token with Read & Write scope, run
   `gh secret set DOCKERHUB_TOKEN` (it prompts for the value), then delete the
   old token.
 - Render hook: in Render, Settings, Deploy Hook, click Regenerate Hook. The old
@@ -227,4 +232,5 @@ check path.
   This lasts until the next `main` run, at the latest the daily run at 04:17
   UTC. To keep the earlier version, `git revert` the bad change on `main`.
 - Data: `git revert` the commit on `main`. For a live source, the next refresh
-  fetches the upstream again, so the revert lasts only until the next run.
+  fetches the upstream again, so the revert lasts only until the next
+  scheduled or manual run.
