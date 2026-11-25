@@ -40,14 +40,19 @@ html_title = project
 html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
 
 
-def columns_table() -> str:
-    """Markdown table of the event columns, read from schema.py without importing it."""
-    source = SCHEMA.read_text(encoding="utf-8")
-    nodes = {
+def schema_nodes(source: str) -> dict[str, ast.expr]:
+    """The top-level assignments of schema.py, read without importing it."""
+    return {
         node.targets[0].id: node.value
         for node in ast.parse(source).body
         if isinstance(node, ast.Assign)
     }
+
+
+def columns_table() -> str:
+    """Markdown table of the event columns, read from schema.py without importing it."""
+    source = SCHEMA.read_text(encoding="utf-8")
+    nodes = schema_nodes(source)
     required = [element.value for element in nodes["REQUIRED"].elts]
     allowed = {
         key.value: [element.value for element in nodes[value.id].elts]
@@ -77,4 +82,9 @@ def columns_table() -> str:
 
 
 # Used by data-dictionary.md.
-myst_substitutions = {"columns_table": columns_table()}
+myst_substitutions = {
+    "columns_table": columns_table(),
+    "schema_version": schema_nodes(SCHEMA.read_text(encoding="utf-8"))[
+        "SCHEMA_VERSION"
+    ].value,
+}
