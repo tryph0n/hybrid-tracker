@@ -288,3 +288,16 @@ def test_file_list_without_one_spreadsheet_stops_the_run():
     answer["data"][0]["dataFile"]["filename"] = "notes.pdf"
     with pytest.raises(ValueError, match="one .xlsx"):
         leiden.spreadsheet_id(answer)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://a.org/p?utm_source=x.com", "https://a.org/p"),
+        ("https://a.org/p?id=3&utm_medium=m&utm_source=x.com", "https://a.org/p?id=3"),
+        (" https://a.org/p?id=3 ", "https://a.org/p?id=3"),
+        ("", ""),
+    ],
+)
+def test_tracking_parameters_are_removed_from_links(url, expected):
+    assert leiden.strip_tracking(url) == expected

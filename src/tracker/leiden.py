@@ -12,6 +12,7 @@ https://doi.org/10.7910/DVN/TQ0FMQ
 
 import io
 import json
+import urllib.parse
 import urllib.request
 import warnings
 from typing import Any
@@ -196,7 +197,7 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
     date = pd.to_datetime(year + " " + month, format="%Y %B")
 
     countries = raw["Where"].map(to_iso2)
-    link = raw["WhatUrl"].fillna("").astype(str).str.strip()
+    link = raw["WhatUrl"].fillna("").astype(str).map(strip_tracking)
     mapped = raw["EventCategory"].map(CATEGORY)
 
     events = pd.DataFrame(
@@ -229,6 +230,23 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
         }
     )
     return events[COLUMNS]
+
+
+def strip_tracking(url: str) -> str:
+    """Remove the `utm_*` tracking parameters of a link and strip the text.
+
+    The author's links carry them (for example `?utm_source=...`). They name
+    the tool that opened the page, not the page.
+    """
+    parts = urllib.parse.urlsplit(url.strip())
+    query = [
+        pair
+        for pair in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        if not pair[0].startswith("utm_")
+    ]
+    return urllib.parse.urlunsplit(
+        parts._replace(query=urllib.parse.urlencode(query, safe="/:"))
+    )
 
 
 def end_dates(values: pd.Series) -> pd.Series:
