@@ -146,3 +146,41 @@ def test_unknown_upstream_label_fails_validation(column, value, message):
     located.loc[0, column] = value
     with pytest.raises(ValueError, match=message):
         validate(eodi.normalize(located))
+
+
+def serve_located(monkeypatch, tmp_path, edit) -> None:
+    """Make the located-incidents download return the fixture after `edit`."""
+    lines = LOCATED.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split(",")
+    path = tmp_path / "located.csv"
+    path.write_text("\n".join(edit(header, lines)) + "\n", encoding="utf-8")
+    monkeypatch.setattr(eodi, "LOCATED_URL", str(path))
+    monkeypatch.setattr(eodi, "HEADERS", {})
+    serve_unlocated(monkeypatch, UNLOCATED.read_bytes())
+
+
+def test_download_keeps_the_country_code_na(monkeypatch, tmp_path):
+    def edit(header, lines):
+        row = lines[1].split(",")
+        row[header.index("pais")] = "NA"
+        return [lines[0], ",".join(row), *lines[2:]]
+
+    serve_located(monkeypatch, tmp_path, edit)
+    events = eodi.fetch()
+    assert (
+        events.loc[events["event_id"] == "eodi:EODI-2024-00003", "countries"].item()
+        == "NA"
+    )
+
+
+def test_download_reads_an_empty_cell_as_missing(monkeypatch, tmp_path):
+    def edit(header, lines):
+        row = lines[1].split(",")
+        row[header.index("pais")] = ""
+        return [lines[0], ",".join(row), *lines[2:]]
+
+    serve_located(monkeypatch, tmp_path, edit)
+    events = eodi.fetch()
+    assert pd.isna(
+        events.loc[events["event_id"] == "eodi:EODI-2024-00003", "countries"].item()
+    )

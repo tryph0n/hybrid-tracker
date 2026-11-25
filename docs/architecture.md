@@ -159,6 +159,7 @@ flowchart TB
   module_tracker_leiden --> module_tracker_schema
   module_tracker_sources --> module_tracker_eodi
   module_tracker_sources --> module_tracker_leiden
+  module_tracker_sources --> module_tracker_schema
   module_architecture_py --> module_tracker_sources
 ```
 

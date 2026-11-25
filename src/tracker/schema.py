@@ -1,5 +1,7 @@
 """Unified event schema shared by every source adapter."""
 
+from pathlib import Path
+
 import pandas as pd
 
 # Column order of every file in data/events/.
@@ -114,3 +116,19 @@ def validate(events: pd.DataFrame) -> None:
         raise ValueError("lat out of range")
     if not events["lon"].dropna().between(-180, 180).all():
         raise ValueError("lon out of range")
+
+
+def read_csv(
+    source: str | Path, storage_options: dict[str, str] | None = None
+) -> pd.DataFrame:
+    """Read a CSV where only an empty cell is a missing value.
+
+    Texts such as "NA" (Namibia) or "None" are real values, so pandas'
+    default list of missing-value texts is switched off.
+    """
+    return pd.read_csv(
+        source,
+        keep_default_na=False,
+        na_values=[""],
+        storage_options=storage_options,
+    )

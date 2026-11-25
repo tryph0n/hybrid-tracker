@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from tracker import eodi, leiden
+from tracker.schema import read_csv
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "events"
 
@@ -82,7 +83,7 @@ def read_events(name: str) -> pd.DataFrame:
     Raises:
         FileNotFoundError: The source has no stored file.
     """
-    return pd.read_csv(events_path(name), keep_default_na=False, na_values=[""])
+    return read_csv(events_path(name))
 
 
 def read_all_events() -> pd.DataFrame:
