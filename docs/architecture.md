@@ -36,7 +36,7 @@ flowchart TB
   service_Hugging_Face("Hugging Face")
   service_Heartbeat_monitor("Heartbeat monitor")
   source_eodi -->|"Data job"| ingest
-  source_leiden -->|"by hand"| ingest
+  source_leiden -->|"Data job"| ingest
   ingest --> events
   events --> app
   app -->|"Docker image job"| service_Docker_Hub
@@ -114,6 +114,7 @@ flowchart LR
 | Lint | Type check |  | `uv run --locked mypy` |
 | Data | Install |  | `uv sync --locked` |
 | Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest live` |
+| Data | Ingest static sources missing from the store | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest static --if-missing` |
 | Data | Build the published tables | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker build` |
 | Data | Validate stored data |  | `uv run tracker ingest check` |
 | Data | Run the tests |  | `uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"` |

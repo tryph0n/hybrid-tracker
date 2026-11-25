@@ -47,7 +47,10 @@ A source is live or static (`Source.kind` in `src/tracker/sources.py`).
 - A live source is fetched in full at each run and replaces the stored file.
   The pipeline refreshes it each day.
 - A static source is a frozen historical snapshot, pinned to one upstream file
-  version. You re-ingest it by hand.
+  version. You re-ingest it by hand. The pipeline runs
+  `tracker ingest static --if-missing` before the build: it downloads only a
+  static source that has no clean table in the raw store, so a new or reset
+  store gets them with no manual step.
 
 Each source goes through two steps. `extract()` downloads the files and saves
 them, as served, in the raw store with a manifest line each. `normalize()` maps
@@ -65,6 +68,7 @@ root:
 export TRACKER_STORE=local TRACKER_STORE_DIR=/tmp/raw-store
 uv run tracker ingest live      # every live source
 uv run tracker ingest static    # every static source
+uv run tracker ingest static --if-missing # only the ones with no clean table
 uv run tracker ingest <name>    # one source, for example eodi
 uv run tracker ingest check     # validate the stored files, no network, no store
 uv run tracker rebuild [<name>] # clean tables again from the stored payloads, no download

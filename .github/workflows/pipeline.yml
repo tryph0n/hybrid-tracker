@@ -60,6 +60,12 @@ jobs:
           TRACKER_STORE: hf
           HF_OIDC_RESOURCE: datasets/sam-bot/hybrid-tracker-raw
         run: uv run tracker ingest live
+      - name: Ingest static sources missing from the store
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          TRACKER_STORE: hf
+          HF_OIDC_RESOURCE: datasets/sam-bot/hybrid-tracker-raw
+        run: uv run tracker ingest static --if-missing
       - name: Build the published tables
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:

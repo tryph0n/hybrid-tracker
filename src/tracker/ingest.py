@@ -5,6 +5,8 @@ Run through the `tracker` command, from the repository root after `uv sync`:
 - `uv run tracker ingest live`: every live source (scheduled pipeline)
 - `uv run tracker ingest static`: every static source (run by hand)
 - `uv run tracker ingest eodi`: a single source
+- `uv run tracker ingest static --if-missing`: only the sources that have no
+  clean table in the raw store (scheduled pipeline)
 - `uv run tracker ingest check`: validate stored files, download nothing
 - `uv run tracker rebuild [source]`: write the clean tables again from the
   stored payloads, download nothing
@@ -170,20 +172,31 @@ def check() -> None:
     logger.info("%d events, %d sources: valid", len(events), events["source"].nunique())
 
 
-def run(target: str) -> None:
+def run(target: str, if_missing: bool = False) -> None:
     """Run one target: a source name, `live`, `static` or `check`.
 
+    Args:
+        target: The target to run.
+        if_missing: Skip each source that already has a clean table in the
+            raw store: it is not downloaded again.
+
     Raises:
-        ValueError: `target` is not a target.
+        ValueError: `target` is not a target, or `if_missing` is set with `check`.
     """
     if target == "check":
+        if if_missing:
+            raise ValueError("`--if-missing` does not apply to `check`")
         check()
-    elif target in SOURCES:
-        ingest(target, open_store())
+        return
+    if target in SOURCES:
+        names = [target]
     elif target in ("live", "static"):
-        store = open_store()
-        for name, source in SOURCES.items():
-            if source.kind == target:
-                ingest(name, store)
+        names = [n for n, source in SOURCES.items() if source.kind == target]
     else:
         raise ValueError(f"Unknown target {target!r}")
+    store = open_store()
+    for name in names:
+        if if_missing and store.backend.read(clean_path(name)) is not None:
+            logger.info("%s: clean table in the store, skipped", name)
+            continue
+        ingest(name, store)

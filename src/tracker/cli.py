@@ -26,6 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="a source, every `live` or `static` source, or `check` to validate "
         "the stored files without a download",
     )
+    ingest_parser.add_argument(
+        "--if-missing",
+        action="store_true",
+        help="skip a source that already has a clean table in the raw store",
+    )
     rebuild_parser = commands.add_parser(
         "rebuild",
         help="write the clean tables again from the stored payloads, with no download",
@@ -66,7 +71,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = build_parser().parse_args(argv)
     if args.command == "ingest":
-        ingest.run(args.target)
+        ingest.run(args.target, args.if_missing)
     elif args.command == "rebuild":
         ingest.rebuild(args.source, open_store(), args.allow_shrink)
     elif args.command == "build":
