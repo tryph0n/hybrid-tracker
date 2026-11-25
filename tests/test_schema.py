@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from tracker.schema import validate
+from tracker.schema import CATEGORIES, CATEGORY_DOMAINS, DOMAINS, validate
 from tracker.sources import read_all_events
 
 
@@ -65,6 +65,16 @@ def set_countries(value):
     return change
 
 
+def set_cells(**cells):
+    def change(events):
+        for column, value in cells.items():
+            events[column] = events[column].astype(object)
+            events.loc[events.index[0], column] = value
+        return events
+
+    return change
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
@@ -84,6 +94,28 @@ def set_countries(value):
         (set_countries("de"), r"Invalid countries values: \['de'\]"),
         (set_countries("DE,FR"), r"Invalid countries values: \['DE,FR'\]"),
         (set_countries("DE;"), r"Invalid countries values: \['DE;'\]"),
+        (
+            set_cells(category="arson"),
+            r"category not in domain: \[\('arson', 'air'\)\]",
+        ),
+        (
+            set_cells(actors="Russia", attribution="assessed"),
+            r"Invalid actors values: \['Russia'\]",
+        ),
+        (
+            set_cells(actors="RU,CN", attribution="assessed"),
+            r"Invalid actors values: \['RU,CN'\]",
+        ),
+        (
+            set_cells(actors="", attribution="official"),
+            "attribution other than none needs actors",
+        ),
+        (
+            set_cells(actors="RU", attribution="none"),
+            "attribution none needs empty actors",
+        ),
+        (set_cells(end_date="2025/01/01"), "doesn't match format"),
+        (set_cells(date="2025-02-10", end_date="2025-02-09"), "end_date before date"),
     ],
 )
 def test_validate_rejects(events, change, message):
@@ -94,3 +126,19 @@ def test_validate_rejects(events, change, message):
 def test_validate_accepts_several_country_codes(events):
     events.loc[events.index[0], "countries"] = "DE;PL"
     validate(events)
+
+
+def test_validate_accepts_attribution_with_several_actors(events):
+    change = set_cells(actors="RU;BY", attribution="claimed")
+    events = change(events)
+    validate(events)
+
+
+def test_validate_accepts_a_campaign_end_date(events):
+    events = set_cells(end_date=events["date"].iloc[0])(events)
+    validate(events)
+
+
+def test_every_category_has_one_domain_of_the_list():
+    assert sorted(CATEGORY_DOMAINS) == sorted(CATEGORIES)
+    assert set(CATEGORY_DOMAINS.values()) == set(DOMAINS)
