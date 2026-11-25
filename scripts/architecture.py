@@ -30,10 +30,12 @@ COMMAND = "uv run python scripts/architecture.py"
 INTRO = f"""\
 # Architecture
 
-1. Each source module in `src/tracker/` downloads one open dataset and maps it
-   to the unified schema.
-2. `python -m tracker.ingest` validates the result and stores it as
-   `data/events/<source>.csv`, committed to the repository.
+1. Each source module in `src/tracker/` has two steps: `extract()` downloads
+   the files of one open dataset, and `normalize()` maps the stored files to
+   the unified schema.
+2. `tracker ingest` saves the downloaded files in the raw store, validates the
+   mapped events and stores them as `data/events/<source>.csv`, committed to
+   the repository, and as a clean Parquet table in the raw store.
 3. The Streamlit page `src/streamlit_app.py` reads these files and nothing else.
 4. The pipeline refreshes the live sources every day, publishes the app and
    mirrors `data/events/` to a public Hugging Face dataset. The app does not
@@ -203,7 +205,7 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
             jobs[file, job].get("name", job) + " job"
             for file, job, step in steps
             if {key, source.kind}
-            & set(re.findall(rf"{re.escape(ingest)} (\w+)", step.get("run", "")))
+            & set(re.findall(r"tracker ingest (\w+)", step.get("run", "")))
         ]
         text = label(", ".join(dict.fromkeys(runners)) or "by hand")
         edges.append(f"  {node_id('source', key)} -->|{text}| ingest")

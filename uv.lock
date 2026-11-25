@@ -572,7 +572,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "openpyxl" },
-    { name = "pandas" },
+    { name = "pandas", extra = ["parquet"] },
     { name = "plotly" },
     { name = "pycountry" },
     { name = "streamlit" },
@@ -601,7 +601,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "openpyxl", specifier = "==3.1.5" },
-    { name = "pandas", specifier = "==3.1.1" },
+    { name = "pandas", extras = ["parquet"], specifier = "==3.1.1" },
     { name = "plotly", specifier = "==7.1.0" },
     { name = "pycountry", specifier = "==26.2.16" },
     { name = "streamlit", specifier = "==1.67.0" },
@@ -1157,6 +1157,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4b/1a/01d622913e6a65d447eb9a42d1ed71d2a50c4244de24091128aaab023875/pandas-3.1.1-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:daf86c882e376ae2a8a459b2f769258d2b6d75e09f6327440cf6eb8d425c5ceb", size = 12913291, upload-time = "2026-11-04T15:07:54.651Z" },
     { url = "https://files.pythonhosted.org/packages/69/73/76b46776b10c6ff7c2037e3748eeb713df8391a34b7768efa81a08c2a77a/pandas-3.1.1-cp315-cp315t-win_amd64.whl", hash = "sha256:f89fb8e88cc5791995cc076c526eac605adc157b6ac6cc619a33ddd0b8bf5871", size = 11273592, upload-time = "2026-11-04T15:07:57.141Z" },
     { url = "https://files.pythonhosted.org/packages/08/ab/cce173d73200410f06306a89dbbb5f2125bd64f66ca5eff393d53d813288/pandas-3.1.1-cp315-cp315t-win_arm64.whl", hash = "sha256:4e6f9a3036fc6a40c5ba00efe4092a45844212bdb6a63eda4ad5a5a4c8da45eb", size = 10604158, upload-time = "2026-11-04T15:07:59.733Z" },
+]
+
+[package.optional-dependencies]
+parquet = [
+    { name = "pyarrow" },
 ]
 
 [[package]]

@@ -44,6 +44,7 @@ jobs:
     timeout-minutes: 15 # a stalled download must not hold the group for hours
     permissions:
       contents: write # the refresh commits data/events
+      id-token: write # the raw store signs in with the run OIDC token
     outputs:
       # The commit that the image and the mirror use: the data commit when the
       # refresh pushed one, else the commit this run checked out.
@@ -55,9 +56,12 @@ jobs:
         run: uv sync --locked
       - name: Refresh live sources
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: uv run python -m tracker.ingest live
+        env:
+          TRACKER_STORE: hf
+          HF_OIDC_RESOURCE: datasets/sam-bot/hybrid-tracker-raw
+        run: uv run tracker ingest live
       - name: Validate stored data
-        run: uv run python -m tracker.ingest check
+        run: uv run tracker ingest check
       - name: Run the tests
         run: uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"
       - name: Commit refreshed data

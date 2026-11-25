@@ -4,6 +4,7 @@ import hashlib
 import re
 from collections.abc import Sequence
 from pathlib import Path
+from typing import IO
 
 import pandas as pd
 
@@ -239,9 +240,7 @@ def validate(events: pd.DataFrame) -> None:
         raise ValueError("lon out of range")
 
 
-def read_csv(
-    source: str | Path, storage_options: dict[str, str] | None = None
-) -> pd.DataFrame:
+def read_csv(source: str | Path | IO[bytes]) -> pd.DataFrame:
     """Read a CSV where only an empty cell is a missing value.
 
     Texts such as "NA" (Namibia) or "None" are real values, so pandas'
@@ -251,5 +250,4 @@ def read_csv(
         source,
         keep_default_na=False,
         na_values=[""],
-        storage_options=storage_options,
     )

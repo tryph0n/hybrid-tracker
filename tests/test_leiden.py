@@ -1,57 +1,35 @@
 """The Leiden adapter on a hand-written sample of the EventData sheet."""
 
+import io
 import json
-import re
-from datetime import datetime
 
-import openpyxl
 import pandas as pd
 import pytest
-from conftest import FIXTURES
+from conftest import FIXTURES, LEIDEN_LINK, workbook_bytes
 
 from tracker import leiden
 from tracker.schema import validate
 
 SAMPLE = FIXTURES / "leiden_eventdata.csv"
-DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
-LINK = "https://example.org/report"
+LINK = LEIDEN_LINK
 
 
 def event_data(
     tmp_path, raw: pd.DataFrame, links: dict[int, str] | None = None
 ) -> pd.DataFrame:
-    """Write `raw` as an xlsx file with hyperlinks, and read it as `fetch` does.
+    """Write `raw` as an xlsx file with hyperlinks, and read it as `normalize` does.
 
     Cells that look like a date become real dates, as in the download. `links`
     maps a row position to the hyperlink target of its "What" cell.
     """
-    book = openpyxl.Workbook()
-    sheet = book.active
-    sheet.title = "EventData"
-    sheet.append(list(raw.columns))
-    for position, row in enumerate(raw.itertuples(index=False)):
-        sheet.append(
-            [
-                datetime.strptime(cell, "%Y-%m-%d")
-                if isinstance(cell, str) and DATE.fullmatch(cell)
-                else None
-                if pd.isna(cell)
-                else cell
-                for cell in row
-            ]
-        )
-        if links and position in links:
-            sheet.cell(
-                row=position + 2, column=raw.columns.get_loc("What") + 1
-            ).hyperlink = links[position]
     path = tmp_path / "RussianOps.xlsx"
-    book.save(path)
+    path.write_bytes(workbook_bytes(raw, links))
     return leiden.read_workbook(str(path))
 
 
 @pytest.fixture
 def events(tmp_path) -> pd.DataFrame:
-    return leiden.normalize(event_data(tmp_path, pd.read_csv(SAMPLE), {1: LINK}))
+    return leiden.map_frame(event_data(tmp_path, pd.read_csv(SAMPLE), {1: LINK}))
 
 
 def test_normalize_follows_schema(events):
@@ -169,7 +147,7 @@ def test_normalize_maps_values(events, event_id, expected):
 def test_every_label_maps_to_a_valid_pair(tmp_path, label, domain, category):
     raw = pd.read_csv(SAMPLE)
     raw.loc[2, "EventCategory"] = label
-    events = leiden.normalize(event_data(tmp_path, raw))
+    events = leiden.map_frame(event_data(tmp_path, raw))
     validate(events)
     row = events.iloc[2]
     assert (row["domain"], row["category"], row["subcategory"]) == (
@@ -189,7 +167,7 @@ def test_row_takes_the_what_hyperlink_or_the_dataset_page(events):
 def test_known_end_texts_give_an_empty_end_date(tmp_path, text):
     raw = pd.read_csv(SAMPLE)
     raw.loc[0, "IncidentDateEnd"] = text
-    events = leiden.normalize(event_data(tmp_path, raw))
+    events = leiden.map_frame(event_data(tmp_path, raw))
     validate(events)
     assert events["end_date"].iloc[0] == ""
 
@@ -198,14 +176,14 @@ def test_unknown_end_text_stops_the_ingestion(tmp_path):
     raw = pd.read_csv(SAMPLE)
     raw.loc[0, "IncidentDateEnd"] = "Ongoing"
     with pytest.raises(ValueError, match="IncidentDateEnd"):
-        leiden.normalize(event_data(tmp_path, raw))
+        leiden.map_frame(event_data(tmp_path, raw))
 
 
 def test_end_date_before_start_fails_validation(tmp_path):
     raw = pd.read_csv(SAMPLE)
     raw.loc[0, "IncidentDateEnd"] = "2021-01-01"
     with pytest.raises(ValueError, match="end_date before date"):
-        validate(leiden.normalize(event_data(tmp_path, raw)))
+        validate(leiden.map_frame(event_data(tmp_path, raw)))
 
 
 def test_title_is_stripped(events):
@@ -220,14 +198,14 @@ def test_unknown_country_stops_the_ingestion(tmp_path):
     raw = pd.read_csv(SAMPLE)
     raw.loc[2, "Where"] = "Ruritania"
     with pytest.raises(LookupError):
-        leiden.normalize(event_data(tmp_path, raw))
+        leiden.map_frame(event_data(tmp_path, raw))
 
 
 def test_unknown_category_fails_validation(tmp_path):
     raw = pd.read_csv(SAMPLE)
     raw.loc[2, "EventCategory"] = "Cyber attack"
     with pytest.raises(ValueError, match="without domain"):
-        validate(leiden.normalize(event_data(tmp_path, raw)))
+        validate(leiden.map_frame(event_data(tmp_path, raw)))
 
 
 def test_event_ids_are_hashes(tmp_path):
@@ -306,3 +284,40 @@ def test_file_list_without_one_spreadsheet_stops_the_run():
 )
 def test_tracking_parameters_are_removed_from_links(url, expected):
     assert leiden.strip_tracking(url) == expected
+
+
+def test_normalize_reads_the_stored_spreadsheet():
+    raw = pd.read_csv(SAMPLE)
+    events = leiden.normalize({leiden.WORKBOOK_NAME: workbook_bytes(raw, {1: LINK})})
+    validate(events)
+    assert len(events) == 7
+
+
+def test_extract_checks_the_version_then_keeps_the_download_as_served(monkeypatch):
+    class Answer(io.BytesIO):
+        status = 200
+
+    answers = {
+        leiden.VERSION_URL: load("leiden_dataverse_version.json"),
+        leiden.FILES_URL: load("leiden_dataverse_files.json"),
+    }
+    file_id = leiden.spreadsheet_id(answers[leiden.FILES_URL])
+    file_url = leiden.FILE_URL.format(id=file_id)
+    monkeypatch.setattr(leiden, "get_json", answers.__getitem__)
+    monkeypatch.setattr(
+        leiden.urllib.request,
+        "urlopen",
+        lambda request, timeout: (
+            Answer(b"xlsx bytes")
+            if request.full_url == file_url
+            else pytest.fail(request.full_url)
+        ),
+    )
+    (payload,) = leiden.extract()
+    assert (payload.source, payload.name, payload.url, payload.status) == (
+        "leiden",
+        leiden.WORKBOOK_NAME,
+        file_url,
+        200,
+    )
+    assert payload.content == b"xlsx bytes"
