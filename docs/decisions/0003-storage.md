@@ -31,7 +31,8 @@ Facts that the decision depends on:
 - A publisher token is scoped to an existing repository, so a run cannot
   create a store. Managing publishers needs the Write role on the repository.
 - The documentation does not say if Trusted Publishers work on a private
-  repository. The probe run below tests it.
+  repository, or if one repository can hold two publisher entries. The probe
+  run below tested both: they work.
 
 ## Decision
 
@@ -112,7 +113,10 @@ repositories.
 
 Probe: a temporary workflow (`storage-probe.yml`, run from the branch of the
 pull request) wrote one small file to `hybrid-tracker-raw` with no stored
-secret. Run: PROBE_RUN_PENDING.
+secret: [run 45636190013](https://github.com/tryph0n/hybrid-tracker/actions/runs/45636190013), upload [commit 3b43e1a](https://huggingface.co/datasets/sam-bot/hybrid-tracker-raw/commit/3b43e1ae3d07a27793f9c4571bc9dae27c617979).
+The store is private, so Trusted Publishers work on a private repository. The
+store held the permanent entry and the temporary entry of the probe at the same
+time, so one repository holds two publisher entries.
 
 ## Alternatives rejected
 
