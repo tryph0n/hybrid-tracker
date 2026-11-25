@@ -165,6 +165,12 @@ uv run sphinx-build -W --keep-going -b html docs docs/_build/html
 standard mode; an ignore needs its error code and a reason on the same line.
 `uv run pytest` includes the dashboard, run headless on the stored data and on
 samples. The check of `docs/architecture.md` prints the command that fixes it.
+
+To print the branch coverage of `src/tracker` with the missing lines, run
+`uv run pytest --cov`. The run fails when the total is under `fail_under` in
+`pyproject.toml` (90). The CI run writes the per-file table in its job summary.
+`src/streamlit_app.py` is not counted: the app test runs it as a script, so it
+is not an imported module.
 The `docs/` build runs with `-W`: a warning fails it.
 
 A pull request runs the same checks. It does not refresh the data, build the
