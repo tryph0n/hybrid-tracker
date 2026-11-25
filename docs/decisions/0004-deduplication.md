@@ -163,7 +163,11 @@ after 1 September 2025. The columns are `event_id_a` (the EODI row),
 `event_id_b` (the Leiden row), `label` (`match` or `no_match`) and `note`. The
 labels come from the content of the rows: titles, places, dates, domains and
 links. A note that starts with "Unsure" marks a label that the rows do not
-settle (8 pairs).
+settle (8 pairs). The Leiden adapter makes each id from a hash of the year,
+the month, and the `What` and `Where` text (`event_ids` in
+`src/tracker/leiden.py`), so an upstream edit of that text changes the id with
+no error: the measure in #94 must fail when a pair names an `event_id` that is
+not in the data.
 
 | Pairs | Total | `match` | `no_match` |
 | --- | --- | --- | --- |
