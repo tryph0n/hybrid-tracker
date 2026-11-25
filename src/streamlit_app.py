@@ -10,26 +10,57 @@ import pycountry
 import streamlit as st
 
 from tracker.clock import utc_today
-from tracker.schema import COLUMNS, EVENT_STATUSES, RUSSIA_LINKS
+from tracker.schema import (
+    ATTRIBUTIONS,
+    CATEGORIES,
+    CATEGORY_DOMAINS,
+    COLUMNS,
+    DOMAINS,
+    EVENT_STATUSES,
+)
 from tracker.sources import SOURCES, read_all_events
+from tracker.views import filter_events, official_by_actor, with_code_lists
+
+DOMAIN_LABELS = {
+    "air": "Air",
+    "sabotage": "Sabotage",
+    "violence": "Violence",
+    "maritime": "Maritime",
+    "cyber": "Cyber",
+    "information": "Information",
+    "espionage": "Espionage",
+    "other": "Other",
+}
 
 CATEGORY_LABELS = {
     "drone_overflight": "Drone overflight",
     "airport_disruption": "Airport disruption",
     "airspace_incursion": "Airspace incursion",
-    "sabotage_attack": "Sabotage & attacks",
-    "influence": "Influence & vandalism",
+    "airspace_disruption": "Airspace disruption",
+    "sabotage": "Sabotage",
+    "arson": "Arson",
+    "bomb_or_threat": "Bomb or threat",
+    "assassination": "Assassination",
+    "cable_or_pipeline_damage": "Cable or pipeline damage",
+    "vessel_incident": "Vessel incident",
+    "service_disruption": "Service disruption",
+    "intrusion": "Intrusion",
+    "data_theft_or_leak": "Data theft or leak",
+    "influence_operation": "Influence operation",
+    "symbolic_vandalism": "Symbolic vandalism",
     "reconnaissance": "Reconnaissance",
-    "other": "Other",
+    "instrumentalised_migration": "Instrumentalised migration",
+    "unclassified": "Unclassified",
 }
 EVENT_STATUS_LABELS = {
     "confirmed": "Confirmed",
     "unconfirmed": "Reported, not confirmed",
     "dismissed": "Dismissed by the source",
 }
-RUSSIA_LINK_LABELS = {
+ATTRIBUTION_LABELS = {
     "official": "Attributed by an authority",
     "assessed": "Assessed by the source's analysts",
+    "claimed": "Claimed by a group",
     "none": "No attribution",
 }
 PERIODS = {
@@ -39,24 +70,26 @@ PERIODS = {
     "Last 30 days": 30,
 }
 
-# One fixed colour per category, in CATEGORY_LABELS order, checked for
-# colour-blind separation on each theme. "Other" stays neutral grey.
+# One fixed colour per domain, in DOMAIN_LABELS order, checked for colour-blind
+# separation on each theme. "Other" stays neutral grey.
 LIGHT_COLORS = [
-    "#2a78d6",
-    "#eb6834",
-    "#1baf7a",
-    "#eda100",
-    "#e87ba4",
-    "#008300",
+    "#0072b2",
+    "#d55e00",
+    "#7a1f5c",
+    "#56b4e9",
+    "#00634a",
+    "#c99700",
+    "#e58fc0",
     "#898781",
 ]
 DARK_COLORS = [
-    "#3987e5",
-    "#d95926",
-    "#199e70",
-    "#c98500",
-    "#d55181",
-    "#0ca30c",
+    "#2f7fd0",
+    "#e8742a",
+    "#b0558f",
+    "#8fd0f5",
+    "#3fd0a0",
+    "#f0c040",
+    "#f0a0c8",
     "#898781",
 ]
 # Single-hue ramp for magnitudes, from few to many on a light background.
@@ -77,9 +110,21 @@ EUROPE_CENTER = {"lat": 53, "lon": 14}
 def load_events() -> pd.DataFrame:
     events = read_all_events()
     events["date"] = pd.to_datetime(events["date"])
+    events["end_date"] = pd.to_datetime(events["end_date"])
+    events["domain_label"] = events["domain"].map(DOMAIN_LABELS)
     events["category_label"] = events["category"].map(CATEGORY_LABELS)
-    events["country_codes"] = events["countries"].fillna("").str.split(";")
-    return events
+    events["attribution_label"] = events["attribution"].map(ATTRIBUTION_LABELS)
+    events["attributed_by_label"] = events["attributed_by"].fillna("None stated")
+    events["actor_names"] = (
+        events["actors"]
+        .fillna("")
+        .map(
+            lambda cell: ", ".join(
+                country_name(code) for code in cell.split(";") if code
+            )
+        )
+    )
+    return with_code_lists(events)
 
 
 def country_name(code: str) -> str:
@@ -110,7 +155,7 @@ def timeline_chart(
 ) -> go.Figure:
     period = events["date"].dt.to_period("W" if weekly else "M").dt.start_time
     counts = (
-        events.groupby([period.rename("period"), "category_label"])
+        events.groupby([period.rename("period"), "domain_label"])
         .size()
         .reset_index(name="events")
     )
@@ -118,10 +163,10 @@ def timeline_chart(
         counts,
         x="period",
         y="events",
-        color="category_label",
-        category_orders={"category_label": list(colors)},
+        color="domain_label",
+        category_orders={"domain_label": list(colors)},
         color_discrete_map=colors,
-        labels={"period": "", "events": "Events", "category_label": ""},
+        labels={"period": "", "events": "Events", "domain_label": ""},
     )
     fig.update_traces(marker_line_color=surface, marker_line_width=1)
     fig.update_layout(
@@ -136,28 +181,37 @@ def timeline_chart(
 def points_map(located: pd.DataFrame, colors: dict[str, str], dark: bool) -> go.Figure:
     located = located.assign(
         day=located["date"].dt.strftime("%Y-%m-%d"),
+        actor_names=located["actor_names"].replace("", "None"),
         here=located.groupby(["lat", "lon"])["lat"].transform("size"),
     )
     fig = px.scatter_map(
         located,
         lat="lat",
         lon="lon",
-        color="category_label",
+        color="domain_label",
         hover_name="title",
         hover_data={
             "day": True,
             "place": True,
+            "category_label": True,
+            "attribution_label": True,
+            "attributed_by_label": True,
+            "actor_names": True,
             "here": True,
             "lat": False,
             "lon": False,
-            "category_label": False,
+            "domain_label": False,
         },
-        category_orders={"category_label": list(colors)},
+        category_orders={"domain_label": list(colors)},
         color_discrete_map=colors,
         labels={
-            "category_label": "",
+            "domain_label": "",
             "day": "Date",
             "place": "Place",
+            "category_label": "Category",
+            "attribution_label": "Attribution",
+            "attributed_by_label": "Attributed by",
+            "actor_names": "Actors",
             "here": "Events here",
         },
         opacity=0.75,
@@ -200,7 +254,7 @@ def countries_map(counts: pd.DataFrame, dark: bool) -> go.Figure:
     return fig
 
 
-def countries_bar(counts: pd.DataFrame, color: str) -> go.Figure:
+def countries_bar(counts: pd.DataFrame) -> go.Figure:
     top = counts.nlargest(15, "events", keep="all")
     fig = px.bar(
         top,
@@ -210,7 +264,9 @@ def countries_bar(counts: pd.DataFrame, color: str) -> go.Figure:
         text="events",
         labels={"events": "Events", "country": ""},
     )
-    fig.update_traces(marker_color=color, textposition="outside", cliponaxis=False)
+    fig.update_traces(
+        marker_color=BLUE_RAMP[3], textposition="outside", cliponaxis=False
+    )
     fig.update_layout(
         barcornerradius=3,
         yaxis={"autorange": "reversed"},
@@ -244,7 +300,7 @@ st.set_page_config(page_title="Europe Hybrid Incidents Tracker", layout="wide")
 
 dark = st.context.theme.type == "dark"
 surface = "#0e1117" if dark else "#ffffff"
-colors = dict(zip(CATEGORY_LABELS.values(), DARK_COLORS if dark else LIGHT_COLORS))
+colors = dict(zip(DOMAIN_LABELS.values(), DARK_COLORS if dark else LIGHT_COLORS))
 
 all_events = load_events()
 
@@ -252,23 +308,55 @@ st.title("Europe Hybrid Incidents Tracker")
 st.caption(
     "Drone incidents, sabotage and other hybrid operations in Europe since 2022, "
     "compiled from open datasets. A reported incident is not a confirmed one, "
-    "and a confirmed one is not an attribution: use the filters."
+    "and a confirmed one is not an attribution. An attribution is a statement "
+    "of the source named in each event, not an established fact: use the filters."
 )
 
 with st.sidebar:
     st.header("Filters")
-    period_label = st.selectbox("Period", list(PERIODS))
+    period_label = st.selectbox("Period", list(PERIODS), key="period")
     source_names = st.multiselect(
         "Sources",
         list(SOURCES),
         default=list(SOURCES),
         format_func=lambda name: SOURCES[name].title,
+        key="sources",
     )
+    domains = st.multiselect(
+        "Domain",
+        DOMAINS,
+        default=DOMAINS,
+        format_func=lambda key: DOMAIN_LABELS[key],
+        key="domains",
+    )
+    category_options = [c for c in CATEGORIES if CATEGORY_DOMAINS[c] in domains]
     categories = st.multiselect(
-        "Categories",
-        list(CATEGORY_LABELS),
-        default=list(CATEGORY_LABELS),
+        "Category",
+        category_options,
+        default=category_options,
         format_func=lambda key: CATEGORY_LABELS[key],
+        key="categories",
+    )
+    actor_options = sorted(
+        {code for codes in all_events["actor_codes"] for code in codes},
+        key=country_name,
+    )
+    actors = st.multiselect(
+        "Actor",
+        actor_options,
+        format_func=country_name,
+        placeholder="All events",
+        help="A state that a source links to the event. Empty keeps every event, "
+        "also those with no state named.",
+        key="actors",
+    )
+    attributions = st.multiselect(
+        "Attribution",
+        ATTRIBUTIONS,
+        default=ATTRIBUTIONS,
+        format_func=lambda key: ATTRIBUTION_LABELS[key],
+        help="Who links the event to the actor. Every level is shown by default.",
+        key="attributions",
     )
     statuses = st.multiselect(
         "Event status",
@@ -276,12 +364,7 @@ with st.sidebar:
         default=["confirmed", "unconfirmed"],
         format_func=lambda key: EVENT_STATUS_LABELS[key],
         help="Dismissed events (the source found no incident) are hidden by default.",
-    )
-    links = st.multiselect(
-        "Link to Russia",
-        RUSSIA_LINKS,
-        default=RUSSIA_LINKS,
-        format_func=lambda key: RUSSIA_LINK_LABELS[key],
+        key="statuses",
     )
     country_options = sorted(
         {code for codes in all_events["country_codes"] for code in codes if code},
@@ -292,19 +375,20 @@ with st.sidebar:
         country_options,
         format_func=country_name,
         placeholder="All countries",
+        key="countries",
     )
 
 # Every filter except the period: used for the "last 30 days" figure.
-scoped = all_events[
-    all_events["source"].isin(source_names)
-    & all_events["category"].isin(categories)
-    & all_events["event_status"].isin(statuses)
-    & all_events["russia_link"].isin(links)
-]
-if countries:
-    scoped = scoped[
-        scoped["country_codes"].map(lambda codes: bool(set(codes) & set(countries)))
-    ]
+scoped = filter_events(
+    all_events,
+    sources=source_names,
+    domains=domains,
+    categories=categories,
+    statuses=statuses,
+    attributions=attributions,
+    actors=actors,
+    countries=countries,
+)
 
 today = utc_today()
 days = PERIODS[period_label]
@@ -335,10 +419,17 @@ kpi_recent.metric(
     delta_color="inverse",
     help="Compared with the 30 days before. Ignores the period filter.",
 )
+official = official_by_actor(events)
+if official:
+    official_help = "Events a public authority attributed to a state, by state: " + (
+        ", ".join(f"{country_name(code)} {n:,}" for code, n in official.items()) + "."
+    )
+else:
+    official_help = "No event of this selection has an official attribution."
 kpi_official.metric(
-    "Officially attributed to Russia",
-    int((events["russia_link"] == "official").sum()),
-    help="Events a public authority attributed to Russia.",
+    "Officially attributed",
+    int((events["attribution"] == "official").sum()),
+    help=official_help + " An attribution is a statement of its author, not a fact.",
 )
 
 weekly = days is not None and days <= 90
@@ -400,7 +491,7 @@ else:
     )
 
 st.subheader("Most affected countries (top 15, ties kept)")
-st.plotly_chart(countries_bar(by_country, colors["Drone overflight"]))
+st.plotly_chart(countries_bar(by_country))
 
 st.subheader("Events")
 table = events.sort_values("date", ascending=False).assign(
@@ -408,24 +499,42 @@ table = events.sort_values("date", ascending=False).assign(
         lambda codes: ", ".join(country_name(code) for code in codes if code)
     ),
     Status=lambda frame: frame["event_status"].map(EVENT_STATUS_LABELS),
-    Russia=lambda frame: frame["russia_link"].map(RUSSIA_LINK_LABELS),
 )
 st.dataframe(
-    table[["date", "Country", "category_label", "title", "Status", "Russia", "url"]],
+    table[
+        [
+            "date",
+            "end_date",
+            "Country",
+            "domain_label",
+            "category_label",
+            "title",
+            "Status",
+            "attribution_label",
+            "actor_names",
+            "attributed_by",
+            "url",
+        ]
+    ],
     hide_index=True,
     column_config={
         "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+        "end_date": st.column_config.DateColumn("End date", format="YYYY-MM-DD"),
+        "domain_label": "Domain",
         "category_label": "Category",
         "title": st.column_config.TextColumn("What", width="large"),
-        "Russia": "Link to Russia",
+        "attribution_label": "Attribution",
+        "actor_names": "Actors",
+        "attributed_by": "Attributed by",
         "url": st.column_config.LinkColumn("Details", display_text="Open"),
     },
 )
 st.download_button(
     "Download selection (CSV)",
-    data=events.assign(date=events["date"].dt.strftime("%Y-%m-%d"))[COLUMNS].to_csv(
-        index=False
-    ),
+    data=events.assign(
+        date=events["date"].dt.strftime("%Y-%m-%d"),
+        end_date=events["end_date"].dt.strftime("%Y-%m-%d"),
+    )[COLUMNS].to_csv(index=False),
     file_name="hybrid_incidents.csv",
     mime="text/csv",
 )
