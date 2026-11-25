@@ -225,9 +225,13 @@ does.
 - On a new tag, the Docker image job builds the image, scans it with Trivy and
   writes the full report in the job summary. A critical finding that has a fix
   fails the job before the push. An unfixed finding does not. The job then
-  pushes the image with a build provenance attestation. To check it, run
+  pushes the tag with a build provenance attestation, and moves `latest` to
+  it only after the attestation succeeds. To check it, run
   `gh attestation verify oci://index.docker.io/<DOCKER_IMAGE>:<tag> --repo tryph0n/hybrid-tracker`.
-  A tag that is already published is not built, scanned or attested again.
+  A tag that is already published and attested is not built, scanned or
+  attested again. If the attestation step failed, run the pipeline again: the
+  job finds the tag without a valid attestation, attests the same digest and
+  then moves `latest`.
 - The Docker image, Deploy and mirror jobs run on `main` only. Each one does
   nothing until its variable or secret is set.
 
