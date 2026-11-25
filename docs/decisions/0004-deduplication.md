@@ -71,8 +71,11 @@ Reasons:
   rows have a day. The interval follows what each source records.
 - The margin of one day is for events at night, which sources date on either
   day (see the facts).
-- EODI gives no size for `approximate`, and no pair in the sample has two rows
-  with a day, so no other width can be measured yet.
+- EODI gives no size for `approximate`. On the sample, an interval of up to
+  3 days on each side of the date changes no pair. With 4 days, the pair
+  `eodi:EODI-2025-00199` and `leiden:018349739d34` becomes a candidate, and
+  with 5 days the pair `eodi:EODI-2025-00208` and `leiden:c8e2a1d1d2c5` too.
+  Both are `no_match`.
 
 ### Candidate pairs
 
@@ -199,10 +202,11 @@ The rules of this record do not reach the targets on the sample:
 - Recall: the domain condition removes 9 of the 26 matches. In these 9 pairs,
   the EODI row is in `air`, and the Leiden row has the `EventCategory`
   "Reconnaissance" (8 pairs) or "Unknown" (1 pair), which the adapter maps to
-  `espionage` or `other`. So the candidates hold at most 0.65 of the matches. The place rule misses 4 more:
-  the Leiden title does not name the place (Dublin, Vilnius, Skrydstrup), or
-  the EODI place is not the airport of its title (`eodi:EODI-2025-00005` is at
-  Charleroi, and its title names Brussels).
+  `espionage` or `other`. So the candidates hold at most 0.65 of the matches.
+  The place rule misses 4 more: the Leiden title does not name the place
+  (Dublin, Vilnius, Skrydstrup), or the EODI place is not the airport of its
+  title (`eodi:EODI-2025-00005` is at Charleroi, and its title names
+  Brussels).
 - Precision: 7 of the 9 false matches are another incident at the same site
   in the same month, for example Liège on 8 and 9 November 2025, and
   Brønnøysund and Bardufoss on 30 September 2025. A `month` date cannot tell
@@ -239,11 +243,13 @@ The rules of this record do not reach the targets on the sample:
   The cluster rule limits the effect: a false match moves a Leiden row to
   another cluster, and it lowers the count only when the Leiden row has no
   true match.
-- No pair in the sample tests the distance rule, the `approximate` rule or the
-  `year` rule. Three pairs match on the date only through the margin of one
-  day, and all three are `no_match`: on the sample, the margin adds 2
-  candidates and no match. Review these rules when a second source with
-  coordinates or day dates arrives.
+- No pair in the sample tests the distance rule or the `year` rule. 14 pairs
+  have an EODI row with an `approximate` date, and 2 of them are matches. An
+  interval wider than the day changes one of these pairs only from 4 days on
+  each side of the date (see the date rule). Three pairs match on the date
+  only through the margin of one day, and all three are `no_match`: on the
+  sample, the margin adds 2 candidates and no match. Review these rules when a
+  second source with coordinates or day dates arrives.
 - This record does not cover duplicates in one source. EODI has some: for
   example, `eodi:EODI-2025-00005` and `eodi:EODI-2025-00335` both record a
   closure of Brussels Airport on 6 November 2025. A rule for them needs its
