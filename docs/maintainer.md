@@ -345,6 +345,17 @@ on `main` and wait for the next scheduled run.
   fetches the upstream again, so the revert lasts only until the next
   scheduled or manual run.
 
+## Release
+
+The version is written by hand in `pyproject.toml` only. The package reads it
+from its metadata (`tracker.__version__`).
+
+1. In one pull request, set `version` in `pyproject.toml`, run `uv lock`, move the `Unreleased` items of `CHANGELOG.md` under `## [X.Y.Z] - date`, and update the links at the end of that file.
+2. Squash-merge it with a Conventional Commits title, then pull `main`.
+3. Tag the squash commit: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+4. Publish the release: `gh release create vX.Y.Z --generate-notes`.
+5. Check that the release page shows the notes. `.github/release.yml` sets their categories from the labels `enhancement` and `bug`.
+
 ## Security
 
 Every action in `.github/workflows` is pinned to a full commit SHA, with the
