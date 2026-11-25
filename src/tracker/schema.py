@@ -160,7 +160,7 @@ def make_event_id(
     if native_id is not None:
         return f"{source}:{native_id}"
     if not key:
-        raise UserError("An event id needs a native id or a key.")
+        raise ValueError("An event id needs a native id or a key.")
     parts = [re.sub(r"\s+", " ", part.strip()).casefold() for part in key]
     digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
     return f"{source}:{digest[:12]}"

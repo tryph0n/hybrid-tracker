@@ -85,7 +85,7 @@ def load_clean(store: Store, work: Path) -> dict[str, int]:
     counts: dict[str, int] = {}
     for name, source in SOURCES.items():
         if source.family not in FAMILIES:
-            raise UserError(f"{name}: unknown licence family {source.family!r}")
+            raise ValueError(f"{name}: unknown licence family {source.family!r}")
         table = store.backend.read(clean_path(name))
         if table is None:
             raise UserError(f"{name}: no clean table, run `tracker ingest {name}`")

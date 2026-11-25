@@ -70,14 +70,30 @@ def test_a_library_error_keeps_its_traceback(tmp_path):
     assert "JSONDecodeError" in result.stderr
 
 
-def test_the_code_raises_no_bare_value_error():
-    source = pathlib.Path(tracker.__file__).parent
-    found = []
-    for path in sorted(source.glob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Raise) and node.exc is not None:
-                target = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
-                if isinstance(target, ast.Name) and target.id == "ValueError":
-                    found.append(f"{path.name}:{node.lineno}")
+INTERNAL_CHECKS = {
+    # Fails only through a bug: every caller passes a native id or a key.
+    ("schema.py", "make_event_id"),
+    # Fails only through a bug: the family comes from the SOURCES registry.
+    ("build.py", "load_clean"),
+}
 
-    assert found == []
+
+def bare_value_errors():
+    source = pathlib.Path(tracker.__file__).parent
+    found = set()
+    for path in sorted(source.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for function in ast.walk(tree):
+            if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for node in ast.walk(function):
+                if isinstance(node, ast.Raise) and node.exc is not None:
+                    call = node.exc
+                    target = call.func if isinstance(call, ast.Call) else call
+                    if isinstance(target, ast.Name) and target.id == "ValueError":
+                        found.add((path.name, function.name))
+    return found
+
+
+def test_only_the_internal_checks_raise_a_bare_value_error():
+    assert bare_value_errors() == INTERNAL_CHECKS
