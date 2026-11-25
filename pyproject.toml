@@ -63,7 +63,7 @@ strict_equality = true
 extra_checks = true
 
 [[tool.mypy.overrides]]
-module = ["plotly", "plotly.*"]
+module = ["openpyxl", "openpyxl.*", "plotly", "plotly.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
