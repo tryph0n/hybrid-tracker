@@ -311,6 +311,14 @@ st.caption(
     "of the source named in each event, not an established fact: use the filters."
 )
 
+
+def select_domain_categories():
+    """Select every category of the chosen domains: runs when the Domain changes."""
+    st.session_state["categories"] = [
+        c for c in CATEGORIES if CATEGORY_DOMAINS[c] in st.session_state["domains"]
+    ]
+
+
 with st.sidebar:
     st.header("Filters")
     period_label = st.selectbox("Period", list(PERIODS), key="period")
@@ -327,6 +335,7 @@ with st.sidebar:
         DOMAINS,
         default=DOMAINS,
         format_func=lambda key: DOMAIN_LABELS[key],
+        on_change=select_domain_categories,
         key="domains",
     )
     category_options = [c for c in CATEGORIES if CATEGORY_DOMAINS[c] in domains]

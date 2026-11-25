@@ -431,3 +431,50 @@ def test_month_precision_note_shows_for_a_year_date_alone(sample_data_dir):
     assert not at.exception
     assert MONTH_NOTE in captions(at)
     assert SOURCES["leiden"].title in captions(at)
+
+
+def categories_of(domains):
+    return [c for c, d in CATEGORY_DOMAINS.items() if d in domains]
+
+
+@pytest.mark.parametrize("domain", DOMAINS)
+def test_adding_a_domain_back_selects_its_categories_again(sample_data_dir, domain):
+    at = run_app()
+    before = metrics(at)["Events"]
+    at.multiselect(key="domains").set_value([d for d in DOMAINS if d != domain]).run()
+    assert not at.exception
+    assert at.multiselect(key="categories").value == categories_of(
+        [d for d in DOMAINS if d != domain]
+    )
+    at.multiselect(key="domains").set_value(DOMAINS).run()
+    assert not at.exception
+    assert at.multiselect(key="categories").value == list(CATEGORY_DOMAINS)
+    assert metrics(at)["Events"] == before
+    assert not at.warning
+
+
+def test_two_domain_changes_select_the_categories_of_the_chosen_domains(
+    sample_data_dir,
+):
+    at = run_app()
+    at.multiselect(key="domains").set_value(["air", "violence"]).run()
+    at.multiselect(key="domains").set_value(["air", "sabotage"]).run()
+    assert not at.exception
+    assert at.multiselect(key="categories").value == categories_of(["air", "sabotage"])
+
+
+def test_map_has_points_again_when_air_is_added_back(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="domains").set_value(["sabotage"]).run()
+    at.multiselect(key="domains").set_value(["sabotage", "air"]).run()
+    assert not at.exception
+    assert not any("has coordinates" in i.value for i in at.info)
+    assert {trace.name for trace in chart(at, 1).data} == {"Air"}
+
+
+def test_narrowed_categories_survive_a_change_of_another_filter(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="categories").set_value(["airspace_incursion"]).run()
+    at.selectbox(key="period").set_value("Last 12 months").run()
+    assert not at.exception
+    assert at.multiselect(key="categories").value == ["airspace_incursion"]
