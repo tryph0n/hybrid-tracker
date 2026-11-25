@@ -25,6 +25,7 @@ import os
 from collections.abc import Mapping
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -166,22 +167,24 @@ def problems(table: pd.DataFrame, now: pd.Timestamp) -> list[str]:
     """
     found = []
     limit = timedelta(days=MAX_FETCH_AGE_DAYS)
-    for row in table.itertuples(index=False):
-        if row.rows == 0:
-            found.append(f"{row.source}: no row in the clean table")
-        if SOURCES[row.source].kind != "live":
+    for row in table.to_dict("records"):
+        name = str(row["source"])
+        fetched = row["last_fetch_at"]
+        if row["rows"] == 0:
+            found.append(f"{name}: no row in the clean table")
+        if SOURCES[name].kind != "live":
             continue
-        if row.last_fetch_at is None:
-            found.append(f"{row.source}: no successful fetch")
-        elif now - pd.Timestamp(row.last_fetch_at) > limit:
+        if fetched is None:
+            found.append(f"{name}: no successful fetch")
+        elif now - pd.Timestamp(str(fetched)) > limit:
             found.append(
-                f"{row.source}: no successful fetch since {row.last_fetch_at} "
+                f"{name}: no successful fetch since {fetched} "
                 f"(more than {MAX_FETCH_AGE_DAYS} days)"
             )
     return found
 
 
-def cell(value: object) -> str:
+def cell(value: Any) -> str:
     """A table cell as text: a share as a percentage, a missing value as empty."""
     if value is None or pd.isna(value):
         return ""
