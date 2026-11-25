@@ -9,7 +9,7 @@ https://doi.org/10.7910/DVN/TQ0FMQ
 import pandas as pd
 import pycountry
 
-from tracker.schema import COLUMNS
+from tracker.schema import COLUMNS, make_event_id
 
 FILE_URL = "https://dataverse.harvard.edu/api/access/datafile/13350817"
 DATASET_URL = "https://doi.org/10.7910/DVN/TQ0FMQ"
@@ -57,11 +57,9 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         raw: The EventData sheet with the columns `IncidentYear`,
-            `IncidentMonth`, `Where`, `EventCategory` and `What`. Keep the
-            default index: the row id is the index plus 2 (the spreadsheet
-            row, as the header is row 1), so the ids move if rows are
-            dropped and the index is then renumbered (for example with
-            `reset_index(drop=True)`).
+            `IncidentMonth`, `Where`, `EventCategory` and `What`. The index
+            does not matter: the ids come from the content of the rows
+            (see `event_ids`).
 
     Returns:
         The rows with an `IncidentYear` (the author's notes below the events
@@ -81,12 +79,9 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
     month = raw["IncidentMonth"].replace("Unknown", "January")
     date = pd.to_datetime(year + " " + month, format="%Y %B")
 
-    # The file has no identifier: use the spreadsheet row.
-    row_number = (raw.index + 2).astype(str).str.zfill(3)
-
     events = pd.DataFrame(
         {
-            "event_id": "leiden:" + row_number,
+            "event_id": event_ids(raw),
             "source": "leiden",
             "date": date.dt.strftime("%Y-%m-%d"),
             "date_precision": "month",
@@ -104,6 +99,34 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
         }
     )
     return events[COLUMNS]
+
+
+def event_ids(raw: pd.DataFrame) -> pd.Series:
+    """Build the id of each EventData row from its content.
+
+    The file has no identifier. The key is the raw `IncidentYear` (as an
+    integer), the raw `IncidentMonth` text, `What` and `Where`, so a later
+    change of the dating rule does not move the ids. Normalisation and
+    hashing: see `tracker.schema.make_event_id`.
+
+    Args:
+        raw: Rows with the columns `IncidentYear`, `IncidentMonth`, `What`
+            and `Where`, all with a year.
+
+    Returns:
+        The ids, with the index of `raw`. Two rows with the same key get the
+        same id, which `validate` rejects.
+    """
+    keys = zip(
+        raw["IncidentYear"].astype(int).astype(str),
+        raw["IncidentMonth"].astype(str),
+        raw["What"].astype(str),
+        raw["Where"].fillna("").astype(str),
+        strict=True,
+    )
+    return pd.Series(
+        [make_event_id("leiden", key=key) for key in keys], index=raw.index
+    )
 
 
 def to_iso2(where: str) -> str:
