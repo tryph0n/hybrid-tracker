@@ -117,6 +117,21 @@ alternatives rejected, consequences) and add the file to the `toctree` of
 `docs/decisions/index.md`. A decision that changes later gets a new record,
 and the old record gets the status `Superseded by NNNN`.
 
+## Contribution rules
+
+These rules are for the maintainer's own pull requests, one per issue. Outside
+pull requests are not accepted. The pull request template in `.github/`
+reminds you of the checks.
+
+- Write code, commits, issues and docs in English.
+- Write each pull request title, and so each squash commit, as a
+  [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/):
+  `type(scope): description`.
+- Choose the simplest solution that works, one that a junior developer can
+  read.
+- Add no new dependency without a reason in the pull request.
+- Use no emojis.
+
 ## Run the checks
 
 In the order of the pipeline:

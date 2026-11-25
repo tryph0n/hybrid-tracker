@@ -1,0 +1,25 @@
+name: Source request
+description: Propose a new data source.
+body:
+  - type: input
+    id: url
+    attributes:
+      label: URL
+      description: The page of the source.
+      placeholder: https://
+    validations:
+      required: true
+  - type: input
+    id: licence
+    attributes:
+      label: Licence
+      description: The licence of the data, with a link to its text. The project can collect the source only if the licence allows redistribution under CC BY 4.0.
+    validations:
+      required: true
+  - type: input
+    id: access
+    attributes:
+      label: Access method
+      description: How to get the data, for example a file download, an API or a web page.
+    validations:
+      required: true
