@@ -103,6 +103,20 @@ A new or renamed column changes every stored file. Update every adapter, run
 A renamed column also changes `src/streamlit_app.py`, and for `event_status`
 or `russia_link`, the "Reading the data" section of `README.md`.
 
+## Record a decision
+
+A pull request needs a decision record in `docs/decisions/` when it adds:
+
+- a new service,
+- a new storage layer,
+- a major version of the schema, or
+- a new framework.
+
+Copy `docs/decisions/template.md`, fill in the four parts (context, decision,
+alternatives rejected, consequences) and add the file to the `toctree` of
+`docs/decisions/index.md`. A decision that changes later gets a new record,
+and the old record gets the status `Superseded by NNNN`.
+
 ## Run the checks
 
 In the order of the pipeline:
