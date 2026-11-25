@@ -344,10 +344,11 @@ with st.sidebar:
         key="domains",
     )
     category_options = [c for c in CATEGORIES if CATEGORY_DOMAINS[c] in domains]
+    if "categories" not in st.session_state:
+        st.session_state["categories"] = category_options
     categories = st.multiselect(
         "Category",
         category_options,
-        default=category_options,
         format_func=lambda key: CATEGORY_LABELS[key],
         key="categories",
     )
