@@ -238,12 +238,12 @@ def strip_tracking(url: str) -> str:
     The author's links carry them (for example `?utm_source=...`). They name
     the tool that opened the page, not the page.
     """
-    parts = urllib.parse.urlsplit(url.strip())
-    query = [
-        pair
-        for pair in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
-        if not pair[0].startswith("utm_")
-    ]
+    url = url.strip()
+    parts = urllib.parse.urlsplit(url)
+    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    query = [pair for pair in pairs if not pair[0].startswith("utm_")]
+    if len(query) == len(pairs):
+        return url
     return urllib.parse.urlunsplit(
         parts._replace(query=urllib.parse.urlencode(query, safe="/:"))
     )

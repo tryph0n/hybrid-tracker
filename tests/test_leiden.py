@@ -296,6 +296,8 @@ def test_file_list_without_one_spreadsheet_stops_the_run():
         ("https://a.org/p?utm_source=x.com", "https://a.org/p"),
         ("https://a.org/p?id=3&utm_medium=m&utm_source=x.com", "https://a.org/p?id=3"),
         (" https://a.org/p?id=3 ", "https://a.org/p?id=3"),
+        ("https://a.org/p?q=a%20b+c&z=1&a=2", "https://a.org/p?q=a%20b+c&z=1&a=2"),
+        ("https://a.org/p?", "https://a.org/p?"),
         ("", ""),
     ],
 )
