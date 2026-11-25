@@ -1,0 +1,38 @@
+[project]
+name = "hybrid-tracker"
+version = "0.1.0"
+description = "Open data on events of the hybrid war against Europe since 2022, with a dashboard."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "openpyxl==3.1.5",
+    "pandas==3.1.1",
+    "plotly==7.1.0",
+    "pycountry==26.2.16",
+    "streamlit==1.67.0",
+]
+
+[dependency-groups]
+dev = [
+    "huggingface_hub==2.4.0",
+    "pytest==9.2.0",
+    "pyyaml==6.0.3",
+    "ruff==0.17.6",
+]
+docs = [
+    "furo==2025.12.19",
+    "myst-parser==5.2.0",
+    "sphinx==9.2.0",
+    "sphinx-autoapi==3.9.0",
+    "sphinxcontrib-mermaid==2.1.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "tracker"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

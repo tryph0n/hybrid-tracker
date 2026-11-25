@@ -62,10 +62,8 @@ Then open http://localhost:8501.
 With Python 3.13:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-streamlit run src/streamlit_app.py
+uv sync --locked --no-dev
+uv run --no-dev streamlit run src/streamlit_app.py
 ```
 
 ## Contributing

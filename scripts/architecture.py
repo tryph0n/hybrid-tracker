@@ -6,9 +6,9 @@ names of the outside services come from SERVICES below.
 The pipeline runs this script with --check, so a change to any of them that
 is not in the committed page fails the build.
 
-Usage (from the repository root, with PYTHONPATH=src):
-    python scripts/architecture.py          # rewrite docs/architecture.md
-    python scripts/architecture.py --check  # fail if the page is out of date
+Usage (from the repository root, after `uv sync`):
+    uv run python scripts/architecture.py          # rewrite docs/architecture.md
+    uv run python scripts/architecture.py --check  # fail if the page is out of date
 """
 
 import ast
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "docs" / "architecture.md"
 APP = ROOT / "src" / "streamlit_app.py"
 INGEST = ROOT / "src" / "tracker" / "ingest.py"
-COMMAND = "PYTHONPATH=src python scripts/architecture.py"
+COMMAND = "uv run python scripts/architecture.py"
 
 INTRO = f"""\
 # Architecture
