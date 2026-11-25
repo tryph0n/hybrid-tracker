@@ -61,7 +61,7 @@ ATTRIBUTION_LABELS = {
     "official": "Attributed by an authority",
     "assessed": "Assessed by the source's analysts",
     "claimed": "Claimed by a group",
-    "none": "No attribution",
+    "none": "No attribution in the source",
 }
 PERIODS = {
     "All time": None,
@@ -114,7 +114,7 @@ def load_events() -> pd.DataFrame:
     events["domain_label"] = events["domain"].map(DOMAIN_LABELS)
     events["category_label"] = events["category"].map(CATEGORY_LABELS)
     events["attribution_label"] = events["attribution"].map(ATTRIBUTION_LABELS)
-    events["attributed_by_label"] = events["attributed_by"].fillna("None stated")
+    events["attributed_by_label"] = events["attributed_by"].fillna("")
     events["actor_names"] = (
         events["actors"]
         .fillna("")
@@ -181,7 +181,6 @@ def timeline_chart(
 def points_map(located: pd.DataFrame, colors: dict[str, str], dark: bool) -> go.Figure:
     located = located.assign(
         day=located["date"].dt.strftime("%Y-%m-%d"),
-        actor_names=located["actor_names"].replace("", "None"),
         here=located.groupby(["lat", "lon"])["lat"].transform("size"),
     )
     fig = px.scatter_map(
