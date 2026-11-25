@@ -154,12 +154,15 @@ In the order of the pipeline:
 ```bash
 uv sync --locked --group docs
 uv run ruff check . && uv run ruff format --check .
+uv run --locked mypy
 uv run python -m tracker.ingest check
 uv run pytest
 uv run python scripts/architecture.py --check
 uv run sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
 
+`uv run --locked mypy` checks `src/tracker` in strict mode and the app in
+standard mode; an ignore needs its error code and a reason on the same line.
 `uv run pytest` includes the dashboard, run headless on the stored data and on
 samples. The check of `docs/architecture.md` prints the command that fixes it.
 The `docs/` build runs with `-W`: a warning fails it.

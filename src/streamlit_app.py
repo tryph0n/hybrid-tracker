@@ -5,6 +5,7 @@ Run from the repository root: streamlit run src/streamlit_app.py
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import pycountry
 import streamlit as st
 
@@ -103,7 +104,9 @@ def count_by_country(events: pd.DataFrame) -> pd.DataFrame:
     return counts
 
 
-def timeline_chart(events: pd.DataFrame, colors: dict, weekly: bool, surface: str):
+def timeline_chart(
+    events: pd.DataFrame, colors: dict[str, str], weekly: bool, surface: str
+) -> go.Figure:
     period = events["date"].dt.to_period("W" if weekly else "M").dt.start_time
     counts = (
         events.groupby([period.rename("period"), "category_label"])
@@ -129,7 +132,7 @@ def timeline_chart(events: pd.DataFrame, colors: dict, weekly: bool, surface: st
     return fig
 
 
-def points_map(located: pd.DataFrame, colors: dict, dark: bool):
+def points_map(located: pd.DataFrame, colors: dict[str, str], dark: bool) -> go.Figure:
     located = located.assign(
         day=located["date"].dt.strftime("%Y-%m-%d"),
         here=located.groupby(["lat", "lon"])["lat"].transform("size"),
@@ -170,7 +173,7 @@ def points_map(located: pd.DataFrame, colors: dict, dark: bool):
     return fig
 
 
-def countries_map(counts: pd.DataFrame, dark: bool):
+def countries_map(counts: pd.DataFrame, dark: bool) -> go.Figure:
     fig = px.choropleth(
         counts.dropna(subset=["iso3"]),
         locations="iso3",
@@ -196,7 +199,7 @@ def countries_map(counts: pd.DataFrame, dark: bool):
     return fig
 
 
-def countries_bar(counts: pd.DataFrame, color: str):
+def countries_bar(counts: pd.DataFrame, color: str) -> go.Figure:
     top = counts.nlargest(15, "events", keep="all")
     fig = px.bar(
         top,
@@ -264,20 +267,20 @@ with st.sidebar:
         "Categories",
         list(CATEGORY_LABELS),
         default=list(CATEGORY_LABELS),
-        format_func=CATEGORY_LABELS.get,
+        format_func=lambda key: CATEGORY_LABELS[key],
     )
     statuses = st.multiselect(
         "Event status",
         EVENT_STATUSES,
         default=["confirmed", "unconfirmed"],
-        format_func=EVENT_STATUS_LABELS.get,
+        format_func=lambda key: EVENT_STATUS_LABELS[key],
         help="Dismissed events (the source found no incident) are hidden by default.",
     )
     links = st.multiselect(
         "Link to Russia",
         RUSSIA_LINKS,
         default=RUSSIA_LINKS,
-        format_func=RUSSIA_LINK_LABELS.get,
+        format_func=lambda key: RUSSIA_LINK_LABELS[key],
     )
     country_options = sorted(
         {code for codes in all_events["country_codes"] for code in codes if code},

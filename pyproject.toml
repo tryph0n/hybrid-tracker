@@ -15,6 +15,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "huggingface_hub==2.4.0",
+    "mypy==2.4.1",
+    "pandas-stubs==3.1.0.*",
     "pytest==9.2.0",
     "pyyaml==6.0.3",
     "ruff==0.17.6",
@@ -36,3 +38,28 @@ module-name = "tracker"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+files = ["src"]
+warn_unused_ignores = true
+show_error_codes = true
+warn_unused_configs = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = "tracker.*"
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+extra_checks = true
+
+[[tool.mypy.overrides]]
+module = ["plotly", "plotly.*"]
+ignore_missing_imports = true
