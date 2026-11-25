@@ -162,7 +162,7 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
     return events[COLUMNS]
 
 
-def date_precision(value) -> str:
+def date_precision(value: str) -> str:
     """Translate EODI's date precision into a DATE_PRECISIONS value.
 
     Args:
@@ -176,7 +176,7 @@ def date_precision(value) -> str:
     return DATE_PRECISION[value]
 
 
-def russia_link(actor) -> str:
+def russia_link(actor: str | float) -> str:
     """Translate EODI's attributed actor into a RUSSIA_LINKS value.
 
     Args:

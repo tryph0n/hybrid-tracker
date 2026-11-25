@@ -82,6 +82,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Lint | Install |  | `uv sync --locked` |
 | Lint | Lint |  | `uv run ruff check . && uv run ruff format --check .` |
+| Lint | Type check |  | `uv run --locked mypy` |
 | Data | Install |  | `uv sync --locked` |
 | Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run python -m tracker.ingest live` |
 | Data | Validate stored data |  | `uv run python -m tracker.ingest check` |
