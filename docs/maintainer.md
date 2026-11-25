@@ -184,15 +184,15 @@ To print the branch coverage of `src/tracker` with the missing lines, run
 is not an imported module.
 The `docs/` build runs with `-W`: a warning fails it.
 
-A pull request runs the same checks. It does not refresh the data, build the
-image or deploy: a broken adapter fails on the next scheduled or manual run,
-and a broken `Dockerfile` fails on `main`.
+A pull request runs the same checks, and the Docker build check builds the image
+and starts it. It does not refresh the data or deploy: a broken adapter fails
+on the next scheduled or manual run.
 
 ## Pipeline
 
 `.github/workflows/pipeline.yml` runs on each push to `main`, on each pull
-request, each day at 04:17 UTC, and by hand. It has six jobs: Lint, Data, Docs,
-Docker image, Deploy to Render and Hugging Face mirror. The
+request, each day at 04:17 UTC, and by hand. It has seven jobs: Lint, Data, Docs,
+Docker build check, Docker image, Deploy to Render and Hugging Face mirror. The
 [architecture page](architecture.md) shows how they connect and what each one
 does.
 
@@ -215,6 +215,9 @@ does.
   job.
 - Render redeploys the tag of the run on every `main` run, also when the tag
   did not change.
+- The Docker build check runs on pull requests only. It builds the image
+  without pushing it, starts the container, and waits for `/_stcore/health` to
+  answer 200. It needs no secret, and it is not a required check yet.
 - The Docker image, Deploy and mirror jobs run on `main` only. Each one does
   nothing until its variable or secret is set.
 
@@ -270,7 +273,8 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Data, commit | A push to main during the run changed the same data file, so the rebase stopped; or a branch rule on main blocks the bot | Run the pipeline again. Keep main open to pushes from github-actions[bot]. |
 | Docs, architecture | The page does not match the code | Run `uv run python scripts/architecture.py` and commit the page. |
 | Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `uv run sphinx-build` command above and read the warning. |
-| Docker image | A broken `Dockerfile` (the build runs only on `main`), an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
+| Docker build check | A broken `Dockerfile`, a missing file in a `COPY`, an app that does not start or does not answer on `/_stcore/health` | Read the log: it shows the build error or the container log. Run `docker build .` locally and fix it. |
+| Docker image | A broken `Dockerfile` that the check missed, an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
 | Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended or the workspace cannot deploy | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Then run the job again. |
 | Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match, or `HF_DATASET` names another dataset; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
 | Hugging Face mirror | "Mirror check failed": the downloaded dataset commit does not hold the same bytes as `data/events/`: a file that the upload skipped, or that differs on the Hub | Run the job again, then compare the files on the Hub. |

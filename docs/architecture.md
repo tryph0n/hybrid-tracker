@@ -58,6 +58,7 @@ flowchart LR
   job_lint["Lint"]
   job_data["Data"]
   job_docs["Docs"]
+  job_image_check["Docker build check"]:::conditional
   job_image["Docker image"]:::conditional
   job_deploy["Deploy to Render"]:::conditional
   job_mirror["Hugging Face mirror"]:::conditional
@@ -74,6 +75,7 @@ flowchart LR
 | Lint |  |  |
 | Data |  |  |
 | Docs |  |  |
+| Docker build check | `github.event_name == 'pull_request'` |  |
 | Docker image | `github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''` | `DOCKERHUB_TOKEN` (secret), `DOCKER_IMAGE` (variable) |
 | Deploy to Render | `needs.image.outputs.image != ''` | `RENDER_DEPLOY_HOOK_URL` (secret) |
 | Hugging Face mirror | `github.ref == 'refs/heads/main' && vars.HF_DATASET != ''` | `HF_DATASET` (variable) |
@@ -91,6 +93,9 @@ flowchart LR
 | Docs | Install |  | `uv sync --locked --group docs` |
 | Docs | Check the architecture page |  | `uv run python scripts/architecture.py --check` |
 | Docs | Build docs |  | `uv run sphinx-build -W --keep-going -b html docs docs/_build/html` |
+| Docker build check | Build the image |  | `docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
+| Docker build check | Check the user and the health check |  | a script |
+| Docker build check | Start the container and wait for the health answer |  | a script |
 | Docker image | Publish Docker image |  | a script |
 | Deploy to Render | Deploy to Render |  | a script |
 | Hugging Face mirror | Install |  | `uv sync --locked` |

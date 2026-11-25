@@ -87,6 +87,51 @@ jobs:
       - name: Build docs
         run: uv run sphinx-build -W --keep-going -b html docs docs/_build/html
 
+  # Pull requests only: build the image and start it, so a broken Dockerfile
+  # fails before the merge. It pushes nothing and needs no secret.
+  image-check:
+    name: Docker build check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: hybrid-tracker:check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Check the user and the health check
+        run: |
+          docker inspect hybrid-tracker:check --format 'User={{.Config.User}} Healthcheck={{json .Config.Healthcheck}}'
+          test -n "$(docker inspect hybrid-tracker:check --format '{{.Config.User}}')"
+          test "$(docker inspect hybrid-tracker:check --format '{{.Config.User}}')" != root
+          test "$(docker inspect hybrid-tracker:check --format '{{.Config.Healthcheck}}')" != "<nil>"
+      - name: Start the container and wait for the health answer
+        run: |
+          docker run -d --name check -p 8501:8501 hybrid-tracker:check
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8501/_stcore/health || true)
+            echo "attempt $i: /_stcore/health answered $code"
+            [ "$code" = 200 ] && break
+            sleep 2
+          done
+          if [ "$code" != 200 ]; then docker logs check; exit 1; fi
+          # The Docker health check has its own start period: poll the status too.
+          for i in $(seq 1 24); do
+            status=$(docker inspect check --format '{{.State.Health.Status}}')
+            echo "container health: $status"
+            [ "$status" = healthy ] && exit 0
+            sleep 5
+          done
+          docker logs check
+          exit 1
+
   # CD, from main only. Each job does nothing until its variable or secret is set.
   image:
     name: Docker image
