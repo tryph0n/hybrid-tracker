@@ -222,6 +222,12 @@ does.
 - The Docker build check runs on pull requests only. It builds the image
   without pushing it, starts the container, and waits for `/_stcore/health` to
   answer 200. It needs no secret, and it is not a required check yet.
+- On a new tag, the Docker image job builds the image, scans it with Trivy and
+  writes the full report in the job summary. A critical finding that has a fix
+  fails the job before the push. An unfixed finding does not. The job then
+  pushes the image with a build provenance attestation. To check it, run
+  `gh attestation verify oci://index.docker.io/<DOCKER_IMAGE>:<tag> --repo tryph0n/hybrid-tracker`.
+  A tag that is already published is not built, scanned or attested again.
 - The Docker image, Deploy and mirror jobs run on `main` only. Each one does
   nothing until its variable or secret is set.
 

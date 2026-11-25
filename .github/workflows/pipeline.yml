@@ -138,14 +138,19 @@ jobs:
     needs: [data, docs]
     if: github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # the attestation is signed with the run OIDC token
+      attestations: write
+      artifact-metadata: write
     outputs:
       image: ${{ steps.image.outputs.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.data.outputs.sha }}
-      - name: Publish Docker image
+      - name: Name the image and check the registry
         id: image
         env:
           DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
@@ -154,13 +159,78 @@ jobs:
           # Same image inputs (the files the Dockerfile copies), same tag.
           tag=$(git ls-tree HEAD Dockerfile README.md pyproject.toml uv.lock .streamlit src data | sha256sum | cut -c1-12)
           echo "image=$DOCKER_IMAGE:$tag" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "$DOCKERHUB_TOKEN" | docker login -u "${DOCKER_IMAGE%%/*}" --password-stdin
           if docker manifest inspect "$DOCKER_IMAGE:$tag" > /dev/null 2>&1; then
             echo "$DOCKER_IMAGE:$tag is already published"
-          else
-            docker build --build-arg "IMAGE_TAG=$tag" -t "$DOCKER_IMAGE:$tag" -t "$DOCKER_IMAGE:latest" .
-            docker push --all-tags "$DOCKER_IMAGE"
+            echo "published=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Set up Buildx
+        if: steps.image.outputs.published != 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Build once into the local daemon and scan it, so a vulnerable image is
+      # never pushed. A push straight to the registry is what carries the
+      # BuildKit attestations, so the image is built a second time for it (the
+      # cache makes that cheap).
+      - name: Build the image for the scan
+        if: steps.image.outputs.published != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          build-args: IMAGE_TAG=${{ steps.image.outputs.tag }}
+          tags: ${{ steps.image.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan the image and write the report
+        if: steps.image.outputs.published != 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image }}
+          format: table
+          output: trivy-report.txt
+          exit-code: "0"
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+      - name: Add the report to the job summary
+        if: steps.image.outputs.published != 'true'
+        run: |
+          {
+            echo "### Vulnerability report for ${{ steps.image.outputs.image }}"
+            echo
+            echo '```'
+            cat trivy-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Fail on a critical finding that has a fix
+        if: steps.image.outputs.published != 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL
+      - name: Publish the image with its provenance
+        id: push
+        if: steps.image.outputs.published != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          provenance: mode=max
+          build-args: IMAGE_TAG=${{ steps.image.outputs.tag }}
+          tags: |
+            ${{ steps.image.outputs.image }}
+            ${{ vars.DOCKER_IMAGE }}:latest
+          cache-from: type=gha
+      - name: Attest the build provenance
+        if: steps.image.outputs.published != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: index.docker.io/${{ vars.DOCKER_IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 
   deploy:
     name: Deploy to Render
