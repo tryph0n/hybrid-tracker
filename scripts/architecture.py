@@ -70,7 +70,7 @@ MODULES = "Python files and their imports: an arrow points to the imported modul
 SERVICES = {
     r"docker (buildx )?push|^push: true$|imagetools create|docker login|^push-to-registry: true$": "Docker Hub",
     r"RENDER_DEPLOY_HOOK_URL": "Render",
-    r"\bhf upload\b": "Hugging Face",
+    r"\bhf (upload|repos tag)\b": "Hugging Face",
     r"HEARTBEAT_URL": "Heartbeat monitor",
 }
 

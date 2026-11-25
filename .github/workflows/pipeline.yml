@@ -309,9 +309,11 @@ jobs:
         env:
           HF_DATASET: ${{ vars.HF_DATASET }}
           HF_OIDC_RESOURCE: datasets/${{ vars.HF_DATASET }}
+        id: mirror
         run: |
           url=$(uv run hf upload "$HF_DATASET" data/events . --repo-type dataset --commit-message "data: mirror $(git rev-parse --short HEAD)" --quiet)
           echo "$url"
+          echo "commit=${url##*/}" >> "$GITHUB_OUTPUT"
           # Read back the commit of this run (the latest commit when nothing changed), not whatever main points to.
           copy=$(mktemp -d)
           uv run hf download "$HF_DATASET" --repo-type dataset --revision "${url##*/}" --local-dir "$copy" > /dev/null
@@ -319,6 +321,31 @@ jobs:
             cmp -s "$file" "$copy/$(basename "$file")" || { echo "Mirror check failed: $(basename "$file") is missing or differs on $HF_DATASET"; exit 1; }
           done
           echo "Mirror check passed: $HF_DATASET matches data/events"
+      # The data is already mirrored and checked at this point. A failure here
+      # only warns, so it cannot hide the upload. A tag is never moved or
+      # recreated: the step creates it only when it does not exist.
+      - name: Tag the dataset with the schema version
+        env:
+          HF_DATASET: ${{ vars.HF_DATASET }}
+          HF_OIDC_RESOURCE: datasets/${{ vars.HF_DATASET }}
+          COMMIT: ${{ steps.mirror.outputs.commit }}
+        run: |
+          tag="v$(sed -n 's/^SCHEMA_VERSION = "\(.*\)"$/\1/p' src/tracker/schema.py)"
+          if [ "$tag" = "v" ]; then
+            echo "::warning::SCHEMA_VERSION not found, no tag created"
+            exit 0
+          fi
+          if ! tags=$(uv run hf repos tag list "$HF_DATASET" --repo-type dataset --format quiet); then
+            echo "::warning::Could not list the tags of $HF_DATASET, $tag not created"
+            exit 0
+          fi
+          if grep -Fxq "$tag" <<<"$tags"; then
+            echo "Tag $tag already exists on $HF_DATASET, left as it is"
+          elif uv run hf repos tag create "$HF_DATASET" "$tag" --repo-type dataset --revision "$COMMIT" --message "Schema version ${tag#v}"; then
+            echo "Tag $tag created on $HF_DATASET at $COMMIT"
+          else
+            echo "::warning::Could not create the tag $tag on $HF_DATASET (the token may lack the right). Create it by hand: see Change the schema in the maintainer guide."
+          fi
 
   # Alerts. They run on a scheduled or manual run only, never on a pull request
   # or a push. Every job of the run is listed in needs, so a failure in any of
