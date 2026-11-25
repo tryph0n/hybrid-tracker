@@ -136,7 +136,18 @@ A new or renamed column changes every stored file. Update every adapter, run
 `schema.py` without importing it: keep `COLUMNS`, `REQUIRED` and the lists of
 `ALLOWED_VALUES` as literal lists, and one comment on each column line.
 A renamed column also changes `src/streamlit_app.py`, and for `event_status`
-or `russia_link`, the "Reading the data" section of `README.md`.
+or `attribution`, the "Reading the data" section of `README.md`.
+
+Raise `SCHEMA_VERSION` in `src/tracker/schema.py`: a removed or renamed column
+is a major version. Add an entry with the mapping from the old version to the
+`Versions` section of `data/events/README.md`. The mirror job tags the dataset
+`v<SCHEMA_VERSION>` on the commit of the first upload with that version. Check
+the tag after the first run on `main`: if the job warns that it could not create
+the tag, create it by hand (the tag is never moved or recreated):
+
+```bash
+hf repos tag create <HF_DATASET> v<SCHEMA_VERSION> --repo-type dataset --revision <upload commit>
+```
 
 ## Record a decision
 
