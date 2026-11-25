@@ -114,3 +114,7 @@ def validate(events: pd.DataFrame) -> None:
         raise ValueError("lat out of range")
     if not events["lon"].dropna().between(-180, 180).all():
         raise ValueError("lon out of range")
+
+
+def deliberate_error() -> int:
+    return "not an int"
