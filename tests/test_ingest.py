@@ -7,7 +7,7 @@ from conftest import FIXTURES, recorded_payloads
 
 from tracker import cli, eodi, ingest, sources
 from tracker.sources import read_events
-from tracker.store import LocalBackend, Payload, Store
+from tracker.store import LocalBackend, Payload, Store, open_store
 
 HEADER = (
     "event_id,source,date,end_date,date_precision,countries,place,lat,lon,"
@@ -279,15 +279,23 @@ def test_the_rebuild_command_runs_without_sockets(data_dir, tmp_path, monkeypatc
     monkeypatch.setenv("TRACKER_STORE", "local")
     monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
     serve_recorded(monkeypatch, "eodi")
-    cli.main(["ingest", "eodi"])
-    (data_dir / "eodi.csv").unlink()
+    serve_recorded(monkeypatch, "leiden")
+    cli.main(["ingest", "live"])
+    cli.main(["ingest", "static"])
+    for name in sources.SOURCES:
+        (data_dir / f"{name}.csv").unlink()
 
     forbid_download(monkeypatch)
     cli.main(["rebuild", "eodi"])
     assert (data_dir / "eodi.csv").exists()
+    assert not (data_dir / "leiden.csv").exists()
     (data_dir / "eodi.csv").unlink()
+
     cli.main(["rebuild"])
-    assert (data_dir / "eodi.csv").exists()
+    store = open_store()
+    for name in sources.SOURCES:
+        assert (data_dir / f"{name}.csv").exists()
+        assert len(clean_table(store, name)) > 0
 
 
 def test_rebuild_reads_the_latest_payload_only(data_dir, store, monkeypatch):
@@ -295,12 +303,16 @@ def test_rebuild_reads_the_latest_payload_only(data_dir, store, monkeypatch):
     ingest.ingest("eodi", store)
     files = recorded_payloads("eodi")
     first = pd.read_csv(io.BytesIO(files["incidentes.csv"]))
-    newer = first.head(len(first) - 1).to_csv(index=False).encode()
+    title = "Newer title"
+    newer = first.assign(titulo_en=title).to_csv(index=False).encode()
     store.save(Payload("eodi", "incidentes.csv", newer, "https://e/all", 200))
+    assert title not in set(clean_table(store, "eodi")["title"])
 
     forbid_download(monkeypatch)
-    assert ingest.latest_payloads("eodi", store)["incidentes.csv"] == newer
+    ingest.rebuild("eodi", store)
     assert len(store.payloads("eodi")) == 3
+    clean = clean_table(store, "eodi")
+    assert title in set(clean["title"])
 
 
 def test_rebuild_without_a_stored_payload(data_dir, store, monkeypatch, caplog):
