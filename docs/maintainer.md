@@ -68,11 +68,20 @@ If the drop is a real correction, delete `data/events/<name>.csv`, run
 `uv run python -m tracker.ingest <name>`, read the diff and commit.
 
 When a new version of a static source is published, follow the docstring of
-its module (`src/tracker/leiden.py`): update the file URL, ingest, read the
-diff of the CSV, and update the version in the `citation` of
-`src/tracker/sources.py`, in the README credits and in the dataset card
-(`data/events/README.md`). If the years change, also update the `title` and the
-README source table. Change the pinned version in the docstring too.
+its module (`src/tracker/leiden.py`). For the Leiden dataset:
+
+1. Run `uv run python -m tracker.ingest leiden`. It reads the latest version
+   from Harvard Dataverse and stops, with a message, when the licence is not
+   "CC BY 4.0" or when the version is not `PINNED_VERSION`. Do not go on if
+   the licence changed: the stored data is published under CC BY 4.0.
+2. Read the new version and its sheet for new labels. An unknown label or an
+   unknown "IncidentDateEnd" text also stops the run: add it to the adapter on
+   purpose.
+3. Set `PINNED_VERSION` in `src/tracker/leiden.py` and run the ingest again.
+4. Read the diff of the CSV, then update the version in the `citation` of
+   `src/tracker/sources.py`, in the README credits and in the dataset card
+   (`data/events/README.md`). If the years change, also update the `title` and
+   the README source table, and the version in the docstring of the module.
 
 ## Add a source
 
