@@ -28,15 +28,22 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.13-slim
 
+RUN useradd --create-home --uid 1000 app
+
 WORKDIR /app
 
-COPY --from=builder /app/.venv ./.venv
+COPY --from=builder --chown=app:app /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-COPY .streamlit/ ./.streamlit/
-COPY src/ ./src/
-COPY data/ ./data/
+COPY --chown=app:app .streamlit/ ./.streamlit/
+COPY --chown=app:app src/ ./src/
+COPY --chown=app:app data/ ./data/
+
+USER app
 
 EXPOSE 8501
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
 
 ENTRYPOINT ["streamlit", "run", "src/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
