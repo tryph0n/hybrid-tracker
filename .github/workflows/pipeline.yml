@@ -60,6 +60,12 @@ jobs:
           TRACKER_STORE: hf
           HF_OIDC_RESOURCE: datasets/sam-bot/hybrid-tracker-raw
         run: uv run tracker ingest live
+      - name: Build the published tables
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          TRACKER_STORE: hf
+          HF_OIDC_RESOURCE: datasets/sam-bot/hybrid-tracker-raw
+        run: uv run tracker build
       - name: Validate stored data
         run: uv run tracker ingest check
       - name: Run the tests

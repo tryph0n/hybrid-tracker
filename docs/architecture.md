@@ -114,6 +114,7 @@ flowchart LR
 | Lint | Type check |  | `uv run --locked mypy` |
 | Data | Install |  | `uv sync --locked` |
 | Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest live` |
+| Data | Build the published tables | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker build` |
 | Data | Validate stored data |  | `uv run tracker ingest check` |
 | Data | Run the tests |  | `uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"` |
 | Data | Commit refreshed data | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | a script |
@@ -148,6 +149,7 @@ Python files and their imports: an arrow points to the imported module.
 ```mermaid
 flowchart TB
   module_streamlit_app_py["streamlit_app.py"]
+  module_tracker_build["tracker.build"]
   module_tracker_cli["tracker.cli"]
   module_tracker_clock["tracker.clock"]
   module_tracker_eodi["tracker.eodi"]
@@ -162,6 +164,11 @@ flowchart TB
   module_streamlit_app_py --> module_tracker_schema
   module_streamlit_app_py --> module_tracker_sources
   module_streamlit_app_py --> module_tracker_views
+  module_tracker_build --> module_tracker_ingest
+  module_tracker_build --> module_tracker_schema
+  module_tracker_build --> module_tracker_sources
+  module_tracker_build --> module_tracker_store
+  module_tracker_cli --> module_tracker_build
   module_tracker_cli --> module_tracker_ingest
   module_tracker_cli --> module_tracker_sources
   module_tracker_cli --> module_tracker_store
@@ -183,6 +190,7 @@ flowchart TB
 | Module | File | Purpose | Third-party imports |
 | --- | --- | --- | --- |
 | `streamlit_app.py` | `src/streamlit_app.py` | Dashboard: maps and charts of the unified hybrid-incident dataset. | pandas, plotly, pycountry, streamlit |
+| `tracker.build` | `src/tracker/build.py` | Build the published tables from the clean tables of the raw store. | duckdb, pandas, pyarrow |
 | `tracker.cli` | `src/tracker/cli.py` | The \`tracker\` command: one subcommand per action. |  |
 | `tracker.clock` | `src/tracker/clock.py` | The current day, in UTC like the stored event dates. | pandas |
 | `tracker.eodi` | `src/tracker/eodi.py` | European Observatory of Drone Incidents (EODI) - live source. | pandas |

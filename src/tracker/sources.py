@@ -31,6 +31,11 @@ class Source:
     licence: str
     """Licence name, for example "CC BY 4.0". It must appear in the README."""
 
+    family: str
+    """Licence family, one of `FAMILIES`. It decides which public dataset gets
+    the rows: `open` for a licence that allows a merge into a CC BY table,
+    `nc` for a NonCommercial one."""
+
     citation: str
     """Credit line. It must appear word for word in the README and in the dataset
     card."""
@@ -45,12 +50,16 @@ class Source:
     source."""
 
 
+FAMILIES = ("open", "nc")
+
+
 SOURCES = {
     "eodi": Source(
         title="European Observatory of Drone Incidents",
         kind="live",
         homepage="https://droneobservatory.eu",
         licence="CC BY 4.0",
+        family="open",
         citation=(
             "Lucas Alaniz Pintos, European Observatory of Drone Incidents "
             "(EODI): drone incidents in Europe."
@@ -63,6 +72,7 @@ SOURCES = {
         kind="static",
         homepage=leiden.DATASET_URL,
         licence="CC BY 4.0",
+        family="open",
         citation=(
             "Bart Schuurman, Russian Operations Against Europe Dataset, "
             "2022-2025, Harvard Dataverse, V4."
