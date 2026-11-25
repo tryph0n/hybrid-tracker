@@ -32,6 +32,7 @@ flowchart TB
   service_Docker_Hub("Docker Hub")
   service_Render("Render")
   service_Hugging_Face("Hugging Face")
+  service_Hugging_Face_mirror("Hugging Face mirror")
   service_Heartbeat_monitor("Heartbeat monitor")
   source_eodi -->|"Data job"| ingest
   source_leiden -->|"by hand"| ingest
@@ -134,6 +135,7 @@ flowchart LR
 | Deploy to Render | Wait for the new image to answer | `steps.deploy.outputs.called == 'true'` | a script |
 | Hugging Face mirror | Install |  | `uv sync --locked` |
 | Hugging Face mirror | Mirror the data to Hugging Face |  | a script |
+| Hugging Face mirror | Tag the dataset with the schema version |  | a script |
 | Report failure | Open an issue, or comment on the open one |  | a script |
 | Close failure issue | Close the open failure issues |  | a script |
 | Heartbeat | Ping the heartbeat monitor |  | a script |
