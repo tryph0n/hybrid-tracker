@@ -70,6 +70,7 @@ SERVICES = {
     r"docker (buildx )?push": "Docker Hub",
     r"RENDER_DEPLOY_HOOK_URL": "Render",
     r"\bhf upload\b": "Hugging Face",
+    r"HEARTBEAT_URL": "Heartbeat monitor",
 }
 
 

@@ -32,6 +32,7 @@ flowchart TB
   service_Docker_Hub("Docker Hub")
   service_Render("Render")
   service_Hugging_Face("Hugging Face")
+  service_Heartbeat_monitor("Heartbeat monitor")
   source_eodi -->|"Data job"| ingest
   source_leiden -->|"by hand"| ingest
   ingest --> events
@@ -62,12 +63,33 @@ flowchart LR
   job_image["Docker image"]:::conditional
   job_deploy["Deploy to Render"]:::conditional
   job_mirror["Hugging Face mirror"]:::conditional
+  job_report_failure["Report failure"]:::conditional
+  job_close_failure["Close failure issue"]:::conditional
+  job_heartbeat["Heartbeat"]:::conditional
   job_lint --> job_data
   job_lint --> job_docs
   job_data -->|sha| job_image
   job_docs --> job_image
   job_image -->|image| job_deploy
   job_data -->|sha| job_mirror
+  job_lint --> job_report_failure
+  job_data --> job_report_failure
+  job_docs --> job_report_failure
+  job_image --> job_report_failure
+  job_deploy --> job_report_failure
+  job_mirror --> job_report_failure
+  job_lint --> job_close_failure
+  job_data --> job_close_failure
+  job_docs --> job_close_failure
+  job_image --> job_close_failure
+  job_deploy --> job_close_failure
+  job_mirror --> job_close_failure
+  job_lint --> job_heartbeat
+  job_data --> job_heartbeat
+  job_docs --> job_heartbeat
+  job_image --> job_heartbeat
+  job_deploy --> job_heartbeat
+  job_mirror --> job_heartbeat
 ```
 
 | Job | Runs if | Secrets and variables |
@@ -79,6 +101,9 @@ flowchart LR
 | Docker image | `github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''` | `DOCKERHUB_TOKEN` (secret), `DOCKER_IMAGE` (variable) |
 | Deploy to Render | `needs.image.outputs.image != ''` | `RENDER_DEPLOY_HOOK_URL` (secret) |
 | Hugging Face mirror | `github.ref == 'refs/heads/main' && vars.HF_DATASET != ''` | `HF_DATASET` (variable) |
+| Report failure | `failure() && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
+| Close failure issue | `${{ !failure() && !cancelled() && github.event_name == 'schedule' }}` |  |
+| Heartbeat | `${{ !failure() && !cancelled() && github.event_name == 'schedule' }}` | `HEARTBEAT_URL` (secret) |
 
 | Job | Step | Runs if | Runs |
 | --- | --- | --- | --- |
@@ -101,6 +126,9 @@ flowchart LR
 | Deploy to Render | Wait for the new image to answer | `steps.deploy.outputs.called == 'true'` | a script |
 | Hugging Face mirror | Install |  | `uv sync --locked` |
 | Hugging Face mirror | Mirror the data to Hugging Face |  | a script |
+| Report failure | Open an issue, or comment on the open one |  | a script |
+| Close failure issue | Close the open failure issues |  | a script |
+| Heartbeat | Ping the heartbeat monitor |  | a script |
 
 ## Modules
 
