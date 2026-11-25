@@ -1,6 +1,8 @@
 """The dashboard run headless with AppTest, on the stored data and on samples."""
 
 import base64
+import importlib
+import logging
 import re
 
 import numpy as np
@@ -9,10 +11,12 @@ import plotly.io as pio
 import pytest
 import streamlit as st
 from conftest import APP
+from streamlit.elements.lib import policies
 from streamlit.testing.v1 import AppTest
 
 from tracker.schema import ATTRIBUTIONS, CATEGORY_DOMAINS, DOMAINS
 from tracker.sources import SOURCES, events_path, read_all_events, read_events
+from tracker.views import coordinate_coverage
 
 
 @pytest.fixture(autouse=True)
@@ -431,3 +435,143 @@ def test_month_precision_note_shows_for_a_year_date_alone(sample_data_dir):
     assert not at.exception
     assert MONTH_NOTE in captions(at)
     assert SOURCES["leiden"].title in captions(at)
+
+
+def categories_of(domains):
+    return [c for c, d in CATEGORY_DOMAINS.items() if d in domains]
+
+
+@pytest.mark.parametrize("domain", DOMAINS)
+def test_adding_a_domain_back_selects_its_categories_again(sample_data_dir, domain):
+    at = run_app()
+    before = metrics(at)["Events"]
+    at.multiselect(key="domains").set_value([d for d in DOMAINS if d != domain]).run()
+    assert not at.exception
+    assert at.multiselect(key="categories").value == categories_of(
+        [d for d in DOMAINS if d != domain]
+    )
+    at.multiselect(key="domains").set_value(DOMAINS).run()
+    assert not at.exception
+    assert at.multiselect(key="categories").value == list(CATEGORY_DOMAINS)
+    assert metrics(at)["Events"] == before
+    assert not at.warning
+
+
+def test_two_domain_changes_select_the_categories_of_the_chosen_domains(
+    sample_data_dir,
+):
+    at = run_app()
+    at.multiselect(key="domains").set_value(["air", "violence"]).run()
+    at.multiselect(key="domains").set_value(["air", "sabotage"]).run()
+    assert not at.exception
+    assert at.multiselect(key="categories").value == categories_of(["air", "sabotage"])
+
+
+def test_map_has_points_again_when_air_is_added_back(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="domains").set_value(["sabotage"]).run()
+    at.multiselect(key="domains").set_value(["sabotage", "air"]).run()
+    assert not at.exception
+    assert not any("has coordinates" in i.value for i in at.info)
+    assert {trace.name for trace in chart(at, 1).data} == {"Air"}
+
+
+def test_narrowed_categories_survive_a_change_of_another_filter(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="categories").set_value(["airspace_incursion"]).run()
+    at.selectbox(key="period").set_value("Last 12 months").run()
+    assert not at.exception
+    assert at.multiselect(key="categories").value == ["airspace_incursion"]
+
+
+EODI_TITLE = SOURCES["eodi"].title
+LEIDEN_TITLE = SOURCES["leiden"].title
+
+
+def where_counts(events):
+    """Located, Countries-view-only and on-no-map counts of a frame of events."""
+    has_coordinates = events["lat"].notna() & events["lon"].notna()
+    has_country = events["countries"].notna()
+    return (
+        int(has_coordinates.sum()),
+        int((~has_coordinates & has_country).sum()),
+        int((~has_coordinates & ~has_country).sum()),
+    )
+
+
+def test_where_caption_names_the_sources_and_says_the_legend_is_not_a_filter(
+    sample_data_dir,
+):
+    at = run_app()
+    shown = expected_events(read_all_events())
+    located, countries_only, on_no_map = where_counts(shown)
+    assert countries_only > 0
+    text = captions(at)
+    assert f"Sources with coordinates: {EODI_TITLE}." in text
+    assert f"Sources with no coordinates: {LEIDEN_TITLE}." in text
+    assert "it is not the Domain filter" in text
+    assert f"{countries_only} events have a country and no coordinates" in text
+    assert "in the Countries view only" in text
+    assert located + countries_only + on_no_map == len(shown)
+    assert sum(len(trace.customdata) for trace in chart(at, 1).data) == located
+
+
+def test_where_counts_add_up_with_the_leiden_dataset_alone(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    assert not at.exception
+    shown = expected_events(read_all_events())
+    shown = shown[shown["source"] == "leiden"]
+    located, countries_only, on_no_map = where_counts(shown)
+    assert located == 0
+    assert countries_only + on_no_map == len(shown)
+    info = at.info[0].value
+    assert f"Sources with no coordinates: {LEIDEN_TITLE}." in info
+    assert EODI_TITLE not in info
+    assert f"{countries_only} events have a country and no coordinates" in info
+    assert "Countries view" in info
+
+
+def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="sources").set_value(["eodi"]).run()
+    assert not at.exception
+    text = captions(at)
+    assert f"Sources with coordinates: {EODI_TITLE}." in text
+    assert "Sources with no coordinates" not in text
+    shown = expected_events(read_all_events())
+    eodi = shown[shown["source"] == "eodi"]
+    countries_only = where_counts(eodi)[1]
+    assert f"{countries_only} events have a country and no coordinates" in text
+    at.multiselect(key="sources").set_value(["eodi", "leiden"]).run()
+    at.multiselect(key="domains").set_value(["sabotage"]).run()
+    assert not at.exception
+    info = at.info[0].value
+    sabotage = shown[shown["domain"] == "sabotage"]
+    assert set(sabotage["source"]) == {"leiden"}
+    assert f"Sources with no coordinates: {LEIDEN_TITLE}." in info
+    assert EODI_TITLE not in info
+    assert where_counts(sabotage)[1] == 1
+    assert "1 event has a country and no coordinates" in info
+
+
+def test_category_widget_gets_no_default_and_session_state_value_together(
+    sample_data_dir, caplog
+):
+    importlib.reload(policies)
+    caplog.set_level(logging.WARNING, logger=policies.__name__)
+    at = run_app()
+    at.multiselect(key="domains").set_value(["air"]).run()
+    at.multiselect(key="domains").set_value(DOMAINS).run()
+    assert not at.exception
+    assert "also had its value set via the Session State API" not in caplog.text
+
+
+def test_where_text_gives_the_events_on_no_map_like_the_helper(sample_data_dir):
+    open_sea_rows(2)
+    at = run_app()
+    shown = expected_events(read_all_events())
+    coverage = coordinate_coverage(shown)
+    assert coverage.on_no_map == 2
+    note = f"{coverage.on_no_map} events have no country (open sea) and are on no map."
+    assert note in captions(at)

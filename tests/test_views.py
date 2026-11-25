@@ -3,7 +3,12 @@
 import pandas as pd
 import pytest
 
-from tracker.views import filter_events, official_by_actor, with_code_lists
+from tracker.views import (
+    coordinate_coverage,
+    filter_events,
+    official_by_actor,
+    with_code_lists,
+)
 
 ROWS = [
     ("eodi", "air", "drone_overflight", "confirmed", "none", "", "DE"),
@@ -76,3 +81,29 @@ def test_official_counts_only_official_events_by_actor(events):
     assert official_by_actor(events) == {"RU": 2, "BY": 1, "CN": 1}
     only_none = events[events["attribution"] == "none"]
     assert official_by_actor(only_none) == {}
+
+
+def test_coordinate_coverage_splits_events_and_sources():
+    frame = pd.DataFrame(
+        [
+            ("eodi", 1.0, 2.0, "DE"),
+            ("eodi", None, None, "PL"),
+            ("leiden", None, None, "FR"),
+            ("leiden", None, None, None),
+            ("leiden", None, None, None),
+        ],
+        columns=["source", "lat", "lon", "countries"],
+    )
+    coverage = coordinate_coverage(frame)
+    assert coverage.sources_with == ["eodi"]
+    assert coverage.sources_without == ["leiden"]
+    assert (coverage.located, coverage.countries_only, coverage.on_no_map) == (1, 2, 2)
+
+
+def test_an_event_with_coordinates_and_a_country_counts_once():
+    frame = pd.DataFrame(
+        [("eodi", 1.0, 2.0, "DE")], columns=["source", "lat", "lon", "countries"]
+    )
+    coverage = coordinate_coverage(frame)
+    assert (coverage.located, coverage.countries_only, coverage.on_no_map) == (1, 0, 0)
+    assert coverage.sources_without == []

@@ -1,6 +1,7 @@
 """Filters and headline counts of the dashboard, as plain functions on a frame."""
 
 from collections.abc import Collection
+from dataclasses import dataclass
 
 import pandas as pd
 
@@ -64,3 +65,34 @@ def official_by_actor(events: pd.DataFrame) -> dict[str, int]:
     official = events[events["attribution"] == "official"]
     counts = official["actor_codes"].explode().dropna().value_counts()
     return {str(code): int(n) for code, n in counts.items()}
+
+
+@dataclass(frozen=True)
+class CoordinateCoverage:
+    """Where the selected events can be seen, and which sources give coordinates.
+
+    `located`, `countries_only` and `on_no_map` are disjoint and add up to the
+    number of events. A source gives coordinates when at least one of its events
+    has them.
+    """
+
+    sources_with: list[str]
+    sources_without: list[str]
+    located: int
+    countries_only: int
+    on_no_map: int
+
+
+def coordinate_coverage(events: pd.DataFrame) -> CoordinateCoverage:
+    """Count the events by the view that shows them, and split sources by coordinates."""
+    has_coordinates = events["lat"].notna() & events["lon"].notna()
+    has_country = events["countries"].notna()
+    with_coordinates = set(events.loc[has_coordinates, "source"])
+    sources = list(dict.fromkeys(events["source"]))
+    return CoordinateCoverage(
+        sources_with=[name for name in sources if name in with_coordinates],
+        sources_without=[name for name in sources if name not in with_coordinates],
+        located=int(has_coordinates.sum()),
+        countries_only=int((~has_coordinates & has_country).sum()),
+        on_no_map=int((~has_coordinates & ~has_country).sum()),
+    )
