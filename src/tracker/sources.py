@@ -31,6 +31,9 @@ class Source:
     licence: str
     """Licence name, for example "CC BY 4.0". It must appear in the README."""
 
+    licence_page: str
+    """Page that states the licence, as recorded in `docs/sources.md`."""
+
     family: str
     """Licence family, one of `FAMILIES`. It decides which public dataset gets
     the rows: `open` for a licence that allows a merge into a CC BY table,
@@ -72,6 +75,9 @@ class Reference:
     licence_url: str
     """Page of the licence text. It must appear in the README."""
 
+    licence_page: str
+    """Page that states the licence, as recorded in `docs/sources.md`."""
+
     family: str
     """Licence family, one of `FAMILIES`."""
 
@@ -93,6 +99,7 @@ SOURCES = {
         kind="live",
         homepage="https://droneobservatory.eu",
         licence="CC BY 4.0",
+        licence_page="https://droneobservatory.eu/en",
         family="open",
         citation=(
             "Lucas Alaniz Pintos, European Observatory of Drone Incidents "
@@ -106,6 +113,7 @@ SOURCES = {
         kind="static",
         homepage=leiden.DATASET_URL,
         licence="CC BY 4.0",
+        licence_page="https://doi.org/10.7910/DVN/TQ0FMQ",
         family="open",
         citation=(
             "Bart Schuurman, Russian Operations Against Europe Dataset, "
@@ -122,6 +130,7 @@ REFERENCES = {
         homepage="https://www.geonames.org",
         licence="CC BY 4.0",
         licence_url="https://creativecommons.org/licenses/by/4.0/",
+        licence_page="https://download.geonames.org/export/dump/readme.txt",
         family="open",
         citation=(
             "GeoNames, https://www.geonames.org: place names and coordinates, "

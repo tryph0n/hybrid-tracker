@@ -4,6 +4,8 @@
 ```{toctree}
 :hidden:
 
+sources
+permissions
 data-dictionary
 architecture
 maintainer
