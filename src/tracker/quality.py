@@ -31,6 +31,7 @@ import pandas as pd
 
 from tracker import clock
 from tracker.build import family_sources
+from tracker.errors import UserError
 from tracker.ingest import clean_path
 from tracker.schema import REQUIRED
 from tracker.sources import FAMILIES, SOURCES
@@ -255,7 +256,7 @@ def run(store: Store, out: Path) -> pd.DataFrame:
     for name in SOURCES:
         events = read_table(store, clean_path(name))
         if events is None:
-            raise ValueError(f"{name}: no clean table, run `tracker ingest {name}`")
+            raise UserError(f"{name}: no clean table, run `tracker ingest {name}`")
         previous = None
         if name in seen and stored_ids is not None:
             previous = set(stored_ids.loc[stored_ids["source"] == name, "event_id"])
@@ -279,5 +280,5 @@ def run(store: Store, out: Path) -> pd.DataFrame:
 
     found = problems(current, now)
     if found:
-        raise ValueError("Quality check failed:\n" + "\n".join(found))
+        raise UserError("Quality check failed:\n" + "\n".join(found))
     return current

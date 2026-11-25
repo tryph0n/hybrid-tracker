@@ -23,6 +23,7 @@ from collections.abc import Mapping
 
 import pandas as pd
 
+from tracker.errors import UserError
 from tracker.schema import validate
 from tracker.sources import (
     REFERENCES,
@@ -94,7 +95,7 @@ def write_clean(
     if previous is not None and len(events) < previous * (1 - MAX_SHRINK):
         message = f"{name}: {len(events)} events, {previous} before"
         if not allow_shrink:
-            raise ValueError(message)
+            raise UserError(message)
         logger.warning("Shrink guard skipped by override: %s", message)
 
     table = io.BytesIO()
@@ -183,9 +184,7 @@ def rebuild(name: str | None, store: Store, allow_shrink: bool = False) -> None:
         files = latest_payloads(key, store)
         if not files:
             if name is not None:
-                raise ValueError(
-                    f"{key}: no stored payload, run `tracker ingest {key}`"
-                )
+                raise UserError(f"{key}: no stored payload, run `tracker ingest {key}`")
             logger.warning("%s: no stored payload, skipped", key)
             continue
         write_clean(key, files, store, allow_shrink)
@@ -214,7 +213,7 @@ def run(target: str, if_missing: bool = False) -> None:
     """
     if target == "check":
         if if_missing:
-            raise ValueError("`--if-missing` does not apply to `check`")
+            raise UserError("`--if-missing` does not apply to `check`")
         check()
         return
     if target in SOURCES or target in REFERENCES:
@@ -224,7 +223,7 @@ def run(target: str, if_missing: bool = False) -> None:
         if target == "static":
             names += list(REFERENCES)
     else:
-        raise ValueError(f"Unknown target {target!r}")
+        raise UserError(f"Unknown target {target!r}")
     store = open_store()
     for name in names:
         if name in REFERENCES:

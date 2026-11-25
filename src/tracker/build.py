@@ -31,6 +31,7 @@ import pyarrow.parquet as pq
 from duckdb.sqltypes import VARCHAR
 
 from tracker import geonames
+from tracker.errors import UserError
 from tracker.ingest import clean_path
 from tracker.schema import COLUMNS, read_csv, validate
 from tracker.sources import FAMILIES, SOURCES
@@ -87,7 +88,7 @@ def load_clean(store: Store, work: Path) -> dict[str, int]:
             raise ValueError(f"{name}: unknown licence family {source.family!r}")
         table = store.backend.read(clean_path(name))
         if table is None:
-            raise ValueError(f"{name}: no clean table, run `tracker ingest {name}`")
+            raise UserError(f"{name}: no clean table, run `tracker ingest {name}`")
         (work / f"{name}.parquet").write_bytes(table)
         counts[name] = pq.read_metadata(work / f"{name}.parquet").num_rows
     return counts
@@ -101,7 +102,7 @@ def load_geocode(store: Store) -> pd.DataFrame:
     """
     content = store.latest(geonames.SOURCE, geonames.FILE_NAME)
     if content is None:
-        raise ValueError(
+        raise UserError(
             f"{geonames.SOURCE}: no stored file, run `tracker ingest {geonames.SOURCE}`"
         )
     stored = [
@@ -181,9 +182,9 @@ def check_coordinates(con: duckdb.DuckDBPyConnection) -> None:
         "AND events.geo_precision <> 'place'"
     ).fetchall()[0][0]
     if changed:
-        raise ValueError(f"{changed} rows with source coordinates were changed")
+        raise UserError(f"{changed} rows with source coordinates were changed")
     if added:
-        raise ValueError(f"{added} rows gained coordinates without `place` precision")
+        raise UserError(f"{added} rows gained coordinates without `place` precision")
 
 
 def quote(path: Path) -> str:
@@ -226,14 +227,14 @@ def check(family: str, folder: Path, counts: dict[str, int]) -> None:
     schema = pq.read_schema(events_file)
     found = {field.name: type_name(field.type) for field in schema}
     if found != expected_types() or list(found) != COLUMNS:
-        raise ValueError(f"{family}: events.parquet breaks the schema: {found}")
+        raise UserError(f"{family}: events.parquet breaks the schema: {found}")
 
     events = pd.read_parquet(events_file)
     validate(events)
     csv_events = read_csv(folder / "events.csv")
     validate(csv_events)
     if len(csv_events) != len(events):
-        raise ValueError(
+        raise UserError(
             f"{family}: events.csv has {len(csv_events)} rows, "
             f"events.parquet has {len(events)}"
         )
@@ -244,16 +245,16 @@ def check(family: str, folder: Path, counts: dict[str, int]) -> None:
     expected = {name: counts[name] for name in family_sources(family)}
     for name in sorted(set(expected) | set(published)):
         if published.get(name, 0) != expected.get(name, 0):
-            raise ValueError(
+            raise UserError(
                 f"{name}: {published.get(name, 0)} rows in {family}/events.parquet, "
                 f"{expected.get(name, 0)} in the clean table"
             )
 
     listed = pd.read_parquet(folder / "sources.parquet")
     if list(listed.columns) != SOURCE_COLUMNS:
-        raise ValueError(f"{family}: unexpected sources columns {list(listed.columns)}")
+        raise UserError(f"{family}: unexpected sources columns {list(listed.columns)}")
     if sorted(listed["source"]) != sorted(expected):
-        raise ValueError(
+        raise UserError(
             f"{family}: sources.parquet lists {sorted(listed['source'])}, "
             f"expected {sorted(expected)}"
         )
@@ -274,7 +275,7 @@ def build(store: Store, out: Path, sql_dir: Path = SQL_DIR) -> None:
     """
     files = sorted(sql_dir.glob("*.sql"))
     if not files:
-        raise ValueError(f"No SQL file in {sql_dir}")
+        raise UserError(f"No SQL file in {sql_dir}")
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         counts = load_clean(store, work)

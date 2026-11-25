@@ -6,8 +6,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from tracker import build, ingest, quality
+from tracker.errors import UserError
 from tracker.sources import REFERENCES, SOURCES
-from tracker.store import open_store
+from tracker.store import StoreError, open_store
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,15 +78,20 @@ def main(argv: Sequence[str] | None = None) -> None:
         argv: The arguments after the command name. Default: `sys.argv`.
 
     Raises:
-        SystemExit: The arguments are invalid, or `--help` was given.
+        SystemExit: The arguments are invalid, `--help` was given, or a command
+            stopped on a known problem (`UserError` or `StoreError`): the code
+            is 1 and the message goes to standard error with no traceback.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = build_parser().parse_args(argv)
-    if args.command == "ingest":
-        ingest.run(args.target, args.if_missing)
-    elif args.command == "rebuild":
-        ingest.rebuild(args.source, open_store(), args.allow_shrink)
-    elif args.command == "build":
-        build.build(open_store(), args.out)
-    elif args.command == "quality":
-        quality.run(open_store(), args.out)
+    try:
+        if args.command == "ingest":
+            ingest.run(args.target, args.if_missing)
+        elif args.command == "rebuild":
+            ingest.rebuild(args.source, open_store(), args.allow_shrink)
+        elif args.command == "build":
+            build.build(open_store(), args.out)
+        elif args.command == "quality":
+            quality.run(open_store(), args.out)
+    except (UserError, StoreError) as error:
+        raise SystemExit(str(error)) from None

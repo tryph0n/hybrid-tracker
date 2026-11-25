@@ -16,6 +16,7 @@ import zipfile
 
 import pandas as pd
 
+from tracker.errors import UserError
 from tracker.store import Payload
 
 SOURCE = "geonames"
@@ -105,7 +106,7 @@ def read_places(archive: bytes) -> pd.DataFrame:
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         members = [name for name in zipped.namelist() if name.endswith(".txt")]
         if len(members) != 1:
-            raise ValueError(f"Expected one .txt file in the archive, got {members}")
+            raise UserError(f"Expected one .txt file in the archive, got {members}")
         content = zipped.read(members[0])
     return pd.read_csv(
         io.BytesIO(content),
