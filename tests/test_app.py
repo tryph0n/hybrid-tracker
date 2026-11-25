@@ -183,6 +183,38 @@ def test_table_and_map_state_who_attributed(sample_data_dir):
     assert "Attributed by=" in hover
 
 
+NONE_LABEL = "No attribution in the source"
+
+
+def test_map_hover_of_an_unattributed_event_shows_the_data(sample_data_dir):
+    at = run_app()
+    traces = chart(at, 1).data
+
+    def hover_values(label):
+        pattern = rf"{label}=%\{{customdata\[(\d+)\]"
+        index = int(re.search(pattern, traces[0].hovertemplate)[1])
+        return [row[index] for trace in traces for row in trace.customdata]
+
+    levels = hover_values("Attribution")
+    holders = hover_values("Attributed by")
+    actors = hover_values("Actors")
+    assert NONE_LABEL in levels
+    assert "" in actors
+    for label in (
+        "Date",
+        "Place",
+        "Category",
+        "Attribution",
+        "Attributed by",
+        "Actors",
+    ):
+        for value in hover_values(label):
+            assert str(value).lower() not in {"nan", "none"}, label
+    for level, holder in zip(levels, holders, strict=True):
+        if level == NONE_LABEL:
+            assert holder == ""
+
+
 def test_credits_every_source(sample_data_dir):
     at = run_app()
     for source in SOURCES.values():
