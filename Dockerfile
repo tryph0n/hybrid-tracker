@@ -37,7 +37,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --chown=app:app .streamlit/ ./.streamlit/
 COPY --chown=app:app src/ ./src/
-COPY --chown=app:app missing/ ./missing/
+COPY --chown=app:app data/ ./data/
 
 USER app
 
