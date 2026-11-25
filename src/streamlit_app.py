@@ -314,6 +314,7 @@ st.caption(
 with st.sidebar:
     st.header("Filters")
     period_label = st.selectbox("Period", list(PERIODS), key="period")
+    period_note = st.container()
     source_names = st.multiselect(
         "Sources",
         list(SOURCES),
@@ -391,6 +392,16 @@ scoped = filter_events(
 
 today = utc_today()
 days = PERIODS[period_label]
+month_sources = scoped.loc[scoped["date_precision"] == "month", "source"].unique()
+if days is not None and len(month_sources):
+    titles = ", ".join(SOURCES[name].title for name in SOURCES if name in month_sources)
+    period_note.caption(
+        f"Some dates are known to the month or year only ({titles}): the event "
+        "is dated the 1st of the month the source gives, or 1 January when it "
+        "gives the year only. Such an event counts in a period only if that "
+        "date falls inside it, so an event of the month that contains the "
+        "period start can be left out."
+    )
 events = (
     scoped if days is None else scoped[scoped["date"] > today - pd.Timedelta(days=days)]
 )
