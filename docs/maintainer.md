@@ -67,6 +67,7 @@ uv run tracker ingest live      # every live source
 uv run tracker ingest static    # every static source
 uv run tracker ingest <name>    # one source, for example eodi
 uv run tracker ingest check     # validate the stored files, no network, no store
+uv run tracker rebuild [<name>] # clean tables again from the stored payloads, no download
 ```
 
 `ingest` saves the payloads first, so a payload that fails to map stays in the
@@ -79,6 +80,19 @@ upstream label also stops the ingest, in the adapter or in `validate`.
 If the drop is a real correction, delete `data/events/<name>.csv` and
 `clean/<name>.parquet` in the raw store, run `uv run tracker ingest <name>`,
 read the diff and commit.
+
+To apply a mapping fix, use `uv run tracker rebuild` (every source) or
+`uv run tracker rebuild <name>`. It reads the latest stored payload of each
+file, runs `normalize()`, validates, and writes the clean table and the CSV
+file. It downloads nothing, so the diff shows the fix and no upstream change.
+With the local store it makes no network call; with the Hugging Face store
+each read is a network call to the dataset. It applies the same checks as
+`ingest`: nothing is written for a source that fails `validate` or loses more
+than 5% of its stored events. If a fix drops rows on purpose, add
+`--allow-shrink`; the log then holds a warning that the guard was skipped. A
+source with no stored payload (today `leiden`, which is ingested by hand) is
+skipped with a warning when you rebuild every source, and is an error when you
+name it. A rebuild from an older payload is not available.
 
 When a new version of a static source is published, follow the docstring of
 its module (`src/tracker/leiden.py`). For the Leiden dataset:
@@ -146,8 +160,9 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
 ## Change the schema
 
 A new or renamed column changes every stored file. Update every adapter, run
-`uv run tracker ingest live` and `uv run tracker ingest static`
-(network and a raw store needed), and update `tests/fixtures/events/` and the `HEADER` in
+`uv run tracker rebuild` (a raw store needed, no download: it replays the
+stored payloads, so the diff shows only the schema change; add `--allow-shrink`
+if the change drops rows on purpose), and update `tests/fixtures/events/` and the `HEADER` in
 `tests/test_ingest.py`. `docs/conf.py` reads
 `schema.py` without importing it: keep `COLUMNS`, `REQUIRED` and the lists of
 `ALLOWED_VALUES` as literal lists, and one comment on each column line.

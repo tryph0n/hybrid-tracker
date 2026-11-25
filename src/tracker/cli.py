@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from tracker import ingest
 from tracker.sources import SOURCES
+from tracker.store import open_store
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +25,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="a source, every `live` or `static` source, or `check` to validate "
         "the stored files without a download",
     )
+    rebuild_parser = commands.add_parser(
+        "rebuild",
+        help="write the clean tables again from the stored payloads, with no download",
+    )
+    rebuild_parser.add_argument(
+        "source",
+        nargs="?",
+        choices=list(SOURCES),
+        help="a source; every source when omitted",
+    )
+    rebuild_parser.add_argument(
+        "--allow-shrink",
+        action="store_true",
+        help="write the table even if it loses more than 5%% of the stored events",
+    )
     return parser
 
 
@@ -40,3 +56,5 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     if args.command == "ingest":
         ingest.run(args.target)
+    elif args.command == "rebuild":
+        ingest.rebuild(args.source, open_store(), args.allow_shrink)

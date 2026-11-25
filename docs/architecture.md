@@ -164,6 +164,7 @@ flowchart TB
   module_streamlit_app_py --> module_tracker_views
   module_tracker_cli --> module_tracker_ingest
   module_tracker_cli --> module_tracker_sources
+  module_tracker_cli --> module_tracker_store
   module_tracker_eodi --> module_tracker_schema
   module_tracker_eodi --> module_tracker_store
   module_tracker_ingest --> module_tracker_schema
