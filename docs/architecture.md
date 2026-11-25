@@ -98,6 +98,7 @@ flowchart LR
 | Docker build check | Start the container and wait for the health answer |  | a script |
 | Docker image | Publish Docker image |  | a script |
 | Deploy to Render | Deploy to Render |  | a script |
+| Deploy to Render | Wait for the new image to answer | `steps.deploy.outputs.called == 'true'` | a script |
 | Hugging Face mirror | Install |  | `uv sync --locked` |
 | Hugging Face mirror | Mirror the data to Hugging Face |  | a script |
 

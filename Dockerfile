@@ -39,6 +39,11 @@ COPY --chown=app:app .streamlit/ ./.streamlit/
 COPY --chown=app:app src/ ./src/
 COPY --chown=app:app data/ ./data/
 
+# After the COPY lines: the tag is not a file of the repository, so it stays out of
+# the tag hash. Streamlit serves it at /app/static/version.txt.
+ARG IMAGE_TAG=dev
+RUN mkdir src/static && echo "$IMAGE_TAG" > src/static/version.txt && chown -R app:app src/static
+
 USER app
 
 EXPOSE 8501
