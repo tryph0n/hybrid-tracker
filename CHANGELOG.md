@@ -8,6 +8,13 @@ The version number is set by hand in `pyproject.toml` only.
 
 ## [Unreleased]
 
+### Changed
+
+- The adapters and the dashboard use schema v2 (dataset 2.0.0): `domain`,
+  `actors`, `attribution` and `attributed_by` replace `russia_link`. See the
+  [`Versions` section](data/events/README.md#versions) of the dataset card for
+  the mapping and for the tag `v1.0.0` of the old version.
+
 ## [0.1.0] - 2026-11-25
 
 First tagged version. It describes the state of the project at that date.

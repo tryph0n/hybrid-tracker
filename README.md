@@ -31,12 +31,25 @@ commits the files, then updates the dashboard and the dataset. See the
 ## Reading the data
 
 A reported incident is not a confirmed one, and a confirmed one is not an
-attribution. Two fields keep these questions apart:
+attribution. Three fields keep these questions apart:
 
 - `event_status`: is the event itself established (`confirmed`, `unconfirmed`,
   `dismissed`)?
-- `russia_link`: who links it to Russia (`official` authority, `assessed` by
-  the source's analysts, `none`)?
+- `actors`: which states a source links to the event (ISO codes joined by ";").
+  It is empty when nobody attributes the event.
+- `attribution`: how strong that link is (`official` authority, `assessed` by
+  the source's analysts, `claimed` by a group, `none`). `attributed_by` names
+  who made the link.
+
+`domain` groups the events (air, sabotage, violence, maritime, cyber,
+information, espionage, other), and `category` refines it.
+
+The data has a version, 2.0.0 today. The first version (1.0.0) used other
+column names. It stays readable at the tag `v1.0.0` of the dataset, for example
+`pd.read_csv("hf://datasets/sam-bot/europe-hybrid-incidents@v1.0.0/eodi.csv")`.
+See the
+[`Versions` section](https://github.com/tryph0n/hybrid-tracker/blob/main/data/events/README.md#versions)
+of the dataset card for the mapping.
 
 The dashboard hides `dismissed` events by default: add "Dismissed by the
 source" to the Event status filter to show them. The Sources table counts all
