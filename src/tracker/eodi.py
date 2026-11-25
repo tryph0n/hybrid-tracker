@@ -10,7 +10,7 @@ import urllib.request
 
 import pandas as pd
 
-from tracker.schema import COLUMNS
+from tracker.schema import COLUMNS, read_csv
 
 LOCATED_URL = "https://droneobservatory.eu/datos/incidentes.csv"
 UNLOCATED_URL = "https://droneobservatory.eu/datos/incidentes_sin_ubicacion.json"
@@ -80,7 +80,7 @@ def fetch() -> pd.DataFrame:
         ValueError: An unknown date precision, an unknown actor or an attributed
             unlocated incident (see `normalize` and `fetch_unlocated`).
     """
-    located = pd.read_csv(LOCATED_URL, storage_options=HEADERS)
+    located = read_csv(LOCATED_URL, storage_options=HEADERS)
     return normalize(pd.concat([located, fetch_unlocated()], ignore_index=True))
 
 
