@@ -377,3 +377,38 @@ def test_the_rebuild_command_takes_the_override_flag():
     assert (args.source, args.allow_shrink) == ("eodi", True)
     args = cli.build_parser().parse_args(["rebuild"])
     assert (args.source, args.allow_shrink) == (None, False)
+
+
+def test_if_missing_writes_the_missing_clean_table_and_skips_a_stored_one(
+    data_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    store = open_store()
+    assert store.backend.read(ingest.clean_path("leiden")) is None
+
+    cli.main(["ingest", "static", "--if-missing"])
+    assert len(clean_table(store, "leiden")) > 0
+
+    forbid_download(monkeypatch)
+    cli.main(["ingest", "static", "--if-missing"])
+
+
+def test_if_missing_downloads_again_when_the_clean_table_is_gone(
+    data_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    cli.main(["ingest", "static"])
+    store = open_store()
+    (tmp_path / "store" / ingest.clean_path("leiden")).unlink()
+
+    cli.main(["ingest", "leiden", "--if-missing"])
+    assert len(clean_table(store, "leiden")) > 0
+
+
+def test_if_missing_does_not_apply_to_check():
+    with pytest.raises(ValueError, match="does not apply"):
+        ingest.run("check", if_missing=True)
