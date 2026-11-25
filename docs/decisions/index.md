@@ -15,4 +15,5 @@ changes: a new record replaces it, and the old one gets the status
 
 template
 0001-record-decisions
+0002-schema-v2
 ```
