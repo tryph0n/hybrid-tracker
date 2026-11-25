@@ -13,7 +13,7 @@ This page is generated from the code by `scripts/architecture.py`: do not edit
 it by hand. After a change, run this command and commit the result:
 
 ```bash
-PYTHONPATH=src python scripts/architecture.py
+uv run python scripts/architecture.py
 ```
 
 The pipeline fails while the page is out of date.
@@ -80,19 +80,19 @@ flowchart LR
 
 | Job | Step | Runs if | Runs |
 | --- | --- | --- | --- |
-| Lint | Install |  | `pip install -r requirements-dev.txt` |
-| Lint | Lint |  | `ruff check . && ruff format --check .` |
-| Data | Install |  | `pip install -r requirements-dev.txt` |
-| Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `python -m tracker.ingest live` |
-| Data | Validate stored data |  | `python -m tracker.ingest check` |
-| Data | Run the tests |  | `pytest` |
+| Lint | Install |  | `uv sync --locked` |
+| Lint | Lint |  | `uv run ruff check . && uv run ruff format --check .` |
+| Data | Install |  | `uv sync --locked` |
+| Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run python -m tracker.ingest live` |
+| Data | Validate stored data |  | `uv run python -m tracker.ingest check` |
+| Data | Run the tests |  | `uv run pytest` |
 | Data | Commit refreshed data | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | a script |
-| Docs | Install |  | `pip install -r requirements-dev.txt -r docs/requirements.txt` |
-| Docs | Check the architecture page |  | `python scripts/architecture.py --check` |
-| Docs | Build docs |  | `sphinx-build -W --keep-going -b html docs docs/_build/html` |
+| Docs | Install |  | `uv sync --locked --group docs` |
+| Docs | Check the architecture page |  | `uv run python scripts/architecture.py --check` |
+| Docs | Build docs |  | `uv run sphinx-build -W --keep-going -b html docs docs/_build/html` |
 | Docker image | Publish Docker image |  | a script |
 | Deploy to Render | Deploy to Render |  | a script |
-| Hugging Face mirror | Install |  | `pip install -r requirements-dev.txt` |
+| Hugging Face mirror | Install |  | `uv sync --locked` |
 | Hugging Face mirror | Mirror the data to Hugging Face |  | a script |
 
 ## Modules

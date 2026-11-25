@@ -5,15 +5,28 @@ dashboard, see the [home page](index.md).
 
 ## Set up
 
-Use Python 3.13 and a virtual environment. The install line is the one of the
-`Docs` job in `.github/workflows/pipeline.yml`:
+Install [uv](https://docs.astral.sh/uv/). The project is a package
+(`pyproject.toml`) with a
+lockfile (`uv.lock`). One command installs the package, the runtime
+dependencies and the `dev` group, with the versions of the lockfile, in a
+virtual environment on Python 3.13:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt -r docs/requirements.txt
-export PYTHONPATH=src
+uv sync --locked
 ```
+
+The Docs job and Read the Docs also use the `docs` group. For the docs build,
+run `uv sync --locked --group docs`. Run every command below with `uv run`
+(for example `uv run pytest`). No environment variable is needed.
+
+## Layout
+
+- `src/tracker/` is the package. It holds the sources, the schema and the
+  ingest. It does not import Streamlit.
+- Only the app imports Streamlit (`src/streamlit_app.py`). Keep it so: the
+  front end must stay easy to replace later.
+- `src/streamlit_app.py` is a script, not part of the package. The image copies
+  `src/`.
 
 ## Sources and ingest
 
@@ -28,10 +41,10 @@ Each source is stored as `data/events/<name>.csv`. Commands, from the
 repository root:
 
 ```bash
-python -m tracker.ingest live      # every live source
-python -m tracker.ingest static    # every static source
-python -m tracker.ingest <name>    # one source, for example eodi
-python -m tracker.ingest check     # validate the stored files, no network
+uv run python -m tracker.ingest live      # every live source
+uv run python -m tracker.ingest static    # every static source
+uv run python -m tracker.ingest <name>    # one source, for example eodi
+uv run python -m tracker.ingest check     # validate the stored files, no network
 ```
 
 `ingest` validates the events before it writes the file. It rejects a refresh
@@ -40,7 +53,7 @@ that loses more than 5% of the stored events (`MAX_SHRINK` in
 correction. An unknown upstream label also stops the ingest, in the adapter or
 in `validate`.
 If the drop is a real correction, delete `data/events/<name>.csv`, run
-`python -m tracker.ingest <name>`, read the diff and commit.
+`uv run python -m tracker.ingest <name>`, read the diff and commit.
 
 When a new version of a static source is published, follow the docstring of
 its module (`src/tracker/leiden.py`): update the file URL, ingest, read the
@@ -66,13 +79,15 @@ spreadsheet rows, so they can move in a new version.
    It is the CSV name, the `source` value, the prefix of `event_id`
    (`<name>:<id>`) and the ingest target. Do not use `check`, `live` or
    `static`.
-4. Add any new package to `requirements.txt`, pinned.
+4. Add any new package with `uv add <package>`, then pin it as `name==version` in
+   `pyproject.toml` and run `uv lock`. Commit `pyproject.toml` and `uv.lock`.
+   Until the image installs from the lockfile, also add it to `requirements.txt`.
 5. For a new category, status or link value: add it to `src/tracker/schema.py`
    and to the labels of `src/streamlit_app.py` (for a category, also the two
    colour lists, in the same order). For a status or link value, also update
    the list in `README.md`, "Reading the data".
 6. If the source needs a secret, export it locally first. Run
-   `python -m tracker.ingest <name>`, then `python -m tracker.ingest check`.
+   `uv run python -m tracker.ingest <name>`, then `uv run python -m tracker.ingest check`.
    Commit `data/events/<name>.csv`.
 7. Add `tests/fixtures/events/<name>.csv`: a few rows in the stored format. Add
    `tests/test_<name>.py` with a recorded upstream sample in
@@ -87,7 +102,7 @@ spreadsheet rows, so they can move in a new version.
    `tests/test_attribution.py` checks the credits.
 9. A live source that needs a secret: add `env:` to the "Refresh live
    sources" step and set the secret in the repository.
-10. Run `python scripts/architecture.py` and commit `docs/architecture.md`.
+10. Run `uv run python scripts/architecture.py` and commit `docs/architecture.md`.
 11. Run the checks below. After the merge of a live source, run the pipeline
     by hand (see "Run the pipeline by hand"): a pull request does not run the
     refresh.
@@ -95,7 +110,7 @@ spreadsheet rows, so they can move in a new version.
 ## Change the schema
 
 A new or renamed column changes every stored file. Update every adapter, run
-`python -m tracker.ingest live` and `python -m tracker.ingest static`
+`uv run python -m tracker.ingest live` and `uv run python -m tracker.ingest static`
 (network needed), and update `tests/fixtures/events/` and the `HEADER` in
 `tests/test_ingest.py`. `docs/conf.py` reads
 `schema.py` without importing it: keep `COLUMNS`, `REQUIRED` and the lists of
@@ -137,14 +152,15 @@ reminds you of the checks.
 In the order of the pipeline:
 
 ```bash
-ruff check . && ruff format --check .
-python -m tracker.ingest check
-pytest
-python scripts/architecture.py --check
-sphinx-build -W --keep-going -b html docs docs/_build/html
+uv sync --locked --group docs
+uv run ruff check . && uv run ruff format --check .
+uv run python -m tracker.ingest check
+uv run pytest
+uv run python scripts/architecture.py --check
+uv run sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
 
-`pytest` includes the dashboard, run headless on the stored data and on
+`uv run pytest` includes the dashboard, run headless on the stored data and on
 samples. The check of `docs/architecture.md` prints the command that fixes it.
 The `docs/` build runs with `-W`: a warning fails it.
 
@@ -227,12 +243,12 @@ A failed run shows a red job in Actions. Read the log of that job first.
 
 | Failed job | Likely cause | Action |
 |---|---|---|
-| Lint | Style error | Run `ruff check --fix . && ruff format .` and commit. |
-| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `python -m tracker.ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
+| Lint | Style error | Run `uv run ruff check --fix . && uv run ruff format .` and commit. |
+| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `uv run python -m tracker.ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
 | Data, validate or tests | A hand edit of a CSV, or an adapter bug. The error usually names the column. | Find the cause, fix it, push. |
 | Data, commit | A push to main during the run changed the same data file, so the rebase stopped; or a branch rule on main blocks the bot | Run the pipeline again. Keep main open to pushes from github-actions[bot]. |
-| Docs, architecture | The page does not match the code | Run `python scripts/architecture.py` and commit the page. |
-| Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `sphinx-build` command above and read the warning. |
+| Docs, architecture | The page does not match the code | Run `uv run python scripts/architecture.py` and commit the page. |
+| Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `uv run sphinx-build` command above and read the warning. |
 | Docker image | A broken `Dockerfile` (the build runs only on `main`), an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
 | Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended or the workspace cannot deploy | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Then run the job again. |
 | Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match, or `HF_DATASET` names another dataset; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |

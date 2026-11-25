@@ -1,11 +1,11 @@
 """Fetch sources and store them as data/events/<source>.csv.
 
-Usage, from the repository root with PYTHONPATH=src:
+Usage, from the repository root after `uv sync`:
 
-- `python -m tracker.ingest live`: every live source (scheduled pipeline)
-- `python -m tracker.ingest static`: every static source (run by hand)
-- `python -m tracker.ingest eodi`: a single source
-- `python -m tracker.ingest check`: validate stored files, fetch nothing
+- `uv run python -m tracker.ingest live`: every live source (scheduled pipeline)
+- `uv run python -m tracker.ingest static`: every static source (run by hand)
+- `uv run python -m tracker.ingest eodi`: a single source
+- `uv run python -m tracker.ingest check`: validate stored files, fetch nothing
 """
 
 import sys
