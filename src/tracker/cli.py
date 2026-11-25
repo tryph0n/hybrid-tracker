@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from tracker import build, ingest, quality
+from tracker.errors import UserError
 from tracker.sources import REFERENCES, SOURCES
 from tracker.store import StoreError, open_store
 
@@ -78,7 +79,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     Raises:
         SystemExit: The arguments are invalid, `--help` was given, or a command
-            stopped on a known problem (`ValueError` or `StoreError`): the code
+            stopped on a known problem (`UserError` or `StoreError`): the code
             is 1 and the message goes to standard error with no traceback.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -92,5 +93,5 @@ def main(argv: Sequence[str] | None = None) -> None:
             build.build(open_store(), args.out)
         elif args.command == "quality":
             quality.run(open_store(), args.out)
-    except (ValueError, StoreError) as error:
+    except (UserError, StoreError) as error:
         raise SystemExit(str(error)) from None

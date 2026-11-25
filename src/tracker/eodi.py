@@ -12,6 +12,7 @@ from collections.abc import Mapping
 
 import pandas as pd
 
+from tracker.errors import UserError
 from tracker.schema import COLUMNS, make_event_id, read_csv
 from tracker.store import Payload
 
@@ -163,7 +164,7 @@ def reshape_unlocated(payload: bytes) -> pd.DataFrame:
     rows = []
     for incident in incidents:
         if incident["estado"]["actual"] == "atribuido":
-            raise ValueError(f"Attributed unlocated incident: {incident['id']}")
+            raise UserError(f"Attributed unlocated incident: {incident['id']}")
         rows.append(
             {
                 "id": incident["id"],
@@ -244,7 +245,7 @@ def date_precision(value: str) -> str:
         ValueError: `value` is not a key of `DATE_PRECISION`.
     """
     if value not in DATE_PRECISION:
-        raise ValueError(f"Unknown date precision {value!r}: add it to DATE_PRECISION")
+        raise UserError(f"Unknown date precision {value!r}: add it to DATE_PRECISION")
     return DATE_PRECISION[value]
 
 
@@ -265,7 +266,7 @@ def geo_precision(located: bool, level: str | float) -> str:
     if located:
         return "exact"
     if level not in GEO_PRECISION:
-        raise ValueError(f"Unknown nivel {level!r}: add it to GEO_PRECISION")
+        raise UserError(f"Unknown nivel {level!r}: add it to GEO_PRECISION")
     return GEO_PRECISION[level]
 
 
@@ -284,5 +285,5 @@ def actor_code(actor: str | float) -> str | float:
     if pd.isna(actor):
         return pd.NA
     if actor not in ACTOR_CODES:
-        raise ValueError(f"Unknown actor {actor!r}: add it to ACTOR_CODES")
+        raise UserError(f"Unknown actor {actor!r}: add it to ACTOR_CODES")
     return ACTOR_CODES[actor]

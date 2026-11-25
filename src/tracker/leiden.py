@@ -22,6 +22,7 @@ import openpyxl
 import pandas as pd
 import pycountry
 
+from tracker.errors import UserError
 from tracker.schema import COLUMNS, make_event_id
 from tracker.store import Payload
 
@@ -90,10 +91,10 @@ def check_version(answer: dict[str, Any]) -> None:
     data = answer["data"]
     licence = data["license"]["name"]
     if licence != LICENCE:
-        raise ValueError(f"The licence is {licence!r}, not {LICENCE!r}")
+        raise UserError(f"The licence is {licence!r}, not {LICENCE!r}")
     version = f"{data['versionNumber']}.{data['versionMinorNumber']}"
     if version != PINNED_VERSION:
-        raise ValueError(
+        raise UserError(
             f"Version {version} is published, the adapter is pinned to "
             f"{PINNED_VERSION}: review it, then change PINNED_VERSION and the "
             "citation"
@@ -115,7 +116,7 @@ def spreadsheet_id(answer: dict[str, Any]) -> int:
         if item["dataFile"]["filename"].lower().endswith(".xlsx")
     ]
     if len(ids) != 1:
-        raise ValueError(f"Expected one .xlsx file, found {len(ids)}")
+        raise UserError(f"Expected one .xlsx file, found {len(ids)}")
     return int(ids[0])
 
 
@@ -293,7 +294,7 @@ def end_dates(values: pd.Series) -> pd.Series:
             return ""
         if isinstance(value, str):
             if value.strip() not in NO_END_DATE:
-                raise ValueError(f"Unknown IncidentDateEnd text: {value!r}")
+                raise UserError(f"Unknown IncidentDateEnd text: {value!r}")
             return ""
         return pd.Timestamp(value).strftime("%Y-%m-%d")
 

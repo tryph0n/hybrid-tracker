@@ -8,6 +8,8 @@ from typing import IO
 
 import pandas as pd
 
+from tracker.errors import UserError
+
 SCHEMA_VERSION = "2.1.0"
 
 # Column order of every file in data/events/.
@@ -158,7 +160,7 @@ def make_event_id(
     if native_id is not None:
         return f"{source}:{native_id}"
     if not key:
-        raise ValueError("An event id needs a native id or a key.")
+        raise UserError("An event id needs a native id or a key.")
     parts = [re.sub(r"\s+", " ", part.strip()).casefold() for part in key]
     digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
     return f"{source}:{digest[:12]}"
@@ -185,28 +187,28 @@ def validate(events: pd.DataFrame) -> None:
         ValueError: A check fails.
     """
     if list(events.columns) != COLUMNS:
-        raise ValueError(f"Unexpected columns: {list(events.columns)}")
+        raise UserError(f"Unexpected columns: {list(events.columns)}")
     if events.empty:
-        raise ValueError("No events")
+        raise UserError("No events")
 
     for column in REQUIRED:
         blank = events[column].astype(str).str.strip() == ""
         missing = (events[column].isna() | blank).sum()
         if missing:
-            raise ValueError(f"{missing} rows without {column}")
+            raise UserError(f"{missing} rows without {column}")
 
     if not events["event_id"].is_unique:
-        raise ValueError("Duplicate event_id")
+        raise UserError("Duplicate event_id")
 
     for column, allowed in ALLOWED_VALUES.items():
         unknown = set(events[column]) - set(allowed)
         if unknown:
-            raise ValueError(f"Unknown {column} values: {sorted(unknown)}")
+            raise UserError(f"Unknown {column} values: {sorted(unknown)}")
 
     mismatched = events[events["category"].map(CATEGORY_DOMAINS) != events["domain"]]
     if not mismatched.empty:
         pairs = sorted(set(zip(mismatched["category"], mismatched["domain"])))
-        raise ValueError(f"category not in domain: {pairs}")
+        raise UserError(f"category not in domain: {pairs}")
 
     for column, pattern in [
         ("countries", COUNTRIES_PATTERN),
@@ -215,14 +217,14 @@ def validate(events: pd.DataFrame) -> None:
         values = events[column].dropna().astype(str)
         bad = values[(values != "") & ~values.str.fullmatch(pattern)]
         if not bad.empty:
-            raise ValueError(f"Invalid {column} values: {sorted(set(bad))}")
+            raise UserError(f"Invalid {column} values: {sorted(set(bad))}")
 
     has_actors = events["actors"].astype("string").fillna("") != ""
     is_none = events["attribution"] == "none"
     if (~is_none & ~has_actors).any():
-        raise ValueError("attribution other than none needs actors")
+        raise UserError("attribution other than none needs actors")
     if (is_none & has_actors).any():
-        raise ValueError("attribution none needs empty actors")
+        raise UserError("attribution none needs empty actors")
 
     # Raises ValueError on a date that does not parse with %Y-%m-%d.
     start = pd.to_datetime(events["date"], format="%Y-%m-%d")
@@ -230,14 +232,14 @@ def validate(events: pd.DataFrame) -> None:
     has_end = end_text != ""
     end = pd.to_datetime(end_text[has_end], format="%Y-%m-%d")
     if (end < start[has_end]).any():
-        raise ValueError("end_date before date")
+        raise UserError("end_date before date")
 
     if (events["lat"].isna() != events["lon"].isna()).any():
-        raise ValueError("lat and lon must be both set or both empty")
+        raise UserError("lat and lon must be both set or both empty")
     if not events["lat"].dropna().between(-90, 90).all():
-        raise ValueError("lat out of range")
+        raise UserError("lat out of range")
     if not events["lon"].dropna().between(-180, 180).all():
-        raise ValueError("lon out of range")
+        raise UserError("lon out of range")
 
 
 def read_csv(source: str | Path | IO[bytes]) -> pd.DataFrame:
