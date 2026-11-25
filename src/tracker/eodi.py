@@ -10,7 +10,7 @@ import urllib.request
 
 import pandas as pd
 
-from tracker.schema import COLUMNS, read_csv
+from tracker.schema import COLUMNS, make_event_id, read_csv
 
 LOCATED_URL = "https://droneobservatory.eu/datos/incidentes.csv"
 UNLOCATED_URL = "https://droneobservatory.eu/datos/incidentes_sin_ubicacion.json"
@@ -143,7 +143,7 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
     """
     events = pd.DataFrame(
         {
-            "event_id": "eodi:" + raw["id"],
+            "event_id": raw["id"].map(lambda i: make_event_id("eodi", i)),
             "source": "eodi",
             "date": raw["inicio"].str[:10],
             "date_precision": raw["inicio_precision"].map(date_precision),
