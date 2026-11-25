@@ -3,8 +3,9 @@
 import argparse
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 
-from tracker import ingest
+from tracker import build, ingest
 from tracker.sources import SOURCES
 from tracker.store import open_store
 
@@ -40,6 +41,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write the table even if it loses more than 5%% of the stored events",
     )
+    build_cmd = commands.add_parser(
+        "build",
+        help="write the published tables of each licence family from the clean tables",
+    )
+    build_cmd.add_argument(
+        "--out",
+        type=Path,
+        default=Path("build"),
+        help="folder that gets one subfolder per family (default: build)",
+    )
     return parser
 
 
@@ -58,3 +69,5 @@ def main(argv: Sequence[str] | None = None) -> None:
         ingest.run(args.target)
     elif args.command == "rebuild":
         ingest.rebuild(args.source, open_store(), args.allow_shrink)
+    elif args.command == "build":
+        build.build(open_store(), args.out)

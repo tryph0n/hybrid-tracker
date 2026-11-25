@@ -68,6 +68,7 @@ uv run tracker ingest static    # every static source
 uv run tracker ingest <name>    # one source, for example eodi
 uv run tracker ingest check     # validate the stored files, no network, no store
 uv run tracker rebuild [<name>] # clean tables again from the stored payloads, no download
+uv run tracker build [--out build] # published tables of each licence family
 ```
 
 `ingest` saves the payloads first, so a payload that fails to map stays in the
@@ -93,6 +94,20 @@ than 5% of its stored events. If a fix drops rows on purpose, add
 source with no stored payload (today `leiden`, which is ingested by hand) is
 skipped with a warning when you rebuild every source, and is an error when you
 name it. A rebuild from an older payload is not available.
+
+`uv run tracker build` reads the clean tables of the raw store, runs the files
+of `sql/` in name order with DuckDB (in memory), and writes `events.parquet`,
+`events.csv` and `sources.parquet` to `build/open/` and `build/nc/`. The
+`open` family holds the rows of `open` sources. The `nc` family holds the rows
+of both families, because a NonCommercial source cannot be merged into a CC BY
+table. The SQL files must create `events_<family>` and `sources_<family>`.
+Before it writes anything, the command fails if a published table has another
+row count for a source than its clean table (the message names the source),
+or if an output breaks the schema (column types, then `validate`). The output
+is sorted by `source, event_id`, so the same input gives the same bytes. A
+Parquet file holds the DuckDB version: after an upgrade, compare contents, not
+hashes. The data job runs the command after the refresh, on a scheduled or
+manual run.
 
 When a new version of a static source is published, follow the docstring of
 its module (`src/tracker/leiden.py`). For the Leiden dataset:
@@ -125,7 +140,8 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    source.`: the architecture page shows that first line. Use the existing
    adapters as examples.
 3. Import the module in `src/tracker/sources.py` and add a `Source` entry:
-   title, `kind`, homepage, licence, citation, `extract`, `normalize`. The key is lowercase.
+   title, `kind`, homepage, licence, `family` (`open` or `nc`), citation,
+   `extract`, `normalize`. The key is lowercase.
    It is the CSV name, the `source` value, the prefix of `event_id`
    (`<name>:<id>`) and the ingest target. Do not use `check`, `live` or
    `static`.
