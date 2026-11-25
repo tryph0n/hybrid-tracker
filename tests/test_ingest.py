@@ -10,8 +10,9 @@ from tracker import ingest, sources
 from tracker.sources import read_events
 
 HEADER = (
-    "event_id,source,date,date_precision,countries,place,lat,lon,category,"
-    "subcategory,title,event_status,russia_link,url\n"
+    "event_id,source,date,end_date,date_precision,countries,place,lat,lon,"
+    "geo_precision,domain,category,subcategory,title,event_status,actors,"
+    "actor_name,attribution,attributed_by,url\n"
 )
 
 
@@ -85,7 +86,10 @@ def test_check_rejects_an_id_shared_by_two_sources(sample_data_dir, capsys):
 
 
 def test_read_events_keeps_the_namibia_code(data_dir):
-    row = "eodi:X,eodi,2025-01-01,day,NA,Windhoek,,,other,x,Title,confirmed,none,https://e\n"
+    row = (
+        "eodi:X,eodi,2025-01-01,,day,NA,Windhoek,,,place,other,unclassified,x,"
+        "Title,confirmed,,,none,,https://e\n"
+    )
     (data_dir / "eodi.csv").write_text(HEADER + row, encoding="utf-8")
     events = read_events("eodi")
     assert events.loc[0, "countries"] == "NA"
