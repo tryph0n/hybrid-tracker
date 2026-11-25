@@ -156,12 +156,16 @@ def service(step: dict, job_name: str) -> str:
 def image_paths() -> list[str]:
     """The paths that the Dockerfile copies into the image."""
     lines = (ROOT / "Dockerfile").read_text(encoding="utf-8").splitlines()
-    return [
-        path
-        for line in lines
-        if line.startswith("COPY ")
-        for path in line.split()[1:-1]
-    ]
+    paths: list[str] = []
+    for line in lines:
+        if not line.startswith("COPY "):
+            continue
+        words = line.split()[1:]
+        if any(word.startswith("--from=") for word in words):
+            continue
+        files = [word for word in words if not word.startswith("--")]
+        paths += [path for path in files[:-1] if path not in paths]
+    return paths
 
 
 def overview(workflows: dict, copied: list[str]) -> list[str]:
@@ -375,7 +379,11 @@ def render() -> str:
     }
     copied = image_paths()
     found = python_modules()
-    image = "The Docker image holds " + ", ".join(f"`{path}`" for path in copied)
+    image = (
+        "The Docker image holds "
+        + ", ".join(f"`{path}`" for path in copied)
+        + ", and the packages of `uv.lock`"
+    )
     pipelines = [
         block
         for file, workflow in workflows.items()

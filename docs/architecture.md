@@ -20,7 +20,7 @@ The pipeline fails while the page is out of date.
 
 ## Overview
 
-Where the events come from, where they are stored, and where they go. Rounded boxes are outside the repository. Edge labels name the pipeline job or the manual step that moves the data. The Docker image holds `requirements.txt`, `.streamlit/`, `src/`, `data/`.
+Where the events come from, where they are stored, and where they go. Rounded boxes are outside the repository. Edge labels name the pipeline job or the manual step that moves the data. The Docker image holds `src/`, `.streamlit/`, `data/`, and the packages of `uv.lock`.
 
 ```mermaid
 flowchart TB
