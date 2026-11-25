@@ -1,0 +1,35 @@
+name: Data error
+description: A value in the dataset is wrong or missing.
+labels: ["data", "bug"]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Source
+      description: The source name, as in the `source` column.
+      placeholder: eodi
+    validations:
+      required: true
+  - type: input
+    id: event_id
+    attributes:
+      label: Event identifier
+      description: The `event_id` value of the event.
+      placeholder: "eodi:123"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong
+      description: The column, the value in the dataset and the value you expect.
+    validations:
+      required: true
+  - type: input
+    id: evidence
+    attributes:
+      label: Evidence link
+      description: A link to a page that shows the correct value.
+      placeholder: https://
+    validations:
+      required: true
