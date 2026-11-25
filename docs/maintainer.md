@@ -73,6 +73,7 @@ uv run tracker ingest <name>    # one source, for example eodi
 uv run tracker ingest check     # validate the stored files, no network, no store
 uv run tracker rebuild [<name>] # clean tables again from the stored payloads, no download
 uv run tracker build [--out build] # published tables of each licence family
+uv run tracker quality [--out build] # quality table and run summary
 ```
 
 `ingest` saves the payloads first, so a payload that fails to map stays in the
@@ -112,6 +113,20 @@ is sorted by `source, event_id`, so the same input gives the same bytes. A
 Parquet file holds the DuckDB version: after an upgrade, compare contents, not
 hashes. The data job runs the command after the refresh, on a scheduled or
 manual run.
+
+`uv run tracker quality` runs after the build. It adds one row per source to
+the quality table: rows, rows added and removed since the previous run (by
+`event_id`), the share of empty values in the key columns (the required columns,
+`lat`, `lon`, and `actors` on the rows whose attribution is not `none`), the
+latest event date and the time of the last successful fetch from the manifest.
+The master copy is `quality/quality.parquet` in the raw store, with the event
+ids of the last run in `quality/event_ids.parquet`. Each run appends its rows.
+The command also writes `quality.parquet` to `build/open/` and `build/nc/` (the
+rows of the sources of that family), and appends the rows of the run to the
+run summary on GitHub, with the number of events with attribution `none` and
+how many are new. It fails, after it writes these, when a source has no row or
+when a live source has no successful fetch for more than three days. A static
+source skips the three-day rule.
 
 When a new version of a static source is published, follow the docstring of
 its module (`src/tracker/leiden.py`). For the Leiden dataset:

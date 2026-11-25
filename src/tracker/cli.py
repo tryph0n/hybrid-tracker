@@ -5,7 +5,7 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from tracker import build, ingest
+from tracker import build, ingest, quality
 from tracker.sources import SOURCES
 from tracker.store import open_store
 
@@ -56,6 +56,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("build"),
         help="folder that gets one subfolder per family (default: build)",
     )
+    quality_cmd = commands.add_parser(
+        "quality",
+        help="write the quality table and the run summary, and fail on a stale source",
+    )
+    quality_cmd.add_argument(
+        "--out",
+        type=Path,
+        default=Path("build"),
+        help="folder of `tracker build` that gets quality.parquet (default: build)",
+    )
     return parser
 
 
@@ -76,3 +86,5 @@ def main(argv: Sequence[str] | None = None) -> None:
         ingest.rebuild(args.source, open_store(), args.allow_shrink)
     elif args.command == "build":
         build.build(open_store(), args.out)
+    elif args.command == "quality":
+        quality.run(open_store(), args.out)
