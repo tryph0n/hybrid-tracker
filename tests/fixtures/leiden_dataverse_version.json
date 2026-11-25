@@ -1,0 +1,13 @@
+{
+  "status": "OK",
+  "data": {
+    "datasetPersistentId": "doi:10.7910/DVN/TQ0FMQ",
+    "versionNumber": 4,
+    "versionMinorNumber": 0,
+    "versionState": "RELEASED",
+    "license": {
+      "name": "CC BY 4.0",
+      "uri": "http://creativecommons.org/licenses/by/4.0"
+    }
+  }
+}
