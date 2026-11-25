@@ -7,4 +7,5 @@
 data-dictionary
 architecture
 maintainer
+decisions/index
 ```
