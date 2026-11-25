@@ -174,18 +174,16 @@ def check_coordinates(con: duckdb.DuckDBPyConnection) -> None:
         "clean.lat IS DISTINCT FROM events.lat "
         "OR clean.lon IS DISTINCT FROM events.lon "
         "OR clean.geo_precision IS DISTINCT FROM events.geo_precision)"
-    ).fetchone()
+    ).fetchall()[0][0]
     added = con.execute(
         "SELECT count(*) FROM clean JOIN events USING (event_id) "
         "WHERE clean.lat IS NULL AND events.lat IS NOT NULL "
         "AND events.geo_precision <> 'place'"
-    ).fetchone()
-    if changed[0]:
-        raise ValueError(f"{changed[0]} rows with source coordinates were changed")
-    if added[0]:
-        raise ValueError(
-            f"{added[0]} rows gained coordinates without `place` precision"
-        )
+    ).fetchall()[0][0]
+    if changed:
+        raise ValueError(f"{changed} rows with source coordinates were changed")
+    if added:
+        raise ValueError(f"{added} rows gained coordinates without `place` precision")
 
 
 def quote(path: Path) -> str:
