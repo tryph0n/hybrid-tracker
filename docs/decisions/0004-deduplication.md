@@ -23,8 +23,11 @@ commit `cbad1cd`):
   rows have the precision `month`, stored on the 1st of the month. One row has
   the precision `year`, stored on 1 January (`leiden:631573191ba1`, 2024). So
   a distance rule never applies to a pair with a Leiden row.
-- From 2025-09-01, Leiden has 19 rows, and 12 of them are about drones. Leiden
-  puts 5 of these 12 in the domain `espionage` (4) or `other` (1), not `air`.
+- From 2025-09-01, Leiden has 19 rows, and the titles of 12 of them name
+  drones. Leiden records 5 of these 12 with the `EventCategory`
+  "Reconnaissance" (4) or "Unknown" (1), and 7 with "Disruption". The Leiden
+  adapter (`src/tracker/leiden.py`) maps "Reconnaissance" to the domain
+  `espionage`, "Unknown" to `other` and "Disruption" to `air`.
 - One Leiden row can group several incidents that EODI records one by one.
   `leiden:be7d76769768` names five Danish airports on one night.
   `leiden:2b17621a2c51` records three days at the Kleine Brogel air base "as
@@ -107,19 +110,23 @@ or sea names is never similar. Reasons:
 - Leiden has no place below the country, but its titles name the airports and
   the bases.
 - The threshold 75 accepts spelling variants and some names in another
-  language: Fammene and Famenne, Munchen and Munich (77), Goteborg and
-  Gothenburg (78). At 85, the sample loses the three matches with these names.
+  language: Fammene and Famenne (86), Munchen and Munich (77), Goteborg and
+  Gothenburg (78). At 85, the rule loses three matches, two with Munich and
+  one with Gothenburg, and one false match, Munich on 18 October.
 
 Titles: the titles are similar when their token-set ratio is at least 40 out of
 100. Reasons:
 
 - On the sample, the lowest title score of a match with a similar place is 45.
   The threshold 40 keeps a margin.
-- A higher threshold does not remove the false matches of the sample, and it
-  removes true matches. The false matches are other incidents at the same site,
-  and their titles are as close as the titles of true matches:
-  `eodi:EODI-2025-00094` (Brønnøysund on 30 September) scores 80 against the
-  Leiden row of 28 September.
+- A higher threshold removes false matches and true matches. At 60, the false
+  matches go from 9 to 2 and the true matches from 13 to 7 (precision 0.78,
+  recall 0.27). At 70, the precision is 0.80 and the recall 0.15. At any
+  threshold, the precision is at most 0.83 and the recall at most 0.50, so no
+  threshold reaches the targets. Of the candidates with a similar place, the
+  pair with the highest title score is a false match: `eodi:EODI-2025-00094`
+  (Brønnøysund on 30 September) scores 80 against the Leiden row of
+  28 September.
 
 The trial measure below used RapidFuzz 3.14: `fuzz.token_set_ratio` for the
 titles and `fuzz.ratio` for the words.
@@ -129,7 +136,8 @@ titles and `fuzz.ratio` for the words.
 A cluster holds at most one row of each source. The matched pairs join clusters
 in the order of their title score, highest first. On a tie, the pair with the
 smaller date gap comes first, then the pair with the smaller `event_id`. A pair
-joins only when the cluster still holds one row of each source.
+joins the clusters of its two rows only when, after the join, no source has
+two rows in the cluster.
 
 Reason: one Leiden row can name several incidents that EODI records one by one
 (see the facts). If all matched pairs joined, the five EODI rows of the Danish
@@ -144,9 +152,8 @@ order: `eodi`, `leiden`. A new source gets its place in the ticket that adds
 it.
 
 Reason: the canonical record gives the date and the place of the incident.
-EODI gives a day and a place for each row, coordinates for most rows, and one
-row for each incident. Leiden gives the month and the country, and sometimes
-groups incidents in one row.
+EODI gives a day for each row, and coordinates for 365 of its 431 rows. Leiden
+gives a month (one row: a year) and a country or a sea, and no coordinates.
 
 ### Labelled sample
 
@@ -185,9 +192,10 @@ numbers are a best case.
 
 The rules of this record do not reach the targets on the sample:
 
-- Recall: the domain condition removes 9 of the 26 matches, because Leiden puts
-  drone flights over military sites in `espionage` or `other`. So the
-  candidates hold at most 0.65 of the matches. The place rule misses 4 more:
+- Recall: the domain condition removes 9 of the 26 matches. In these 9 pairs,
+  the EODI row is in `air`, and the Leiden row has the `EventCategory`
+  "Reconnaissance" (8 pairs) or "Unknown" (1 pair), which the adapter maps to
+  `espionage` or `other`. So the candidates hold at most 0.65 of the matches. The place rule misses 4 more:
   the Leiden title does not name the place (Dublin, Vilnius, Skrydstrup), or
   the EODI place is not the airport of its title (`eodi:EODI-2025-00005` is at
   Charleroi, and its title names Brussels).
@@ -227,8 +235,10 @@ The rules of this record do not reach the targets on the sample:
   The cluster rule limits the effect: a false match moves a Leiden row to
   another cluster, and it lowers the count only when the Leiden row has no
   true match.
-- No pair in the sample tests the distance rule, the `approximate` rule, the
-  `year` rule or the margin of one day. Review them when a second source with
+- No pair in the sample tests the distance rule, the `approximate` rule or the
+  `year` rule. Three pairs match on the date only through the margin of one
+  day, and all three are `no_match`: on the sample, the margin adds 2
+  candidates and no match. Review these rules when a second source with
   coordinates or day dates arrives.
 - This record does not cover duplicates in one source. EODI has some: for
   example, `eodi:EODI-2025-00005` and `eodi:EODI-2025-00335` both record a
