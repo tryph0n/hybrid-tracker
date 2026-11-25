@@ -32,7 +32,6 @@ flowchart TB
   service_Docker_Hub("Docker Hub")
   service_Render("Render")
   service_Hugging_Face("Hugging Face")
-  service_Hugging_Face_mirror("Hugging Face mirror")
   service_Heartbeat_monitor("Heartbeat monitor")
   source_eodi -->|"Data job"| ingest
   source_leiden -->|"by hand"| ingest

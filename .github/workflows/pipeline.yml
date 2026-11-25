@@ -339,7 +339,7 @@ jobs:
             echo "::warning::Could not list the tags of $HF_DATASET, $tag not created"
             exit 0
           fi
-          if printf '%s\n' "$tags" | grep -Fxq "$tag"; then
+          if grep -Fxq "$tag" <<<"$tags"; then
             echo "Tag $tag already exists on $HF_DATASET, left as it is"
           elif uv run hf repos tag create "$HF_DATASET" "$tag" --repo-type dataset --revision "$COMMIT" --message "Schema version ${tag#v}"; then
             echo "Tag $tag created on $HF_DATASET at $COMMIT"
