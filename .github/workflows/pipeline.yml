@@ -235,3 +235,69 @@ jobs:
             cmp -s "$file" "$copy/$(basename "$file")" || { echo "Mirror check failed: $(basename "$file") is missing or differs on $HF_DATASET"; exit 1; }
           done
           echo "Mirror check passed: $HF_DATASET matches data/events"
+
+  # Alerts. They run on a scheduled or manual run only, never on a pull request
+  # or a push. Every job of the run is listed in needs, so a failure in any of
+  # them is seen. Each job does nothing until its secret is set, where it needs one.
+  report-failure:
+    name: Report failure
+    needs: [lint, data, docs, image, deploy, mirror]
+    if: failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open an issue, or comment on the open one
+        run: |
+          gh label create pipeline-failure --force --color B60205 --description "A scheduled or manual pipeline run failed"
+          open=$(gh issue list --label pipeline-failure --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "The pipeline failed again: $RUN_URL"
+          else
+            gh issue create --label pipeline-failure \
+              --title "Pipeline run failed" \
+              --body "A $GITHUB_EVENT_NAME run of the pipeline failed: $RUN_URL. See the runbook in the maintainer guide. The next successful scheduled run closes this issue."
+          fi
+
+  close-failure:
+    name: Close failure issue
+    needs: [lint, data, docs, image, deploy, mirror]
+    if: ${{ !failure() && !cancelled() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Close the open failure issues
+        run: |
+          for number in $(gh issue list --label pipeline-failure --state open --json number --jq '.[].number'); do
+            gh issue close "$number" --comment "The scheduled run succeeded: $RUN_URL"
+          done
+
+  heartbeat:
+    name: Heartbeat
+    needs: [lint, data, docs, image, deploy, mirror]
+    if: ${{ !failure() && !cancelled() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping the heartbeat monitor
+        env:
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: |
+          # A secret cannot gate a step: skip here until it is set.
+          if [ -z "$HEARTBEAT_URL" ]; then
+            echo "HEARTBEAT_URL is not set, heartbeat skipped"
+            exit 0
+          fi
+          curl -fsS --retry 3 -o /dev/null "$HEARTBEAT_URL"
+          echo "Heartbeat sent"

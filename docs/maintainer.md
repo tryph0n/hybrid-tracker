@@ -247,6 +247,7 @@ In the GitHub repository settings, Secrets and variables, Actions:
 | `DOCKERHUB_TOKEN` | secret | Docker Hub access token with Repo Read & Write scope |
 | `RENDER_DEPLOY_HOOK_URL` | secret | Deploy hook of the Render service (Settings, Deploy Hook). The service image must be the repository in `DOCKER_IMAGE`: Render rejects an image from another repository. |
 | `HF_DATASET` | variable | `<user>/<dataset>` on Hugging Face |
+| `HEARTBEAT_URL` | secret | Ping address of the heartbeat monitor (see "Alerts"). Until it is set, the Heartbeat job is green and sends nothing. |
 
 The Render service is a web service created from the image
 `docker.io/<user>/<repository>:latest`. It runs on the free plan, with
@@ -288,11 +289,34 @@ A green Deploy job means that Render accepted the deploy and that the app
 serves the tag of the run. When the secret is not set, the job is green and
 checks nothing.
 
+## Alerts
+
+Two signals tell the owner that the data does not refresh.
+
+- A failed scheduled or manual run opens one issue with the label
+  `pipeline-failure` and the link of the run. While that issue is open, each
+  new failure adds a comment to it. The next successful scheduled run closes
+  it. A green manual run does not. A pull request or a push never opens or
+  closes it.
+- A successful scheduled run pings a heartbeat monitor (an OpenStatus heartbeat
+  with a period of 1 day and a grace of 1 day), with the address in
+  `HEARTBEAT_URL`. A manual run does not ping. The monitor alerts the owner
+  when no ping arrives for 48 hours. A run that GitHub drops or disables fails
+  nothing and opens no issue: only this alert shows it.
+
+On a failure issue, open the linked run and follow the table above. On a
+heartbeat alert, check Actions: if the schedule is off, see "Schedule stops
+after 60 days". If the last scheduled run is green, check that
+`HEARTBEAT_URL` is the address of the monitor, then run the pipeline by hand
+on `main` and wait for the next scheduled run.
+
 ## Rotate a credential
 
 - Docker Hub token: create a new token with Repo Read & Write scope, run
   `gh secret set DOCKERHUB_TOKEN` (it prompts for the value), then delete the
   old token.
+- Heartbeat address: in the monitor, create a new heartbeat or rotate its
+  address, then run `gh secret set HEARTBEAT_URL`.
 - Render hook: in Render, Settings, Deploy Hook, click Regenerate Hook. The old
   URL stops working at once. Copy the new URL and run
   `gh secret set RENDER_DEPLOY_HOOK_URL`.
