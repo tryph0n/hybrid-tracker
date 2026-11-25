@@ -392,7 +392,9 @@ scoped = filter_events(
 
 today = utc_today()
 days = PERIODS[period_label]
-month_sources = scoped.loc[scoped["date_precision"] == "month", "source"].unique()
+month_sources = scoped.loc[
+    scoped["date_precision"].isin(["month", "year"]), "source"
+].unique()
 if days is not None and len(month_sources):
     titles = ", ".join(SOURCES[name].title for name in SOURCES if name in month_sources)
     period_note.caption(
