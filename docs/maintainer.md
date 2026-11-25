@@ -19,6 +19,18 @@ The Docs job and Read the Docs also use the `docs` group. For the docs build,
 run `uv sync --locked --group docs`. Run every command below with `uv run`
 (for example `uv run pytest`). No environment variable is needed.
 
+One more command installs the Git hooks. They run Ruff (check with `--fix`,
+then format) and file checks before each commit, with the same Ruff version as
+the lockfile:
+
+```bash
+uv run pre-commit install
+```
+
+Run all hooks on every file with `uv run pre-commit run --all-files`. When
+Dependabot bumps Ruff in `uv.lock`, set the `rev` of `ruff-pre-commit` in
+`.pre-commit-config.yaml` to the same version. A test fails if they differ.
+
 ## Layout
 
 - `src/tracker/` is the package. It holds the sources, the schema and the
