@@ -6,12 +6,15 @@ Run through the `tracker` command, from the repository root after `uv sync`:
 - `uv run tracker ingest static`: every static source (run by hand)
 - `uv run tracker ingest eodi`: a single source
 - `uv run tracker ingest check`: validate stored files, download nothing
+- `uv run tracker rebuild [source]`: write the clean tables again from the
+  stored payloads, download nothing
 
 Each source step needs a raw store: set `TRACKER_STORE` (see `tracker.store`).
 """
 
 import io
 import logging
+from collections.abc import Mapping
 
 import pandas as pd
 
@@ -47,36 +50,41 @@ def previous_count(name: str, stored: bytes | None) -> int | None:
     return None
 
 
-def ingest(name: str, store: Store) -> None:
-    """Download one source, keep its payloads, then write its clean table.
+def write_clean(
+    name: str,
+    files: Mapping[str, bytes],
+    store: Store,
+    allow_shrink: bool = False,
+) -> None:
+    """Map the payloads of one source, validate them and write its clean table.
 
-    The payloads are saved first: a payload that fails to map stays in the raw
-    store, so the mapping can be fixed and replayed. Then the events of the
-    payloads are validated, and written sorted by `event_id` to
-    `clean/<name>.parquet` in the store and to `data/events/<name>.csv` (the
-    folder is created if needed). Nothing is written to either if `validate`
-    or the shrink check fails.
+    The events are sorted by `event_id` and written to `clean/<name>.parquet`
+    in the store and to `data/events/<name>.csv` (the folder is created if
+    needed). Nothing is written to either if `validate` or the shrink check
+    fails. `ingest` and `rebuild` both end here.
 
     Args:
         name: Key of `SOURCES`.
+        files: Payload file name to bytes, as `normalize` takes them.
         store: The raw store.
+        allow_shrink: Skip the shrink check. A warning in the log says so when
+            the check would have failed.
 
     Raises:
-        KeyError: `name` is not a source.
-        ValueError: The events fail `validate`, or the download loses more than
-            the `MAX_SHRINK` share of the stored events.
+        ValueError: The events fail `validate`, or they lose more than the
+            `MAX_SHRINK` share of the stored events and `allow_shrink` is false.
     """
-    source = SOURCES[name]
-    payloads = source.extract()
-    store.save_many(payloads)
-    events = source.normalize({p.name: p.content for p in payloads})
+    events = SOURCES[name].normalize(files)
     events = events.sort_values("event_id", ignore_index=True)
     validate(events)
 
     stored = store.backend.read(clean_path(name))
     previous = previous_count(name, stored)
     if previous is not None and len(events) < previous * (1 - MAX_SHRINK):
-        raise ValueError(f"{name}: {len(events)} events, {previous} before")
+        message = f"{name}: {len(events)} events, {previous} before"
+        if not allow_shrink:
+            raise ValueError(message)
+        logger.warning("Shrink guard skipped by override: %s", message)
 
     table = io.BytesIO()
     events.to_parquet(table, index=False)
@@ -89,6 +97,70 @@ def ingest(name: str, store: Store) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     events.to_csv(path, index=False, lineterminator="\n")
     logger.info("%s: %d events", name, len(events))
+
+
+def ingest(name: str, store: Store) -> None:
+    """Download one source, keep its payloads, then write its clean table.
+
+    The payloads are saved first: a payload that fails to map stays in the raw
+    store, so the mapping can be fixed and replayed with `rebuild`.
+
+    Args:
+        name: Key of `SOURCES`.
+        store: The raw store.
+
+    Raises:
+        KeyError: `name` is not a source.
+        ValueError: The events fail `validate`, or the download loses more than
+            the `MAX_SHRINK` share of the stored events.
+    """
+    payloads = SOURCES[name].extract()
+    store.save_many(payloads)
+    write_clean(name, {p.name: p.content for p in payloads}, store)
+
+
+def latest_payloads(name: str, store: Store) -> dict[str, bytes]:
+    """The latest stored payload of each file of a source, empty if it has none."""
+    files: dict[str, bytes] = {}
+    for file in sorted({line["name"] for line in store.payloads(name)}):
+        content = store.latest(name, file)
+        if content is not None:
+            files[file] = content
+    return files
+
+
+def rebuild(name: str | None, store: Store, allow_shrink: bool = False) -> None:
+    """Write the clean tables again from the latest stored payloads, offline.
+
+    Nothing is downloaded: with the local store, nothing uses the network. Only
+    the latest payload of each file is read, because each fetch is a full
+    snapshot. The run stops at the first source that fails, as `ingest` does.
+
+    Args:
+        name: Key of `SOURCES`, or None for every source. A source with no
+            stored payload is skipped with a warning when `name` is None.
+        store: The raw store.
+        allow_shrink: Skip the shrink check, for a mapping fix that drops rows
+            on purpose. The log records its use.
+
+    Raises:
+        KeyError: `name` is not a source.
+        ValueError: `name` has no stored payload, or the events fail `validate`,
+            or they lose more than the `MAX_SHRINK` share of the stored events
+            and `allow_shrink` is false.
+    """
+    if name is not None and name not in SOURCES:
+        raise KeyError(name)
+    for key in SOURCES if name is None else [name]:
+        files = latest_payloads(key, store)
+        if not files:
+            if name is not None:
+                raise ValueError(
+                    f"{key}: no stored payload, run `tracker ingest {key}`"
+                )
+            logger.warning("%s: no stored payload, skipped", key)
+            continue
+        write_clean(key, files, store, allow_shrink)
 
 
 def check() -> None:

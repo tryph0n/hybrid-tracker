@@ -5,9 +5,9 @@ import pandas as pd
 import pytest
 from conftest import FIXTURES, recorded_payloads
 
-from tracker import cli, ingest, sources
+from tracker import cli, eodi, ingest, sources
 from tracker.sources import read_events
-from tracker.store import LocalBackend, Payload, Store
+from tracker.store import LocalBackend, Payload, Store, open_store
 
 HEADER = (
     "event_id,source,date,end_date,date_precision,countries,place,lat,lon,"
@@ -236,3 +236,144 @@ def test_registry_matches_the_stored_files():
         assert set(events["source"]) == {name}, name
         ids = events["event_id"].astype(str)
         assert list(ids[~ids.str.startswith(f"{name}:")]) == [], name
+
+
+def forbid_download(monkeypatch) -> None:
+    """Make every source fail if its `extract` is called."""
+
+    def fail() -> list[Payload]:
+        raise AssertionError("rebuild must not download")
+
+    for name, source in sources.SOURCES.items():
+        monkeypatch.setitem(
+            sources.SOURCES, name, dataclasses.replace(source, extract=fail)
+        )
+
+
+def clean_table(store: Store, name: str) -> pd.DataFrame:
+    table = store.backend.read(ingest.clean_path(name))
+    assert table is not None
+    return pd.read_parquet(io.BytesIO(table))
+
+
+def test_rebuild_applies_a_changed_mapping_without_a_download(
+    data_dir, store, monkeypatch
+):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    before = clean_table(store, "eodi")
+    assert "drone_overflight" in set(before["category"])
+
+    forbid_download(monkeypatch)
+    monkeypatch.setitem(eodi.CATEGORY, "sobrevuelo", "airspace_incursion")
+    ingest.rebuild("eodi", store)
+
+    after = clean_table(store, "eodi")
+    assert "drone_overflight" not in set(after["category"])
+    assert len(after) == len(before)
+    assert read_events("eodi")["category"].tolist() == after["category"].tolist()
+    assert len(store.payloads("eodi")) == 2
+
+
+def test_the_rebuild_command_runs_without_sockets(data_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "eodi")
+    serve_recorded(monkeypatch, "leiden")
+    cli.main(["ingest", "live"])
+    cli.main(["ingest", "static"])
+    for name in sources.SOURCES:
+        (data_dir / f"{name}.csv").unlink()
+
+    forbid_download(monkeypatch)
+    cli.main(["rebuild", "eodi"])
+    assert (data_dir / "eodi.csv").exists()
+    assert not (data_dir / "leiden.csv").exists()
+    (data_dir / "eodi.csv").unlink()
+
+    cli.main(["rebuild"])
+    store = open_store()
+    for name in sources.SOURCES:
+        assert (data_dir / f"{name}.csv").exists()
+        assert len(clean_table(store, name)) > 0
+
+
+def test_rebuild_reads_the_latest_payload_only(data_dir, store, monkeypatch):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    files = recorded_payloads("eodi")
+    first = pd.read_csv(io.BytesIO(files["incidentes.csv"]))
+    title = "Newer title"
+    newer = first.assign(titulo_en=title).to_csv(index=False).encode()
+    store.save(Payload("eodi", "incidentes.csv", newer, "https://e/all", 200))
+    assert title not in set(clean_table(store, "eodi")["title"])
+
+    forbid_download(monkeypatch)
+    ingest.rebuild("eodi", store)
+    assert len(store.payloads("eodi")) == 3
+    clean = clean_table(store, "eodi")
+    assert title in set(clean["title"])
+
+
+def test_rebuild_without_a_stored_payload(data_dir, store, monkeypatch, caplog):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    caplog.set_level("INFO")
+
+    ingest.rebuild(None, store)
+    assert "leiden: no stored payload, skipped" in caplog.text
+    assert not (data_dir / "leiden.csv").exists()
+
+    with pytest.raises(ValueError, match="leiden: no stored payload"):
+        ingest.rebuild("leiden", store)
+    with pytest.raises(KeyError):
+        ingest.rebuild("bogus", store)
+
+
+def test_rebuild_writes_nothing_when_validate_fails(data_dir, store, monkeypatch):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    before = (data_dir / "eodi.csv").read_bytes()
+    table = store.backend.read(ingest.clean_path("eodi"))
+
+    monkeypatch.setitem(eodi.CATEGORY, "sobrevuelo", "balloon")
+    with pytest.raises(ValueError, match="Unknown category"):
+        ingest.rebuild("eodi", store)
+    assert (data_dir / "eodi.csv").read_bytes() == before
+    assert store.backend.read(ingest.clean_path("eodi")) == table
+
+
+def test_rebuild_needs_the_override_to_lose_more_than_five_percent(
+    data_dir, store, monkeypatch, caplog
+):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    before = (data_dir / "eodi.csv").read_bytes()
+    count = len(clean_table(store, "eodi"))
+
+    def shrunk(files):
+        return full(files).head(count - 2)
+
+    full = sources.SOURCES["eodi"].normalize
+    monkeypatch.setitem(
+        sources.SOURCES,
+        "eodi",
+        dataclasses.replace(sources.SOURCES["eodi"], normalize=shrunk),
+    )
+    with pytest.raises(ValueError, match=f"{count - 2} events, {count} before"):
+        ingest.rebuild("eodi", store)
+    assert (data_dir / "eodi.csv").read_bytes() == before
+    assert len(clean_table(store, "eodi")) == count
+
+    caplog.set_level("INFO")
+    ingest.rebuild("eodi", store, allow_shrink=True)
+    assert len(clean_table(store, "eodi")) == count - 2
+    assert len(read_events("eodi")) == count - 2
+    assert "Shrink guard skipped by override" in caplog.text
+
+
+def test_the_rebuild_command_takes_the_override_flag():
+    args = cli.build_parser().parse_args(["rebuild", "eodi", "--allow-shrink"])
+    assert (args.source, args.allow_shrink) == ("eodi", True)
+    args = cli.build_parser().parse_args(["rebuild"])
+    assert (args.source, args.allow_shrink) == (None, False)
