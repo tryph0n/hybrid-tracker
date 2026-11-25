@@ -1,9 +1,11 @@
 # Architecture
 
-1. Each source module in `src/tracker/` downloads one open dataset and maps it
-   to the unified schema.
-2. `python -m tracker.ingest` validates the result and stores it as
-   `data/events/<source>.csv`, committed to the repository.
+1. Each source module in `src/tracker/` has two steps: `extract()` downloads
+   the files of one open dataset, and `normalize()` maps the stored files to
+   the unified schema.
+2. `tracker ingest` saves the downloaded files in the raw store, validates the
+   mapped events and stores them as `data/events/<source>.csv`, committed to
+   the repository, and as a clean Parquet table in the raw store.
 3. The Streamlit page `src/streamlit_app.py` reads these files and nothing else.
 4. The pipeline refreshes the live sources every day, publishes the app and
    mirrors `data/events/` to a public Hugging Face dataset. The app does not
@@ -111,8 +113,8 @@ flowchart LR
 | Lint | Lint |  | `uv run ruff check . && uv run ruff format --check .` |
 | Lint | Type check |  | `uv run --locked mypy` |
 | Data | Install |  | `uv sync --locked` |
-| Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run python -m tracker.ingest live` |
-| Data | Validate stored data |  | `uv run python -m tracker.ingest check` |
+| Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest live` |
+| Data | Validate stored data |  | `uv run tracker ingest check` |
 | Data | Run the tests |  | `uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"` |
 | Data | Commit refreshed data | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | a script |
 | Docs | Install |  | `uv sync --locked --group docs` |
@@ -146,6 +148,7 @@ Python files and their imports: an arrow points to the imported module.
 ```mermaid
 flowchart TB
   module_streamlit_app_py["streamlit_app.py"]
+  module_tracker_cli["tracker.cli"]
   module_tracker_clock["tracker.clock"]
   module_tracker_eodi["tracker.eodi"]
   module_tracker_ingest["tracker.ingest"]
@@ -159,13 +162,19 @@ flowchart TB
   module_streamlit_app_py --> module_tracker_schema
   module_streamlit_app_py --> module_tracker_sources
   module_streamlit_app_py --> module_tracker_views
+  module_tracker_cli --> module_tracker_ingest
+  module_tracker_cli --> module_tracker_sources
   module_tracker_eodi --> module_tracker_schema
+  module_tracker_eodi --> module_tracker_store
   module_tracker_ingest --> module_tracker_schema
   module_tracker_ingest --> module_tracker_sources
+  module_tracker_ingest --> module_tracker_store
   module_tracker_leiden --> module_tracker_schema
+  module_tracker_leiden --> module_tracker_store
   module_tracker_sources --> module_tracker_eodi
   module_tracker_sources --> module_tracker_leiden
   module_tracker_sources --> module_tracker_schema
+  module_tracker_sources --> module_tracker_store
   module_tracker_store --> module_tracker_clock
   module_architecture_py --> module_tracker_sources
 ```
@@ -173,9 +182,10 @@ flowchart TB
 | Module | File | Purpose | Third-party imports |
 | --- | --- | --- | --- |
 | `streamlit_app.py` | `src/streamlit_app.py` | Dashboard: maps and charts of the unified hybrid-incident dataset. | pandas, plotly, pycountry, streamlit |
+| `tracker.cli` | `src/tracker/cli.py` | The \`tracker\` command: one subcommand per action. |  |
 | `tracker.clock` | `src/tracker/clock.py` | The current day, in UTC like the stored event dates. | pandas |
 | `tracker.eodi` | `src/tracker/eodi.py` | European Observatory of Drone Incidents (EODI) - live source. | pandas |
-| `tracker.ingest` | `src/tracker/ingest.py` | Fetch sources and store them as data/events/\<source\>.csv. |  |
+| `tracker.ingest` | `src/tracker/ingest.py` | Download sources, keep their payloads in the raw store and write clean tables. | pandas |
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | openpyxl, pandas, pycountry |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
 | `tracker.sources` | `src/tracker/sources.py` | Registry of data sources and access to their stored events. | pandas |

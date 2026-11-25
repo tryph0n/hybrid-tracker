@@ -1,6 +1,6 @@
 """Registry of data sources and access to their stored events."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,13 +8,14 @@ import pandas as pd
 
 from tracker import eodi, leiden
 from tracker.schema import read_csv
+from tracker.store import Payload
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "events"
 
 
 @dataclass(frozen=True)
 class Source:
-    """A data source: its metadata and the function that fetches its events."""
+    """A data source: its metadata and the two steps that turn it into events."""
 
     title: str
     """Name shown in the app."""
@@ -34,9 +35,14 @@ class Source:
     """Credit line. It must appear word for word in the README and in the dataset
     card."""
 
-    fetch: Callable[[], pd.DataFrame]
-    """Downloads the source and returns its events in the unified schema. Define
-    it in the adapter module of the source."""
+    extract: Callable[[], list[Payload]]
+    """Downloads the files of the source and returns them as they are served,
+    with no mapping. Define it in the adapter module of the source."""
+
+    normalize: Callable[[Mapping[str, bytes]], pd.DataFrame]
+    """Maps the stored payloads (file name to bytes) to events in the unified
+    schema, with no network access. Define it in the adapter module of the
+    source."""
 
 
 SOURCES = {
@@ -49,7 +55,8 @@ SOURCES = {
             "Lucas Alaniz Pintos, European Observatory of Drone Incidents "
             "(EODI): drone incidents in Europe."
         ),
-        fetch=eodi.fetch,
+        extract=eodi.extract,
+        normalize=eodi.normalize,
     ),
     "leiden": Source(
         title="Russian Operations Against Europe Dataset, 2022-2025",
@@ -60,7 +67,8 @@ SOURCES = {
             "Bart Schuurman, Russian Operations Against Europe Dataset, "
             "2022-2025, Harvard Dataverse, V4."
         ),
-        fetch=leiden.fetch,
+        extract=leiden.extract,
+        normalize=leiden.normalize,
     ),
 }
 

@@ -49,28 +49,41 @@ A source is live or static (`Source.kind` in `src/tracker/sources.py`).
 - A static source is a frozen historical snapshot, pinned to one upstream file
   version. You re-ingest it by hand.
 
-Each source is stored as `data/events/<name>.csv`. Commands, from the
-repository root:
+Each source goes through two steps. `extract()` downloads the files and saves
+them, as served, in the raw store with a manifest line each. `normalize()` maps
+the stored payloads to the unified schema and uses no network, so a mapping fix
+can be replayed on the stored payloads. The clean table is written to the raw
+store as `clean/<name>.parquet` (private) and, until the data leaves git, to
+`data/events/<name>.csv`.
+
+The commands need a raw store. Set `TRACKER_STORE=local` and
+`TRACKER_STORE_DIR=<folder>` to work on a local folder, or `TRACKER_STORE=hf`
+for the private dataset (see `src/tracker/store.py`). From the repository
+root:
 
 ```bash
-uv run python -m tracker.ingest live      # every live source
-uv run python -m tracker.ingest static    # every static source
-uv run python -m tracker.ingest <name>    # one source, for example eodi
-uv run python -m tracker.ingest check     # validate the stored files, no network
+export TRACKER_STORE=local TRACKER_STORE_DIR=/tmp/raw-store
+uv run tracker ingest live      # every live source
+uv run tracker ingest static    # every static source
+uv run tracker ingest <name>    # one source, for example eodi
+uv run tracker ingest check     # validate the stored files, no network, no store
 ```
 
-`ingest` validates the events before it writes the file. It rejects a refresh
-that loses more than 5% of the stored events (`MAX_SHRINK` in
-`src/tracker/ingest.py`): an upstream outage is more likely than a real
-correction. An unknown upstream label also stops the ingest, in the adapter or
-in `validate`.
-If the drop is a real correction, delete `data/events/<name>.csv`, run
-`uv run python -m tracker.ingest <name>`, read the diff and commit.
+`ingest` saves the payloads first, so a payload that fails to map stays in the
+raw store. It validates the events before it writes the clean table and the
+CSV file. It rejects a refresh that loses more than 5% of the stored events
+(`MAX_SHRINK` in `src/tracker/ingest.py`): an upstream outage is more likely
+than a real correction. The guard compares with the clean table of the raw
+store, or with the CSV file while a source has no clean table. An unknown
+upstream label also stops the ingest, in the adapter or in `validate`.
+If the drop is a real correction, delete `data/events/<name>.csv` and
+`clean/<name>.parquet` in the raw store, run `uv run tracker ingest <name>`,
+read the diff and commit.
 
 When a new version of a static source is published, follow the docstring of
 its module (`src/tracker/leiden.py`). For the Leiden dataset:
 
-1. Run `uv run python -m tracker.ingest leiden`. It reads the latest version
+1. Run `uv run tracker ingest leiden`. It reads the latest version
    from Harvard Dataverse and stops, with a message, when the licence is not
    "CC BY 4.0" or when the version is not `PINNED_VERSION`. Do not go on if
    the licence changed: the stored data is published under CC BY 4.0.
@@ -87,15 +100,18 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
 
 1. Check the licence. It must allow redistribution under CC BY 4.0, because
    the stored data is published under CC BY 4.0. Write down the citation.
-2. Write `src/tracker/<name>.py`. It defines `fetch()`, which returns a
-   DataFrame in the columns of `tracker.schema.COLUMNS`. Put the mapping in a
-   `normalize()` function, so tests can run it without network. An unknown
+2. Write `src/tracker/<name>.py`. It defines `extract()`, which only downloads
+   and returns a list of `tracker.store.Payload` (file name, bytes as served,
+   URL, HTTP status), and `normalize(files)`, which takes a mapping of file
+   name to bytes and returns a DataFrame in the columns of
+   `tracker.schema.COLUMNS`. `normalize()` must not use the network: a test runs
+   it on recorded files with sockets disabled. An unknown
    upstream label must stop the ingest: raise, or leave the cell empty so that
    `validate` rejects it. Start the module docstring with `<Title> - <kind>
    source.`: the architecture page shows that first line. Use the existing
    adapters as examples.
 3. Import the module in `src/tracker/sources.py` and add a `Source` entry:
-   title, `kind`, homepage, licence, citation, `fetch`. The key is lowercase.
+   title, `kind`, homepage, licence, citation, `extract`, `normalize`. The key is lowercase.
    It is the CSV name, the `source` value, the prefix of `event_id`
    (`<name>:<id>`) and the ingest target. Do not use `check`, `live` or
    `static`.
@@ -107,7 +123,7 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    colour-blind check again). For a status or attribution value, also update
    the list in `README.md`, "Reading the data".
 6. If the source needs a secret, export it locally first. Run
-   `uv run python -m tracker.ingest <name>`, then `uv run python -m tracker.ingest check`.
+   `uv run tracker ingest <name>`, then `uv run tracker ingest check`.
    Commit `data/events/<name>.csv`.
 7. Add `tests/fixtures/events/<name>.csv`: a few rows in the stored format. Add
    `tests/test_<name>.py` with a recorded upstream sample in
@@ -130,8 +146,8 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
 ## Change the schema
 
 A new or renamed column changes every stored file. Update every adapter, run
-`uv run python -m tracker.ingest live` and `uv run python -m tracker.ingest static`
-(network needed), and update `tests/fixtures/events/` and the `HEADER` in
+`uv run tracker ingest live` and `uv run tracker ingest static`
+(network and a raw store needed), and update `tests/fixtures/events/` and the `HEADER` in
 `tests/test_ingest.py`. `docs/conf.py` reads
 `schema.py` without importing it: keep `COLUMNS`, `REQUIRED` and the lists of
 `ALLOWED_VALUES` as literal lists, and one comment on each column line.
@@ -186,7 +202,7 @@ In the order of the pipeline:
 uv sync --locked --group docs
 uv run ruff check . && uv run ruff format --check .
 uv run --locked mypy
-uv run python -m tracker.ingest check
+uv run tracker ingest check
 uv run pytest
 uv run python scripts/architecture.py --check
 uv run sphinx-build -W --keep-going -b html docs docs/_build/html
@@ -304,7 +320,7 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Failed job | Likely cause | Action |
 |---|---|---|
 | Lint | Style error | Run `uv run ruff check --fix . && uv run ruff format .` and commit. |
-| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `uv run python -m tracker.ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
+| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `uv run tracker ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
 | Data, validate or tests | A hand edit of a CSV, or an adapter bug. The error usually names the column. | Find the cause, fix it, push. |
 | Data, commit | A push to main during the run changed the same data file, so the rebase stopped; or a branch rule on main blocks the bot | Run the pipeline again. Keep main open to pushes from github-actions[bot]. |
 | Docs, architecture | The page does not match the code | Run `uv run python scripts/architecture.py` and commit the page. |
