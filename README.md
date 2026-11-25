@@ -57,7 +57,12 @@ stored events, whatever the filters.
 
 Known limits: sources are not de-duplicated against each other, and counts
 over time follow each source's coverage period (see the Sources table of the
-dashboard).
+dashboard). Some sources give a date to the month or year only (`date_precision` is
+`month`) and the event is dated the 1st of the month the source gives, or
+1 January when the source gives the year only. The period filter places an
+event by that date, so for a period other than "All time" an event of the
+month that contains the period start can be left out, even if it took place
+inside the period. The dashboard shows a note when this can apply.
 
 All columns and values are in the
 [data dictionary](https://hybrid-tracker.readthedocs.io/en/latest/data-dictionary.html).

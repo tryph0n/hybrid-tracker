@@ -362,3 +362,59 @@ def test_country_bar_keeps_the_countries_tied_at_the_cut(sample_data_dir):
     assert "Most affected countries (top 15, ties kept)" in [
         h.value for h in at.subheader
     ]
+
+
+MONTH_NOTE = "Some dates are known to the month or year only"
+
+
+def test_month_precision_note_follows_the_period(sample_data_dir):
+    events = read_all_events()
+    assert set(events.loc[events["date_precision"] == "month", "source"]) == {"leiden"}
+    at = run_app()
+    assert MONTH_NOTE not in captions(at)
+    at.selectbox(key="period").set_value("Last 12 months").run()
+    assert not at.exception
+    assert MONTH_NOTE in captions(at)
+    assert SOURCES["leiden"].title in captions(at)
+    at.selectbox(key="period").set_value("All time").run()
+    assert MONTH_NOTE not in captions(at)
+
+
+def test_month_precision_note_stays_when_the_period_removes_those_events(
+    sample_data_dir,
+):
+    at = run_app()
+    at.selectbox(key="period").set_value("Last 30 days").run()
+    assert at.info[0].value == "No event matches these filters."
+    assert MONTH_NOTE in captions(at)
+
+
+def test_month_precision_note_needs_a_month_event_among_the_kept_ones(
+    sample_data_dir,
+):
+    at = run_app()
+    at.selectbox(key="period").set_value("Last 12 months").run()
+    at.multiselect(key="sources").set_value(["eodi"]).run()
+    assert not at.exception
+    assert MONTH_NOTE not in captions(at)
+    at.multiselect(key="sources").set_value(["eodi", "leiden"]).run()
+    assert MONTH_NOTE in captions(at)
+
+
+def test_month_precision_note_follows_date_precision_not_the_source(
+    sample_data_dir,
+):
+    leiden = read_events("leiden")
+    leiden["date_precision"] = "day"
+    leiden.to_csv(events_path("leiden"), index=False)
+    eodi = read_events("eodi")
+    eodi.loc[eodi.index[0], "date_precision"] = "month"
+    eodi.to_csv(events_path("eodi"), index=False)
+    st.cache_data.clear()
+    at = run_app()
+    at.selectbox(key="period").set_value("Last 12 months").run()
+    assert not at.exception
+    notes = [c.value for c in at.caption if MONTH_NOTE in c.value]
+    assert len(notes) == 1
+    assert SOURCES["eodi"].title in notes[0]
+    assert SOURCES["leiden"].title not in notes[0]
