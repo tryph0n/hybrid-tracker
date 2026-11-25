@@ -41,29 +41,48 @@ DATE_PRECISION = {
 }
 
 # EODI gives the attributed actor in the language of the attributing authority.
-# True means Russia. Listed explicitly because guessing from the spelling is
-# unsafe ("Belarus" contains "rus"). An unknown name stops the ingestion.
-ACTOR_IS_RUSSIA = {
-    "Rosja": True,
-    "Federacja Rosyjska": True,
-    "Federația Rusă": True,
-    "Russland": True,
-    "Ryssland": True,
-    # Names of Russia in the languages of the countries the register covers.
-    "Russia": True,
-    "Rusia": True,
-    "Rusija": True,
-    "Russie": True,
-    "Rusland": True,
-    "Krievija": True,
-    "Venemaa": True,
-    "Venäjä": True,
-    "Rusko": True,
-    "Oroszország": True,
-    "Русия": True,
-    "Ρωσία": True,
-    "Ukraina": False,
-    "Ucraina": False,
+# Each name maps to an ISO 3166-1 alpha-2 code. Listed explicitly because
+# guessing from the spelling is unsafe ("Belarus" contains "rus"). An unknown
+# name stops the ingestion. Ukraine is outside the five tracked states: the row
+# keeps its code, as record 0002 fixes.
+ACTOR_CODES = {
+    "Rosja": "RU",
+    "Federacja Rosyjska": "RU",
+    "Federația Rusă": "RU",
+    "Russland": "RU",
+    "Ryssland": "RU",
+    "Russia": "RU",
+    "Rusia": "RU",
+    "Rusija": "RU",
+    "Russie": "RU",
+    "Rusland": "RU",
+    "Krievija": "RU",
+    "Venemaa": "RU",
+    "Venäjä": "RU",
+    "Rusko": "RU",
+    "Oroszország": "RU",
+    "Русия": "RU",
+    "Ρωσία": "RU",
+    "Belarus": "BY",
+    "Białoruś": "BY",
+    "Weißrussland": "BY",
+    "Vitryssland": "BY",
+    "Baltkrievija": "BY",
+    "Valgevene": "BY",
+    "Bělorusko": "BY",
+    "Belarusz": "BY",
+    "Беларус": "BY",
+    "Λευκορωσία": "BY",
+    "Ukraina": "UA",
+    "Ucraina": "UA",
+}
+
+# EODI "lugar.nivel" of an unlocated incident: how precisely the place is known.
+# "region" is a named region without coordinates, for example "Romanian coast".
+GEO_PRECISION = {
+    "localidad": "place",
+    "region": "place",
+    "pais": "country",
 }
 
 
@@ -77,8 +96,9 @@ def fetch() -> pd.DataFrame:
         OSError: A download failed.
         KeyError: A column is missing (see `normalize`) or a JSON field is
             missing (see `fetch_unlocated`).
-        ValueError: An unknown date precision, an unknown actor or an attributed
-            unlocated incident (see `normalize` and `fetch_unlocated`).
+        ValueError: An unknown date precision, actor or `nivel`, or an
+            attributed unlocated incident (see `normalize` and
+            `fetch_unlocated`).
     """
     located = read_csv(LOCATED_URL, storage_options=HEADERS)
     return normalize(pd.concat([located, fetch_unlocated()], ignore_index=True))
@@ -88,15 +108,16 @@ def fetch_unlocated() -> pd.DataFrame:
     """Incidents without exact coordinates, reshaped like the CSV rows.
 
     Downloads the JSON file (60 s timeout). The frame has no `latitud`,
-    `longitud` or `atribucion_actor` column: after the concat in `fetch` those
-    cells are empty.
+    `longitud`, `atribucion_actor` or `atribucion_autoridad` column: after the
+    concat in `fetch` those cells are empty. `fin` and `nivel` come from
+    `tiempo.fin.valor` and `lugar.nivel`; an absent `fin` stays empty.
 
     Returns:
         One row per incident, with the CSV column names the other rows use.
 
     Raises:
         OSError: The download failed.
-        KeyError: A JSON field is missing.
+        KeyError: A JSON field other than `tiempo.fin` is missing.
         ValueError: An incident has the state "atribuido": its actor is not
             parsed yet, so the ingestion stops.
     """
@@ -116,6 +137,8 @@ def fetch_unlocated() -> pd.DataFrame:
                 "titulo_en": incident["titulo"]["en"],
                 "inicio": incident["tiempo"]["inicio"]["valor"],
                 "inicio_precision": incident["tiempo"]["inicio"]["precision"],
+                "fin": incident["tiempo"].get("fin", {}).get("valor"),
+                "nivel": incident["lugar"]["nivel"],
                 "pais": incident["lugar"]["pais"],
                 "lugar_en": incident["nombres"]["lugar"]["en"],
                 "enlace": INCIDENT_PAGE.format(id=incident["id"]),
@@ -129,8 +152,10 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         raw: EODI rows with the columns `id`, `inicio`, `inicio_precision`,
-            `pais`, `lugar_en`, `latitud`, `longitud`, `tipo`, `titulo_en`,
-            `presencia_dron`, `atribucion_actor` and `enlace`.
+            `fin`, `pais`, `lugar_en`, `latitud`, `longitud`, `tipo`,
+            `titulo_en`, `presencia_dron`, `atribucion_actor`,
+            `atribucion_autoridad` and `enlace`. The column `nivel` is needed
+            only for a row without coordinates.
 
     Returns:
         The rows with exactly the columns of `tracker.schema.COLUMNS`. An
@@ -139,23 +164,35 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
 
     Raises:
         KeyError: A column of `raw` is missing.
-        ValueError: An unknown date precision or actor.
+        ValueError: An unknown date precision, actor or `nivel`.
     """
+    nivel = raw["nivel"] if "nivel" in raw else pd.Series(pd.NA, index=raw.index)
+    actors = raw["atribucion_actor"].map(actor_code, na_action=None)
+    attributed = actors.notna()
     events = pd.DataFrame(
         {
             "event_id": raw["id"].map(lambda i: make_event_id("eodi", i)),
             "source": "eodi",
             "date": raw["inicio"].str[:10],
+            "end_date": raw["fin"].str[:10],
             "date_precision": raw["inicio_precision"].map(date_precision),
             "countries": raw["pais"],
             "place": raw["lugar_en"],
             "lat": raw["latitud"],
             "lon": raw["longitud"],
+            "geo_precision": [
+                geo_precision(located, level)
+                for located, level in zip(raw["latitud"].notna(), nivel)
+            ],
+            "domain": "air",
             "category": raw["tipo"].map(CATEGORY),
             "subcategory": raw["tipo"],
             "title": raw["titulo_en"],
             "event_status": raw["presencia_dron"].map(EVENT_STATUS),
-            "russia_link": raw["atribucion_actor"].map(russia_link, na_action=None),
+            "actors": actors,
+            "actor_name": pd.NA,
+            "attribution": attributed.map({True: "official", False: "none"}),
+            "attributed_by": raw["atribucion_autoridad"].where(attributed),
             "url": raw["enlace"],
         }
     )
@@ -176,21 +213,41 @@ def date_precision(value: str) -> str:
     return DATE_PRECISION[value]
 
 
-def russia_link(actor: str | float) -> str:
-    """Translate EODI's attributed actor into a RUSSIA_LINKS value.
+def geo_precision(located: bool, level: str | float) -> str:
+    """Translate the position of a row into a GEO_PRECISIONS value.
+
+    Args:
+        located: True when the row has coordinates.
+        level: The `nivel` text of an unlocated row, a key of `GEO_PRECISION`.
+
+    Returns:
+        "exact" for a located row, otherwise the value of `GEO_PRECISION`.
+
+    Raises:
+        ValueError: The row has no coordinates and `level` is not a key of
+            `GEO_PRECISION`.
+    """
+    if located:
+        return "exact"
+    if level not in GEO_PRECISION:
+        raise ValueError(f"Unknown nivel {level!r}: add it to GEO_PRECISION")
+    return GEO_PRECISION[level]
+
+
+def actor_code(actor: str | float) -> str | float:
+    """Translate EODI's attributed actor into an ISO 3166-1 alpha-2 code.
 
     Args:
         actor: The `atribucion_actor` name, or NaN when nobody is attributed.
 
     Returns:
-        "official" for a name of Russia, "none" for NaN or for an actor mapped
-        to False.
+        The code of the state, or NaN when nobody is attributed.
 
     Raises:
-        ValueError: `actor` is not a key of `ACTOR_IS_RUSSIA`.
+        ValueError: `actor` is not a key of `ACTOR_CODES`.
     """
     if pd.isna(actor):
-        return "none"
-    if actor not in ACTOR_IS_RUSSIA:
-        raise ValueError(f"Unknown actor {actor!r}: add it to ACTOR_IS_RUSSIA")
-    return "official" if ACTOR_IS_RUSSIA[actor] else "none"
+        return pd.NA
+    if actor not in ACTOR_CODES:
+        raise ValueError(f"Unknown actor {actor!r}: add it to ACTOR_CODES")
+    return ACTOR_CODES[actor]
