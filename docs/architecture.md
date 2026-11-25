@@ -116,6 +116,7 @@ flowchart LR
 | Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest live` |
 | Data | Ingest static sources missing from the store | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest static --if-missing` |
 | Data | Build the published tables | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker build` |
+| Data | Write the quality table and the run summary | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker quality` |
 | Data | Validate stored data |  | `uv run tracker ingest check` |
 | Data | Run the tests |  | `uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"` |
 | Data | Commit refreshed data | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | a script |
@@ -156,6 +157,7 @@ flowchart TB
   module_tracker_eodi["tracker.eodi"]
   module_tracker_ingest["tracker.ingest"]
   module_tracker_leiden["tracker.leiden"]
+  module_tracker_quality["tracker.quality"]
   module_tracker_schema["tracker.schema"]
   module_tracker_sources["tracker.sources"]
   module_tracker_store["tracker.store"]
@@ -171,6 +173,7 @@ flowchart TB
   module_tracker_build --> module_tracker_store
   module_tracker_cli --> module_tracker_build
   module_tracker_cli --> module_tracker_ingest
+  module_tracker_cli --> module_tracker_quality
   module_tracker_cli --> module_tracker_sources
   module_tracker_cli --> module_tracker_store
   module_tracker_eodi --> module_tracker_schema
@@ -180,6 +183,12 @@ flowchart TB
   module_tracker_ingest --> module_tracker_store
   module_tracker_leiden --> module_tracker_schema
   module_tracker_leiden --> module_tracker_store
+  module_tracker_quality --> module_tracker_build
+  module_tracker_quality --> module_tracker_clock
+  module_tracker_quality --> module_tracker_ingest
+  module_tracker_quality --> module_tracker_schema
+  module_tracker_quality --> module_tracker_sources
+  module_tracker_quality --> module_tracker_store
   module_tracker_sources --> module_tracker_eodi
   module_tracker_sources --> module_tracker_leiden
   module_tracker_sources --> module_tracker_schema
@@ -197,6 +206,7 @@ flowchart TB
 | `tracker.eodi` | `src/tracker/eodi.py` | European Observatory of Drone Incidents (EODI) - live source. | pandas |
 | `tracker.ingest` | `src/tracker/ingest.py` | Download sources, keep their payloads in the raw store and write clean tables. | pandas |
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | openpyxl, pandas, pycountry |
+| `tracker.quality` | `src/tracker/quality.py` | Quality table and run summary: one row per source and per run. | pandas |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
 | `tracker.sources` | `src/tracker/sources.py` | Registry of data sources and access to their stored events. | pandas |
 | `tracker.store` | `src/tracker/store.py` | Raw store client: keeps each source payload as fetched, with a manifest. | huggingface_hub |
