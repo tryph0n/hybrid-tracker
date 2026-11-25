@@ -86,7 +86,7 @@ flowchart LR
 | Data | Install |  | `uv sync --locked` |
 | Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run python -m tracker.ingest live` |
 | Data | Validate stored data |  | `uv run python -m tracker.ingest check` |
-| Data | Run the tests |  | `uv run pytest` |
+| Data | Run the tests |  | `uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"` |
 | Data | Commit refreshed data | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | a script |
 | Docs | Install |  | `uv sync --locked --group docs` |
 | Docs | Check the architecture page |  | `uv run python scripts/architecture.py --check` |
