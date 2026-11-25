@@ -93,7 +93,6 @@ spreadsheet rows, so they can move in a new version.
    `static`.
 4. Add any new package with `uv add <package>`, then pin it as `name==version` in
    `pyproject.toml` and run `uv lock`. Commit `pyproject.toml` and `uv.lock`.
-   Until the image installs from the lockfile, also add it to `requirements.txt`.
 5. For a new category, status or link value: add it to `src/tracker/schema.py`
    and to the labels of `src/streamlit_app.py` (for a category, also the two
    colour lists, in the same order). For a status or link value, also update
@@ -201,11 +200,12 @@ does.
   tests the data, and commits the changes to `data/events`. The commit does not
   start a new run: the image and the mirror use that commit in the same run.
 - The daily commits come from a bot. Pull before you create a branch.
-- The image tag is a hash of the `Dockerfile` and of the files it copies:
-  `requirements.txt`, `.streamlit`, `src` and `data`. A change to
-  any of them, the dataset card included, gives a new tag. A new `COPY` line in
-  the `Dockerfile` must also go in the `git ls-tree` line of the Docker image
-  job (`tests/test_image.py` checks it) and in the tag command of
+- The image tag is a hash of the `Dockerfile` and of every file the build
+  reads: `README.md`, `pyproject.toml`, `uv.lock`, `.streamlit`, `src` and
+  `data`. The packages come from `uv.lock`, so a lockfile change gives a new
+  tag. A change to any of them, the dataset card included, gives a new tag.
+  A new `COPY` line or a new bind mount in the `Dockerfile` must also go in
+  the `git ls-tree` line of the Docker image job (`tests/test_image.py` checks it) and in the tag command of
   [Roll back](#roll-back). The same inputs give
   the same tag, and nothing is pushed to Docker Hub. `latest` moves only when a
   new tag is built. After a revert to an earlier tag, `latest` stays on the
@@ -295,7 +295,7 @@ check path.
   Deploy Hook), take an earlier tag from Docker Hub, and run:
   `curl -fsS --get --data-urlencode "imgURL=docker.io/<user>/<repository>:<tag>" "<deploy hook URL>"`.
   The tag of a commit is the output of
-  `git ls-tree <commit> Dockerfile requirements.txt .streamlit src data | sha256sum | cut -c1-12`.
+  `git ls-tree <commit> Dockerfile README.md pyproject.toml uv.lock .streamlit src data | sha256sum | cut -c1-12`.
   This lasts until the next `main` run that reaches the Deploy job, usually
   the daily run at 04:17 UTC. To keep the earlier version, `git revert` the bad change on `main`.
 - Data: `git revert` the commit on `main`. For a live source, the next refresh
