@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SCHEMA_VERSION = "2.0.0"
+SCHEMA_VERSION = "2.1.0"
 
 # Column order of every file in data/events/.
 COLUMNS = [
@@ -15,7 +15,7 @@ COLUMNS = [
     "source",  # key of tracker.sources.SOURCES
     "date",  # event start, YYYY-MM-DD (UTC date when the source gives a time)
     "end_date",  # end of a campaign, YYYY-MM-DD, not before date, empty for a single incident
-    "date_precision",  # "day", "approximate" (day marked approximate), "month" (on the 1st)
+    "date_precision",  # "day", "approximate" (day marked approximate), "month" (on the 1st), "year" (on 1 January)
     "countries",  # ISO 3166-1 alpha-2 codes joined by ";", empty for open sea
     "place",  # free-text location as given by the source
     "lat",  # decimal degrees, empty when the source has no coordinates
@@ -96,7 +96,7 @@ EVENT_STATUSES = ["confirmed", "unconfirmed", "dismissed"]
 # "none": no source attributes the event to a state.
 ATTRIBUTIONS = ["official", "assessed", "claimed", "none"]
 
-DATE_PRECISIONS = ["day", "approximate", "month"]
+DATE_PRECISIONS = ["day", "approximate", "month", "year"]
 
 GEO_PRECISIONS = ["exact", "place", "country", "sea"]
 

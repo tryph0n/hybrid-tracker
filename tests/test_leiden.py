@@ -58,7 +58,9 @@ def test_normalize_follows_schema(events):
     validate(events)
     # The three note rows below the events are dropped.
     assert len(events) == 7
-    assert (events["date_precision"] == "month").all()
+    unknown_month = events["event_id"] == "leiden:ed264516da77"
+    assert (events.loc[unknown_month, "date_precision"] == "year").all()
+    assert (events.loc[~unknown_month, "date_precision"] == "month").all()
     assert (events["event_status"] == "confirmed").all()
     assert (events["actors"] == "RU").all()
     assert (events["attribution"] == "assessed").all()
@@ -108,6 +110,7 @@ def test_normalize_follows_schema(events):
             "leiden:ed264516da77",
             {
                 "date": "2023-01-01",
+                "date_precision": "year",
                 "countries": "NL",
                 "domain": "sabotage",
                 "category": "sabotage",

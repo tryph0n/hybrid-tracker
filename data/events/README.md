@@ -34,6 +34,13 @@ A removed or renamed column is a major version. Each version has a tag on the
 Hugging Face dataset, `v<version>`, on the commit of its first upload. A tag is
 never moved.
 
+### 2.1.0
+
+New value `year` for `date_precision`: a date known to the year only, stored on
+1 January. No column changes. Leiden events whose month is "Unknown" in the
+source (one event, `leiden:631573191ba1`) now have `year` instead of `month`;
+every other Leiden row keeps `month`.
+
 ### 2.0.0
 
 Schema v2 (record 0002 of the project). 20 columns: `domain`, `actors`,

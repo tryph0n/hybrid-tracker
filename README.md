@@ -44,7 +44,7 @@ attribution. Three fields keep these questions apart:
 `domain` groups the events (air, sabotage, violence, maritime, cyber,
 information, espionage, other), and `category` refines it.
 
-The data has a version, 2.0.0 today. The first version (1.0.0) used other
+The data has a version, 2.1.0 today. The first version (1.0.0) used other
 column names. It stays readable at the tag `v1.0.0` of the dataset, for example
 `pd.read_csv("hf://datasets/sam-bot/europe-hybrid-incidents@v1.0.0/eodi.csv")`.
 See the
@@ -58,8 +58,8 @@ stored events, whatever the filters.
 Known limits: sources are not de-duplicated against each other, and counts
 over time follow each source's coverage period (see the Sources table of the
 dashboard). Some sources give a date to the month or year only (`date_precision` is
-`month`) and the event is dated the 1st of the month the source gives, or
-1 January when the source gives the year only. The period filter places an
+`month` or, since version 2.1.0, `year`) and the event is dated the 1st of the
+month the source gives, or 1 January when the source gives the year only. The period filter places an
 event by that date, so for a period other than "All time" an event of the
 month that contains the period start can be left out, even if it took place
 inside the period. The dashboard shows a note when this can apply.

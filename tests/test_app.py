@@ -418,3 +418,16 @@ def test_month_precision_note_follows_date_precision_not_the_source(
     assert len(notes) == 1
     assert SOURCES["eodi"].title in notes[0]
     assert SOURCES["leiden"].title not in notes[0]
+
+
+def test_month_precision_note_shows_for_a_year_date_alone(sample_data_dir):
+    leiden = read_events("leiden")
+    leiden["date_precision"] = "day"
+    leiden.loc[leiden.index[0], "date_precision"] = "year"
+    leiden.to_csv(events_path("leiden"), index=False)
+    st.cache_data.clear()
+    at = run_app()
+    at.selectbox(key="period").set_value("Last 12 months").run()
+    assert not at.exception
+    assert MONTH_NOTE in captions(at)
+    assert SOURCES["leiden"].title in captions(at)

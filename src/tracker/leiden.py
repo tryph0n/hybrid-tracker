@@ -191,8 +191,10 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
     """
     raw = raw.dropna(subset=["IncidentYear"])
 
-    # Dates are known to the month only. One event has no month: use January.
+    # A date is known to the month, or to the year when the month is "Unknown":
+    # that row is dated 1 January.
     year = raw["IncidentYear"].astype(int).astype(str)
+    year_only = raw["IncidentMonth"] == "Unknown"
     month = raw["IncidentMonth"].replace("Unknown", "January")
     date = pd.to_datetime(year + " " + month, format="%Y %B")
 
@@ -206,7 +208,7 @@ def normalize(raw: pd.DataFrame) -> pd.DataFrame:
             "source": "leiden",
             "date": date.dt.strftime("%Y-%m-%d"),
             "end_date": end_dates(raw["IncidentDateEnd"]),
-            "date_precision": "month",
+            "date_precision": year_only.map({True: "year", False: "month"}),
             "countries": countries,
             "place": raw["Where"],
             "lat": float("nan"),
