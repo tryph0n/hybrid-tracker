@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ LOCAL_DIR_VAR = "TRACKER_STORE_DIR"
 HF_REPO_VAR = "TRACKER_STORE_REPO"
 DEFAULT_HF_REPO = "sam-bot/hybrid-tracker-raw"
 MANIFEST_NAME = "manifest.jsonl"
+SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 MAX_FILES_PER_COMMIT = 99
 
 
@@ -149,6 +151,8 @@ class Store:
         files: dict[str, bytes] = {}
         lines: list[dict[str, Any]] = []
         for payload in payloads:
+            _check_segment("source", payload.source)
+            _check_segment("name", payload.name)
             month = f"raw/{payload.source}/{now:%Y}/{now:%m}"
             path = manifests_path(month)
             if path not in manifests:
@@ -248,6 +252,14 @@ class Store:
         return [json.loads(row) for row in raw.decode().splitlines() if row]
 
 
+def _check_segment(label: str, value: str) -> None:
+    if not SEGMENT_RE.fullmatch(value):
+        raise StoreError(
+            f"Invalid payload {label} {value!r}: use letters, digits, '.', '_' and '-', "
+            "starting with a letter or digit"
+        )
+
+
 def manifests_path(month_folder: str) -> str:
     return f"{month_folder}/{MANIFEST_NAME}"
 
@@ -256,12 +268,18 @@ def payload_path(
     month: str, day: int, name: str, now: Any, month_lines: list[dict[str, Any]]
 ) -> str:
     """Path of a payload. A second payload of the same file on one day gets the time in its name."""
+    taken = {line["path"] for line in month_lines}
     path = f"{month}/{day:02d}/{name}"
-    if any(line["path"] == path for line in month_lines):
+    if path in taken:
         stem, dot, suffix = name.rpartition(".")
         stamp = f"{now:%H%M%S}"
-        timed = f"{stem}-{stamp}.{suffix}" if dot else f"{name}-{stamp}"
-        path = f"{month}/{day:02d}/{timed}"
+        base = f"{stem}-{stamp}" if dot else f"{name}-{stamp}"
+        ending = f".{suffix}" if dot else ""
+        path = f"{month}/{day:02d}/{base}{ending}"
+        counter = 1
+        while path in taken:
+            counter += 1
+            path = f"{month}/{day:02d}/{base}-{counter}{ending}"
     return path
 
 

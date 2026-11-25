@@ -163,7 +163,7 @@ def test_open_store_rejects_a_bad_environment(env):
         open_store(env)
 
 
-def test_open_store_hf_uses_the_default_repo(monkeypatch):
+def test_open_store_hf_uses_the_default_repo():
     chosen = open_store({"TRACKER_STORE": "hf"})
     assert isinstance(chosen.backend, HfBackend)
     assert chosen.backend.repo_id == store.DEFAULT_HF_REPO
@@ -279,3 +279,43 @@ def test_latest_fails_when_the_manifest_points_to_a_missing_payload(local, tmp_p
     (tmp_path / line["path"]).unlink()
     with pytest.raises(StoreError, match="missing payload"):
         local.latest("eodi", "register.csv")
+
+
+def test_two_changes_in_the_same_second_keep_every_payload(
+    local, tmp_path, monkeypatch
+):
+    local.save(payload(b"v1"))
+    set_clock(monkeypatch, "2026-03-05 15:30:45")
+    local.save(payload(b"v2"))
+    local.save(payload(b"v3"))
+    day = tmp_path / "raw/eodi/2026/03/05"
+    assert (day / "register.csv").read_bytes() == b"v1"
+    assert (day / "register-153045.csv").read_bytes() == b"v2"
+    assert (day / "register-153045-2.csv").read_bytes() == b"v3"
+    assert local.latest("eodi", "register.csv") == b"v3"
+
+
+def test_same_second_changes_in_one_group_keep_every_payload(
+    local, tmp_path, monkeypatch
+):
+    local.save(payload(b"v1"))
+    set_clock(monkeypatch, "2026-03-05 15:30:45")
+    local.save_many([payload(b"v2"), payload(b"v3")])
+    assert len(local.payloads("eodi")) == 3
+    assert len({line["path"] for line in local.payloads("eodi")}) == 3
+
+
+@pytest.mark.parametrize(
+    "bad", ["", "..", ".", "a/b", "../x", "/abs", ".hidden", "a b", "a\\b"]
+)
+def test_save_rejects_an_unsafe_source(local, tmp_path, bad):
+    with pytest.raises(StoreError):
+        local.save(payload(source=bad))
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("bad", ["", "..", "a/b", "../x", "/abs", ".hidden", "a b"])
+def test_save_rejects_an_unsafe_name(local, tmp_path, bad):
+    with pytest.raises(StoreError):
+        local.save(payload(name=bad))
+    assert list(tmp_path.iterdir()) == []
