@@ -79,6 +79,8 @@ of the source.
 The [maintainer guide](https://hybrid-tracker.readthedocs.io/en/latest/maintainer.html)
 covers the checks, the pipeline and the settings.
 
+To report a vulnerability, read the [security policy](https://github.com/tryph0n/hybrid-tracker/blob/main/SECURITY.md).
+
 ## Licence and credits
 
 Code: Copyright 2026 Samy Antoine SAAD, licensed under the Apache License,

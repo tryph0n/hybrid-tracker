@@ -333,3 +333,20 @@ on `main` and wait for the next scheduled run.
 - Data: `git revert` the commit on `main`. For a live source, the next refresh
   fetches the upstream again, so the revert lasts only until the next
   scheduled or manual run.
+
+## Security
+
+Every action in `.github/workflows` is pinned to a full commit SHA, with the
+full version in a comment on the same line, for example
+`actions/checkout@<sha> # v7.0.1`. A tag can be moved to other code, a SHA
+cannot. Dependabot updates both the SHA and the comment. To add an action, take
+the commit SHA of the tag (for an annotated tag, the commit it points to) and
+write the version as `# vX.Y.Z`.
+
+These repository settings are on: code scanning default setup (languages
+`python` and `actions`), secret scanning with push protection, and private
+vulnerability reporting. Code scanning uses the default setup, so do not add a
+CodeQL workflow: the two are mutually exclusive. The policy is in
+[`SECURITY.md`](https://github.com/tryph0n/hybrid-tracker/blob/main/SECURITY.md)
+at the repository root. Keep it outside `docs/`, because Sphinx warns about a
+document that is in no `toctree`, and the docs build fails on a warning.
