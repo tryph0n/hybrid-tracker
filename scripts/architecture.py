@@ -64,10 +64,11 @@ PIPELINE = (
 )
 MODULES = "Python files and their imports: an arrow points to the imported module."
 
-# The service that a workflow step reaches, found by a pattern in its command.
+# The service that a workflow step reaches, found by a pattern in its command
+# or in its `with` options (one `key: value` per line).
 # A step that uses secrets or variables and matches none shows its job name.
 SERVICES = {
-    r"docker (buildx )?push": "Docker Hub",
+    r"docker (buildx )?push|^push: true$|imagetools create|docker login|^push-to-registry: true$": "Docker Hub",
     r"RENDER_DEPLOY_HOOK_URL": "Render",
     r"\bhf upload\b": "Hugging Face",
     r"HEARTBEAT_URL": "Heartbeat monitor",
@@ -146,8 +147,12 @@ def job_outputs(spec, job: str) -> list[str]:
 
 def service(step: dict, job_name: str) -> str:
     """The service outside the repository that a step reaches, or ""."""
+    options = step.get("with") or {}
+    text = "\n".join(
+        [step.get("run", ""), *(f"{k}: {str(v).lower()}" for k, v in options.items())]
+    )
     for pattern, name in SERVICES.items():
-        if re.search(pattern, step.get("run", "")):
+        if re.search(pattern, text, re.MULTILINE):
             return name
     if references(step, "secrets") or references(step, "vars"):
         return job_name
