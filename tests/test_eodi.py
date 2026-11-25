@@ -50,11 +50,33 @@ def test_normalize_follows_schema(events):
                 "category": "drone_overflight",
                 "subcategory": "sobrevuelo",
                 "event_status": "confirmed",
-                "russia_link": "none",
+                "domain": "air",
+                "end_date": pd.NA,
+                "geo_precision": "exact",
+                "actors": pd.NA,
+                "actor_name": pd.NA,
+                "attribution": "none",
+                "attributed_by": pd.NA,
             },
         ),
-        ("EODI-2025-00233", {"russia_link": "official", "countries": "PL"}),
-        ("EODI-2026-00140", {"russia_link": "none", "category": "airspace_incursion"}),
+        (
+            "EODI-2025-00233",
+            {
+                "actors": "RU",
+                "attribution": "official",
+                "attributed_by": "Kancelaria Prezesa Rady Ministrów",
+                "countries": "PL",
+            },
+        ),
+        (
+            "EODI-2026-00140",
+            {
+                "actors": "UA",
+                "attribution": "official",
+                "attributed_by": "Nacionālie bruņotie spēki",
+                "category": "airspace_incursion",
+            },
+        ),
         ("EODI-2026-00148", {"event_status": "unconfirmed", "date": "2026-09-26"}),
         (
             "EODI-2025-00042",
@@ -76,11 +98,21 @@ def test_normalize_follows_schema(events):
                 ),
                 "category": "drone_overflight",
                 "event_status": "unconfirmed",
-                "russia_link": "none",
+                "attribution": "none",
+                "geo_precision": "place",
+                "end_date": pd.NA,
                 "url": "https://droneobservatory.eu/EODI-2025-00140",
             },
         ),
-        ("EODI-2025-00222", {"date": "2025-02-02", "countries": "MD"}),
+        (
+            "EODI-2025-00222",
+            {
+                "date": "2025-02-02",
+                "end_date": "2025-02-02",
+                "countries": "MD",
+                "geo_precision": "country",
+            },
+        ),
         ("EODI-2024-00003", {"date_precision": "day"}),
         ("EODI-2026-00148", {"date_precision": "day"}),
         (
@@ -91,7 +123,13 @@ def test_normalize_follows_schema(events):
 )
 def test_normalize_maps_values(events, native_id, expected):
     row = events.set_index("event_id").loc[f"eodi:{native_id}"]
-    assert row[list(expected)].to_dict() == expected
+    actual = row[list(expected)].to_dict()
+    assert actual.keys() == expected.keys()
+    for column, value in expected.items():
+        if value is pd.NA:
+            assert pd.isna(actual[column]), column
+        else:
+            assert actual[column] == value, column
 
 
 def test_located_and_unlocated_coordinates(events):
@@ -108,15 +146,33 @@ def test_located_and_unlocated_coordinates(events):
 
 def test_unknown_actor_stops_the_ingestion():
     located = pd.read_csv(LOCATED)
-    located.loc[0, "atribucion_actor"] = "Belarus"
-    with pytest.raises(ValueError, match="ACTOR_IS_RUSSIA"):
+    located.loc[0, "atribucion_actor"] = "Narnia"
+    with pytest.raises(ValueError, match="ACTOR_CODES"):
         eodi.normalize(located)
 
 
-def test_polish_name_of_russia_is_an_official_attribution():
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [("Federacja Rosyjska", "RU"), ("Belarus", "BY"), ("Ucraina", "UA")],
+)
+def test_actor_name_maps_to_an_iso_code(name, code):
     located = pd.read_csv(LOCATED)
-    located.loc[0, "atribucion_actor"] = "Federacja Rosyjska"
-    assert eodi.normalize(located).loc[0, "russia_link"] == "official"
+    located.loc[0, "atribucion_actor"] = name
+    located.loc[0, "atribucion_autoridad"] = "Some office"
+    row = eodi.normalize(located).loc[0]
+    assert (row["actors"], row["attribution"], row["attributed_by"]) == (
+        code,
+        "official",
+        "Some office",
+    )
+
+
+def test_unknown_nivel_stops_the_ingestion():
+    located = pd.read_csv(LOCATED)
+    located.loc[0, ["latitud", "longitud"]] = pd.NA
+    located["nivel"] = "barrio"
+    with pytest.raises(ValueError, match="GEO_PRECISION"):
+        eodi.normalize(located)
 
 
 def test_unknown_date_precision_stops_the_ingestion():
