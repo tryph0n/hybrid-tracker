@@ -478,3 +478,74 @@ def test_narrowed_categories_survive_a_change_of_another_filter(sample_data_dir)
     at.selectbox(key="period").set_value("Last 12 months").run()
     assert not at.exception
     assert at.multiselect(key="categories").value == ["airspace_incursion"]
+
+
+EODI_TITLE = SOURCES["eodi"].title
+LEIDEN_TITLE = SOURCES["leiden"].title
+
+
+def where_counts(events):
+    """Located, Countries-view-only and on-no-map counts of a frame of events."""
+    has_coordinates = events["lat"].notna()
+    has_country = events["countries"].notna()
+    return (
+        int(has_coordinates.sum()),
+        int((~has_coordinates & has_country).sum()),
+        int((~has_coordinates & ~has_country).sum()),
+    )
+
+
+def test_where_caption_names_the_sources_and_says_the_legend_is_not_a_filter(
+    sample_data_dir,
+):
+    at = run_app()
+    shown = expected_events(read_all_events())
+    located, countries_only, on_no_map = where_counts(shown)
+    assert countries_only > 0
+    text = captions(at)
+    assert f"Sources with coordinates: {EODI_TITLE}." in text
+    assert f"Sources with no coordinates: {LEIDEN_TITLE}." in text
+    assert "it is not the Domain filter" in text
+    assert f"{countries_only} events have a country and no coordinates" in text
+    assert "in the Countries view only" in text
+    assert located + countries_only + on_no_map == len(shown)
+    assert sum(len(trace.customdata) for trace in chart(at, 1).data) == located
+
+
+def test_where_counts_add_up_with_the_leiden_dataset_alone(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    assert not at.exception
+    shown = expected_events(read_all_events())
+    shown = shown[shown["source"] == "leiden"]
+    located, countries_only, on_no_map = where_counts(shown)
+    assert located == 0
+    assert countries_only + on_no_map == len(shown)
+    info = at.info[0].value
+    assert f"Sources with no coordinates: {LEIDEN_TITLE}." in info
+    assert EODI_TITLE not in info
+    assert f"{countries_only} events have a country and no coordinates" in info
+    assert "Countries view" in info
+
+
+def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="sources").set_value(["eodi"]).run()
+    assert not at.exception
+    text = captions(at)
+    assert f"Sources with coordinates: {EODI_TITLE}." in text
+    assert "Sources with no coordinates" not in text
+    shown = expected_events(read_all_events())
+    eodi = shown[shown["source"] == "eodi"]
+    countries_only = where_counts(eodi)[1]
+    assert f"{countries_only} events have a country and no coordinates" in text
+    at.multiselect(key="sources").set_value(["eodi", "leiden"]).run()
+    at.multiselect(key="domains").set_value(["sabotage"]).run()
+    assert not at.exception
+    info = at.info[0].value
+    sabotage = shown[shown["domain"] == "sabotage"]
+    assert set(sabotage["source"]) == {"leiden"}
+    assert f"Sources with no coordinates: {LEIDEN_TITLE}." in info
+    assert EODI_TITLE not in info
+    assert where_counts(sabotage)[1] == 1
+    assert "1 event has a country and no coordinates" in info

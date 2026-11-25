@@ -19,7 +19,12 @@ from tracker.schema import (
     EVENT_STATUSES,
 )
 from tracker.sources import SOURCES, read_all_events
-from tracker.views import filter_events, official_by_actor, with_code_lists
+from tracker.views import (
+    coordinate_coverage,
+    filter_events,
+    official_by_actor,
+    with_code_lists,
+)
 
 DOMAIN_LABELS = {
     "air": "Air",
@@ -469,13 +474,26 @@ map_view = st.segmented_control(
     label_visibility="collapsed",
 )
 located = events.dropna(subset=["lat", "lon"])
-on_no_map = int((events["lat"].isna() & events["countries"].isna()).sum())
+coverage = coordinate_coverage(events)
+on_no_map = coverage.on_no_map
 if on_no_map == 1:
     no_map_note = " 1 event has no country (open sea) and is on no map."
 elif on_no_map:
     no_map_note = f" {on_no_map:,} events have no country (open sea) and are on no map."
 else:
     no_map_note = ""
+without_titles = ", ".join(SOURCES[name].title for name in coverage.sources_without)
+if coverage.countries_only == 1:
+    countries_only_note = (
+        " 1 event has a country and no coordinates: it is in the Countries view only."
+    )
+elif coverage.countries_only:
+    countries_only_note = (
+        f" {coverage.countries_only:,} events have a country and no coordinates: "
+        "they are in the Countries view only."
+    )
+else:
+    countries_only_note = ""
 if map_view == "Countries":
     st.plotly_chart(countries_map(by_country, dark))
     st.caption(
@@ -484,7 +502,10 @@ if map_view == "Countries":
     )
 elif located.empty:
     st.info(
-        "None of the selected events has coordinates. Try the Countries view."
+        "None of the selected events has coordinates. Sources with no coordinates: "
+        f"{without_titles}."
+        + countries_only_note
+        + " Try the Countries view."
         + no_map_note
     )
 else:
@@ -503,12 +524,17 @@ else:
         located_note = (
             f"{len(located):,} of {len(events):,} selected events have coordinates."
         )
+    with_titles = ", ".join(SOURCES[name].title for name in coverage.sources_with)
+    sources_note = f" Sources with coordinates: {with_titles}."
+    if without_titles:
+        sources_note += f" Sources with no coordinates: {without_titles}."
     st.plotly_chart(points_map(located, colors, dark))
     st.caption(
         located_note
         + stacked_note
-        + " Events with a country appear in the Countries view."
-        + no_map_note
+        + sources_note
+        + " The legend lists only the domains of the events that have "
+        "coordinates: it is not the Domain filter." + countries_only_note + no_map_note
     )
 
 st.subheader("Most affected countries (top 15, ties kept)")
