@@ -1,6 +1,7 @@
 """The dashboard run headless with AppTest, on the stored data and on samples."""
 
 import base64
+import re
 
 import numpy as np
 import pandas as pd
@@ -10,7 +11,7 @@ import streamlit as st
 from conftest import APP
 from streamlit.testing.v1 import AppTest
 
-from tracker.schema import CATEGORIES
+from tracker.schema import ATTRIBUTIONS, CATEGORY_DOMAINS, DOMAINS
 from tracker.sources import SOURCES, events_path, read_all_events, read_events
 
 
@@ -83,17 +84,103 @@ def test_counts_on_the_samples(sample_data_dir):
     kpis = metrics(at)
     assert kpis["Events"] == str(len(shown))
     assert kpis["Countries"] == str(len(codes))
-    assert kpis["Officially attributed to Russia"] == str(
-        (shown["russia_link"] == "official").sum()
+    assert kpis["Officially attributed"] == str(
+        (shown["attribution"] == "official").sum()
     )
     assert len(at.get("plotly_chart")) == 3
 
 
-def test_every_category_has_a_filter_option(sample_data_dir):
+def test_sources_filter_lists_every_source_all_selected(sample_data_dir):
     at = run_app()
-    categories = at.sidebar.multiselect[1]
-    assert categories.label == "Categories"
-    assert len(categories.options) == len(CATEGORIES)
+    sources = at.multiselect(key="sources")
+    assert sources.options == [SOURCES[name].title for name in SOURCES]
+    assert sources.value == list(SOURCES)
+
+
+def test_every_domain_is_a_filter_option(sample_data_dir):
+    at = run_app()
+    domains = at.multiselect(key="domains")
+    assert domains.label == "Domain"
+    assert len(domains.options) == len(DOMAINS)
+    assert domains.value == DOMAINS
+
+
+def test_category_options_follow_the_selected_domains(sample_data_dir):
+    at = run_app()
+    categories = at.multiselect(key="categories")
+    assert len(categories.options) == len(CATEGORY_DOMAINS)
+    at.multiselect(key="domains").set_value(["air", "violence"]).run()
+    assert not at.exception
+    categories = at.multiselect(key="categories")
+    expected = [c for c, d in CATEGORY_DOMAINS.items() if d in ("air", "violence")]
+    assert len(categories.options) == len(expected)
+    assert len(categories.value) == len(expected)
+
+
+def test_attribution_filter_starts_with_the_four_levels(sample_data_dir):
+    at = run_app()
+    attributions = at.multiselect(key="attributions")
+    assert attributions.value == ATTRIBUTIONS
+    assert len(attributions.options) == 4
+
+
+def test_attribution_filter_never_hides_events_by_default(sample_data_dir):
+    at = run_app()
+    shown = expected_events(read_all_events())
+    assert (shown["attribution"] == "none").any()
+    assert metrics(at)["Events"] == str(len(shown))
+    at.multiselect(key="attributions").set_value(["official"]).run()
+    assert not at.exception
+    assert metrics(at)["Events"] == str((shown["attribution"] == "official").sum())
+
+
+def test_official_counts_only_official_events_of_the_selection(sample_data_dir):
+    at = run_app()
+    shown = expected_events(read_all_events())
+    official = shown[shown["attribution"] == "official"]
+    assert 0 < len(official) < len(shown)
+    assert metrics(at)["Officially attributed"] == str(len(official))
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    assert metrics(at)["Officially attributed"] == "0"
+    assert metrics(at)["Events"] == str((shown["source"] == "leiden").sum())
+    help_text = next(m.help for m in at.metric if m.label == "Officially attributed")
+    assert "No event of this selection" in help_text
+
+
+def test_official_help_gives_the_split_by_actor(sample_data_dir):
+    at = run_app()
+    help_text = next(m.help for m in at.metric if m.label == "Officially attributed")
+    assert "Russian Federation 1" in help_text
+
+
+def test_empty_actor_selection_keeps_events_with_no_state(sample_data_dir):
+    at = run_app()
+    shown = expected_events(read_all_events())
+    assert at.multiselect(key="actors").value == []
+    assert metrics(at)["Events"] == str(len(shown))
+    at.multiselect(key="actors").set_value(["RU"]).run()
+    assert not at.exception
+    assert metrics(at)["Events"] == str(
+        shown["actors"].fillna("").str.contains("RU").sum()
+    )
+
+
+def test_every_chart_is_coloured_by_domain(sample_data_dir):
+    at = run_app()
+    names = {trace.name for trace in chart(at, 0).data}
+    assert names <= {"Air", "Information", "Sabotage", "Violence", "Espionage"}
+    assert {trace.name for trace in chart(at, 1).data} == {"Air"}
+
+
+def test_table_and_map_state_who_attributed(sample_data_dir):
+    at = run_app()
+    table = at.dataframe[0].value
+    for column in ["attribution_label", "attributed_by", "end_date"]:
+        assert column in table.columns
+    assert "Polish government" in set(table["attributed_by"])
+    hover = chart(at, 1).data[0].hovertemplate
+    assert "Attribution=" in hover
+    assert "Attributed by=" in hover
 
 
 def test_credits_every_source(sample_data_dir):
@@ -107,7 +194,7 @@ def test_credits_every_source(sample_data_dir):
 
 def test_empty_selection_stops_with_a_message(sample_data_dir):
     at = run_app()
-    at.sidebar.multiselect[0].set_value([]).run()
+    at.multiselect(key="sources").set_value([]).run()
     assert not at.exception
     assert at.info[0].value == "No event matches these filters."
     assert not at.metric
@@ -115,7 +202,7 @@ def test_empty_selection_stops_with_a_message(sample_data_dir):
 
 def test_source_without_coordinates_keeps_the_other_charts(sample_data_dir):
     at = run_app()
-    at.sidebar.multiselect[0].set_value(["leiden"]).run()
+    at.multiselect(key="sources").set_value(["leiden"]).run()
     assert not at.exception
     assert "Countries view" in at.info[0].value
     assert len(at.get("plotly_chart")) == 2
@@ -131,7 +218,7 @@ def test_countries_view(sample_data_dir):
 
 def test_country_filter_restricts_kpi_and_bar(sample_data_dir):
     at = run_app()
-    at.sidebar.multiselect[4].set_value(["DE"]).run()
+    at.multiselect(key="countries").set_value(["DE"]).run()
     assert not at.exception
     assert metrics(at)["Countries"] == "1"
     assert chart(at, 2).data[0].y == ("Germany",)
@@ -141,7 +228,7 @@ def test_country_filter_restricts_kpi_and_bar(sample_data_dir):
 
 def test_multi_country_events_count_for_each_selected_country(sample_data_dir):
     at = run_app()
-    at.sidebar.multiselect[4].set_value(["AT", "DE"]).run()
+    at.multiselect(key="countries").set_value(["AT", "DE"]).run()
     assert not at.exception
     assert metrics(at)["Countries"] == "2"
     bars = chart(at, 2).data[0]
@@ -161,7 +248,7 @@ def test_events_on_no_map_are_counted(sample_data_dir, copies, note):
     assert note in captions(at)
     at.segmented_control[0].set_value("Countries").run()
     assert note in captions(at)
-    at.sidebar.multiselect[0].set_value(["leiden"]).run()
+    at.multiselect(key="sources").set_value(["leiden"]).run()
     assert not at.exception
     at.segmented_control[0].set_value("Incidents").run()
     assert note in at.info[0].value
@@ -171,13 +258,13 @@ def test_one_located_event_gets_a_singular_caption(sample_data_dir):
     eodi = read_events("eodi")
     eodi[eodi["lat"].notna()].head(1).to_csv(events_path("eodi"), index=False)
     at = run_app()
-    at.sidebar.multiselect[0].set_value(["eodi"]).run()
+    at.multiselect(key="sources").set_value(["eodi"]).run()
     assert "1 of 1 selected events has coordinates." in captions(at)
 
 
 def test_no_map_note_is_absent_without_open_sea_events(sample_data_dir):
     at = run_app()
-    at.sidebar.multiselect[0].set_value(["eodi"]).run()
+    at.multiselect(key="sources").set_value(["eodi"]).run()
     assert "no country" not in captions(at)
     at.segmented_control[0].set_value("Countries").run()
     assert "no country" not in captions(at)
@@ -188,7 +275,10 @@ def test_markers_say_how_many_events_are_at_their_place(sample_data_dir):
     at = run_app()
     traces = chart(at, 1).data
     assert all("Events here=" in trace.hovertemplate for trace in traces)
-    on_markers = sorted(row[2] for trace in traces for row in trace.customdata)
+    position = int(
+        re.search(r"Events here=%\{customdata\[(\d+)\]", traces[0].hovertemplate)[1]
+    )
+    on_markers = sorted(row[position] for trace in traces for row in trace.customdata)
     assert on_markers == [1, 1, 1, 1, 3, 3, 3]
 
 
@@ -198,16 +288,18 @@ def test_caption_counts_events_sharing_their_place(sample_data_dir):
     st.cache_data.clear()
     at = run_app()
     assert "3 of them share their place with other events" in captions(at)
-    at.sidebar.multiselect[2].set_value(["confirmed", "unconfirmed", "dismissed"]).run()
+    at.multiselect(key="statuses").set_value(
+        ["confirmed", "unconfirmed", "dismissed"]
+    ).run()
     assert "4 of them share their place with other events" in captions(at)
-    at.sidebar.multiselect[1].set_value(["airspace_incursion"]).run()
+    at.multiselect(key="categories").set_value(["airspace_incursion"]).run()
     assert "selected events have coordinates" in captions(at)
     assert "share their place" not in captions(at)
 
 
 def test_status_filter_says_dismissed_events_are_hidden(sample_data_dir):
     at = run_app()
-    status = at.sidebar.multiselect[2]
+    status = at.multiselect(key="statuses")
     assert status.label == "Event status"
     assert "dismissed" in status.help.lower()
     assert "dismissed" not in status.value

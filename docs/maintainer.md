@@ -101,9 +101,10 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    `static`.
 4. Add any new package with `uv add <package>`, then pin it as `name==version` in
    `pyproject.toml` and run `uv lock`. Commit `pyproject.toml` and `uv.lock`.
-5. For a new category, status or link value: add it to `src/tracker/schema.py`
-   and to the labels of `src/streamlit_app.py` (for a category, also the two
-   colour lists, in the same order). For a status or link value, also update
+5. For a new domain, category, status or attribution value: add it to
+   `src/tracker/schema.py` and to the labels of `src/streamlit_app.py` (for a
+   domain, also the two colour lists, in the same order, and run the
+   colour-blind check again). For a status or attribution value, also update
    the list in `README.md`, "Reading the data".
 6. If the source needs a secret, export it locally first. Run
    `uv run python -m tracker.ingest <name>`, then `uv run python -m tracker.ingest check`.

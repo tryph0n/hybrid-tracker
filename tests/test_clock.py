@@ -43,6 +43,6 @@ def test_period_filter_and_last_30_days_share_the_utc_day(
     assert expected > 0
     at = run_app()
     assert metrics(at)["Last 30 days"] == str(expected)
-    at.sidebar.selectbox[0].set_value("Last 30 days").run()
+    at.selectbox(key="period").set_value("Last 30 days").run()
     assert not at.exception
     assert metrics(at)["Events"] == str(expected)
