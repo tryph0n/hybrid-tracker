@@ -162,29 +162,23 @@ jobs:
           echo "image=$DOCKER_IMAGE:$tag" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "$DOCKERHUB_TOKEN" | docker login -u "${DOCKER_IMAGE%%/*}" --password-stdin
-          # state: new (build, scan, publish, attest), unattested (a tag
-          # published without a valid attestation: attest it) or done.
-          state=new
-          if digest=$(docker buildx imagetools inspect "$DOCKER_IMAGE:$tag" --format '{{.Manifest.Digest}}' 2> /dev/null); then
-            echo "$DOCKER_IMAGE:$tag is already published as $digest"
-            echo "digest=$digest" >> "$GITHUB_OUTPUT"
-            if gh attestation verify "oci://index.docker.io/$DOCKER_IMAGE@$digest" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-              state=done
-            else
-              echo "no valid attestation for $digest, it will be attested"
-              state=unattested
-            fi
+          # A tag counts as published only when it also has an attestation of
+          # this repository. Otherwise it is built again, from this run, so
+          # the provenance names this commit and this run.
+          if docker buildx imagetools inspect "$DOCKER_IMAGE:$tag" > /dev/null 2>&1 \
+            && gh attestation verify "oci://index.docker.io/$DOCKER_IMAGE:$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$DOCKER_IMAGE:$tag is already published and attested"
+            echo "published=true" >> "$GITHUB_OUTPUT"
           fi
-          echo "state=$state" >> "$GITHUB_OUTPUT"
       - name: Set up Buildx
-        if: steps.image.outputs.state == 'new'
+        if: steps.image.outputs.published != 'true'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       # Build once into the local daemon and scan it, so a vulnerable image is
       # never pushed. A push straight to the registry is what carries the
       # BuildKit attestations, so the image is built a second time for it (the
       # cache makes that cheap).
       - name: Build the image for the scan
-        if: steps.image.outputs.state == 'new'
+        if: steps.image.outputs.published != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -195,7 +189,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Scan the image and write the report
-        if: steps.image.outputs.state == 'new'
+        if: steps.image.outputs.published != 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.image.outputs.image }}
@@ -205,7 +199,7 @@ jobs:
           scanners: vuln
           severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
       - name: Add the report to the job summary
-        if: steps.image.outputs.state == 'new'
+        if: steps.image.outputs.published != 'true'
         env:
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
@@ -217,7 +211,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Fail on a critical finding that has a fix
-        if: steps.image.outputs.state == 'new'
+        if: steps.image.outputs.published != 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.image.outputs.image }}
@@ -229,7 +223,7 @@ jobs:
       # Only the tag is pushed here. latest moves after the attestation.
       - name: Publish the image with its provenance
         id: push
-        if: steps.image.outputs.state == 'new'
+        if: steps.image.outputs.published != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -239,17 +233,17 @@ jobs:
           tags: ${{ steps.image.outputs.image }}
           cache-from: type=gha
       - name: Attest the build provenance
-        if: steps.image.outputs.state != 'done'
+        if: steps.image.outputs.published != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: index.docker.io/${{ vars.DOCKER_IMAGE }}
-          subject-digest: ${{ steps.push.outputs.digest || steps.image.outputs.digest }}
+          subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
       - name: Move latest to the attested image
-        if: steps.image.outputs.state != 'done'
+        if: steps.image.outputs.published != 'true'
         env:
           DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
-          DIGEST: ${{ steps.push.outputs.digest || steps.image.outputs.digest }}
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: docker buildx imagetools create --tag "$DOCKER_IMAGE:latest" "$DOCKER_IMAGE@$DIGEST"
 
   deploy:

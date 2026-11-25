@@ -228,10 +228,11 @@ does.
   pushes the tag with a build provenance attestation, and moves `latest` to
   it only after the attestation succeeds. To check it, run
   `gh attestation verify oci://index.docker.io/<DOCKER_IMAGE>:<tag> --repo tryph0n/hybrid-tracker`.
-  A tag that is already published and attested is not built, scanned or
-  attested again. If the attestation step failed, run the pipeline again: the
-  job finds the tag without a valid attestation, attests the same digest and
-  then moves `latest`.
+  A tag that is already published and attested is not built again. A
+  published tag without a valid attestation, such as a tag from before the
+  attestation existed or after a failed attestation step, is built, scanned,
+  pushed and attested again from the new run. Run the pipeline again after a
+  failed attestation step: `latest` has not moved.
 - The Docker image, Deploy and mirror jobs run on `main` only. Each one does
   nothing until its variable or secret is set.
 

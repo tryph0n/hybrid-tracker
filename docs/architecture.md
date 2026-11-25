@@ -122,14 +122,14 @@ flowchart LR
 | Docker build check | Check the user and the health check |  | a script |
 | Docker build check | Start the container and wait for the health answer |  | a script |
 | Docker image | Name the image and check the registry |  | a script |
-| Docker image | Set up Buildx | `steps.image.outputs.state == 'new'` | `docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069` |
-| Docker image | Build the image for the scan | `steps.image.outputs.state == 'new'` | `docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
-| Docker image | Scan the image and write the report | `steps.image.outputs.state == 'new'` | `aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25` |
-| Docker image | Add the report to the job summary | `steps.image.outputs.state == 'new'` | a script |
-| Docker image | Fail on a critical finding that has a fix | `steps.image.outputs.state == 'new'` | `aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25` |
-| Docker image | Publish the image with its provenance | `steps.image.outputs.state == 'new'` | `docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
-| Docker image | Attest the build provenance | `steps.image.outputs.state != 'done'` | `actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6` |
-| Docker image | Move latest to the attested image | `steps.image.outputs.state != 'done'` | `docker buildx imagetools create --tag "$DOCKER_IMAGE:latest" "$DOCKER_IMAGE@$DIGEST"` |
+| Docker image | Set up Buildx | `steps.image.outputs.published != 'true'` | `docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069` |
+| Docker image | Build the image for the scan | `steps.image.outputs.published != 'true'` | `docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
+| Docker image | Scan the image and write the report | `steps.image.outputs.published != 'true'` | `aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25` |
+| Docker image | Add the report to the job summary | `steps.image.outputs.published != 'true'` | a script |
+| Docker image | Fail on a critical finding that has a fix | `steps.image.outputs.published != 'true'` | `aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25` |
+| Docker image | Publish the image with its provenance | `steps.image.outputs.published != 'true'` | `docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc` |
+| Docker image | Attest the build provenance | `steps.image.outputs.published != 'true'` | `actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6` |
+| Docker image | Move latest to the attested image | `steps.image.outputs.published != 'true'` | `docker buildx imagetools create --tag "$DOCKER_IMAGE:latest" "$DOCKER_IMAGE@$DIGEST"` |
 | Deploy to Render | Deploy to Render |  | a script |
 | Deploy to Render | Wait for the new image to answer | `steps.deploy.outputs.called == 'true'` | a script |
 | Hugging Face mirror | Install |  | `uv sync --locked` |
