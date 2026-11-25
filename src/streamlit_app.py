@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import pycountry
 import streamlit as st
 
+from tracker.clock import utc_today
 from tracker.schema import COLUMNS, EVENT_STATUSES, RUSSIA_LINKS
 from tracker.sources import SOURCES, read_all_events
 
@@ -305,7 +306,7 @@ if countries:
         scoped["country_codes"].map(lambda codes: bool(set(codes) & set(countries)))
     ]
 
-today = pd.Timestamp.now().normalize()
+today = utc_today()
 days = PERIODS[period_label]
 events = (
     scoped if days is None else scoped[scoped["date"] > today - pd.Timedelta(days=days)]
