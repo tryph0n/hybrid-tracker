@@ -145,12 +145,14 @@ Python files and their imports: an arrow points to the imported module.
 ```mermaid
 flowchart TB
   module_streamlit_app_py["streamlit_app.py"]
+  module_tracker_clock["tracker.clock"]
   module_tracker_eodi["tracker.eodi"]
   module_tracker_ingest["tracker.ingest"]
   module_tracker_leiden["tracker.leiden"]
   module_tracker_schema["tracker.schema"]
   module_tracker_sources["tracker.sources"]
   module_architecture_py["architecture.py"]
+  module_streamlit_app_py --> module_tracker_clock
   module_streamlit_app_py --> module_tracker_schema
   module_streamlit_app_py --> module_tracker_sources
   module_tracker_eodi --> module_tracker_schema
@@ -166,6 +168,7 @@ flowchart TB
 | Module | File | Purpose | Third-party imports |
 | --- | --- | --- | --- |
 | `streamlit_app.py` | `src/streamlit_app.py` | Dashboard: maps and charts of the unified hybrid-incident dataset. | pandas, plotly, pycountry, streamlit |
+| `tracker.clock` | `src/tracker/clock.py` | The current day, in UTC like the stored event dates. | pandas |
 | `tracker.eodi` | `src/tracker/eodi.py` | European Observatory of Drone Incidents (EODI) - live source. | pandas |
 | `tracker.ingest` | `src/tracker/ingest.py` | Fetch sources and store them as data/events/\<source\>.csv. |  |
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | pandas, pycountry |
