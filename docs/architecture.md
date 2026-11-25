@@ -152,6 +152,7 @@ flowchart TB
   module_tracker_leiden["tracker.leiden"]
   module_tracker_schema["tracker.schema"]
   module_tracker_sources["tracker.sources"]
+  module_tracker_store["tracker.store"]
   module_tracker_views["tracker.views"]
   module_architecture_py["architecture.py"]
   module_streamlit_app_py --> module_tracker_clock
@@ -165,6 +166,7 @@ flowchart TB
   module_tracker_sources --> module_tracker_eodi
   module_tracker_sources --> module_tracker_leiden
   module_tracker_sources --> module_tracker_schema
+  module_tracker_store --> module_tracker_clock
   module_architecture_py --> module_tracker_sources
 ```
 
@@ -177,5 +179,6 @@ flowchart TB
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | openpyxl, pandas, pycountry |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
 | `tracker.sources` | `src/tracker/sources.py` | Registry of data sources and access to their stored events. | pandas |
+| `tracker.store` | `src/tracker/store.py` | Raw store client: keeps each source payload as fetched, with a manifest. | huggingface_hub |
 | `tracker.views` | `src/tracker/views.py` | Filters and headline counts of the dashboard, as plain functions on a frame. | pandas |
 | `architecture.py` | `scripts/architecture.py` | Generate docs/architecture.md, the architecture diagrams, from the code. | yaml |
