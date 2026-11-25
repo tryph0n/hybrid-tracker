@@ -168,8 +168,15 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
 
 ## Add a source
 
-1. Check the licence. It must allow redistribution under CC BY 4.0, because
-   the stored data is published under CC BY 4.0. Write down the citation.
+1. Check the licence. It must allow redistribution under CC BY 4.0 (family
+   `open`) or CC BY-NC 4.0 (family `nc`), because
+   the published data of each family carries its licence. Write down the
+   citation, the licence and the page that states it.
+   Add no adapter for a source that `docs/sources.md` does not list as
+   usable. Usable means "Use now", or "Ask first" with a yes in
+   `docs/permissions.md`: no source is collected without a recorded licence,
+   and an "Ask first" source waits for a written yes. Record the source in
+   `docs/sources.md` first.
 2. Write `src/tracker/<name>.py`. It defines `extract()`, which only downloads
    and returns a list of `tracker.store.Payload` (file name, bytes as served,
    URL, HTTP status), and `normalize(files)`, which takes a mapping of file
@@ -181,7 +188,7 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    source.`: the architecture page shows that first line. Use the existing
    adapters as examples.
 3. Import the module in `src/tracker/sources.py` and add a `Source` entry:
-   title, `kind`, homepage, licence, `family` (`open` or `nc`), citation,
+   title, `kind`, homepage, licence, `licence_page`, `family` (`open` or `nc`), citation,
    `extract`, `normalize`. The key is lowercase.
    It is the CSV name, the `source` value, the prefix of `event_id`
    (`<name>:<id>`) and the ingest target. Do not use `check`, `live` or
