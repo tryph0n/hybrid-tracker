@@ -32,3 +32,13 @@ updates:
     ignore:
       - dependency-name: python
         update-types: ["version-update:semver-minor"]
+
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      pre-commit-minor-patch:
+        update-types: [minor, patch]
