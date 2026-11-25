@@ -1,6 +1,8 @@
 """The dashboard run headless with AppTest, on the stored data and on samples."""
 
 import base64
+import importlib
+import logging
 import re
 
 import numpy as np
@@ -9,10 +11,12 @@ import plotly.io as pio
 import pytest
 import streamlit as st
 from conftest import APP
+from streamlit.elements.lib import policies
 from streamlit.testing.v1 import AppTest
 
 from tracker.schema import ATTRIBUTIONS, CATEGORY_DOMAINS, DOMAINS
 from tracker.sources import SOURCES, events_path, read_all_events, read_events
+from tracker.views import coordinate_coverage
 
 
 @pytest.fixture(autouse=True)
@@ -486,7 +490,7 @@ LEIDEN_TITLE = SOURCES["leiden"].title
 
 def where_counts(events):
     """Located, Countries-view-only and on-no-map counts of a frame of events."""
-    has_coordinates = events["lat"].notna()
+    has_coordinates = events["lat"].notna() & events["lon"].notna()
     has_country = events["countries"].notna()
     return (
         int(has_coordinates.sum()),
@@ -549,3 +553,25 @@ def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
     assert EODI_TITLE not in info
     assert where_counts(sabotage)[1] == 1
     assert "1 event has a country and no coordinates" in info
+
+
+def test_category_widget_gets_no_default_and_session_state_value_together(
+    sample_data_dir, caplog
+):
+    importlib.reload(policies)
+    caplog.set_level(logging.WARNING, logger=policies.__name__)
+    at = run_app()
+    at.multiselect(key="domains").set_value(["air"]).run()
+    at.multiselect(key="domains").set_value(DOMAINS).run()
+    assert not at.exception
+    assert "also had its value set via the Session State API" not in caplog.text
+
+
+def test_where_text_gives_the_events_on_no_map_like_the_helper(sample_data_dir):
+    open_sea_rows(2)
+    at = run_app()
+    shown = expected_events(read_all_events())
+    coverage = coordinate_coverage(shown)
+    assert coverage.on_no_map == 2
+    note = f"{coverage.on_no_map} events have no country (open sea) and are on no map."
+    assert note in captions(at)
