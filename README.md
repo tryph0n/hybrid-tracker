@@ -112,3 +112,13 @@ must credit the original sources:
   incidents in Europe. CC BY 4.0.
 - Bart Schuurman, Russian Operations Against Europe Dataset, 2022-2025, Harvard
   Dataverse, V4. CC BY 4.0.
+
+Approximate coordinates: an event that has a place and no coordinates gets those of
+the town of that name in its country, with `geo_precision` `place`. The town
+centre comes from GeoNames, which is not an event source. Changes: the file is
+filtered to populated places with at least 500 inhabitants (`cities500`), and
+matched to events by name and country. Reuse must credit it:
+
+- GeoNames, https://www.geonames.org: place names and coordinates, filtered to
+  populated places. Provided as is, without warranty. CC BY 4.0
+  ([licence](https://creativecommons.org/licenses/by/4.0/)).

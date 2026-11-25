@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from tracker import eodi, leiden
+from tracker import eodi, geonames, leiden
 from tracker.schema import read_csv
 from tracker.store import Payload
 
@@ -50,6 +50,40 @@ class Source:
     source."""
 
 
+@dataclass(frozen=True)
+class Reference:
+    """Reference data: a file that the build reads to complete events.
+
+    It is not an event source. It has no clean table, no row in the Sources
+    table of the app and none in the published `sources` tables, but it needs a
+    recorded licence and a credit like a source does.
+    """
+
+    title: str
+    """Name of the dataset."""
+
+    homepage: str
+    """Page of the dataset. It must appear in the README and in the dataset
+    card."""
+
+    licence: str
+    """Licence name. It must appear in the README."""
+
+    licence_url: str
+    """Page of the licence text. It must appear in the README."""
+
+    family: str
+    """Licence family, one of `FAMILIES`."""
+
+    citation: str
+    """Credit line. It must appear word for word in the README and in the dataset
+    card."""
+
+    extract: Callable[[], list[Payload]]
+    """Downloads the files of the dataset and returns them as they are served.
+    Define it in the module of the dataset."""
+
+
 FAMILIES = ("open", "nc")
 
 
@@ -81,6 +115,23 @@ SOURCES = {
         normalize=leiden.normalize,
     ),
 }
+
+REFERENCES = {
+    geonames.SOURCE: Reference(
+        title="GeoNames populated places (cities500)",
+        homepage="https://www.geonames.org",
+        licence="CC BY 4.0",
+        licence_url="https://creativecommons.org/licenses/by/4.0/",
+        family="open",
+        citation=(
+            "GeoNames, https://www.geonames.org: place names and coordinates, "
+            "filtered to populated places. Provided as is, without warranty."
+        ),
+        extract=geonames.extract,
+    ),
+}
+"""Reference datasets by key. Each one is a raw store source with payloads and
+no clean table."""
 
 
 def events_path(name: str) -> Path:

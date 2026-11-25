@@ -27,6 +27,14 @@ original sources:
 - Lucas Alaniz Pintos, European Observatory of Drone Incidents (EODI): drone incidents in Europe. CC BY 4.0. <https://droneobservatory.eu>
 - Bart Schuurman, Russian Operations Against Europe Dataset, 2022-2025, Harvard Dataverse, V4. CC BY 4.0. <https://doi.org/10.7910/DVN/TQ0FMQ>
 
+Approximate coordinates: in the published tables, an event with a place and no
+coordinates gets those of the town of that name in its country, with
+`geo_precision` `place`. They come from GeoNames, filtered to populated places
+with at least 500 inhabitants, and matched by name and country. Reuse must
+credit it:
+
+- GeoNames, https://www.geonames.org: place names and coordinates, filtered to populated places. Provided as is, without warranty. CC BY 4.0. <https://creativecommons.org/licenses/by/4.0/>
+
 ## Versions
 
 The dataset follows [semantic versioning](https://semver.org/spec/v2.0.0.html).

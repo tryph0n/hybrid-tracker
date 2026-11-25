@@ -70,6 +70,7 @@ uv run tracker ingest live      # every live source
 uv run tracker ingest static    # every static source
 uv run tracker ingest static --if-missing # only the ones with no clean table
 uv run tracker ingest <name>    # one source, for example eodi
+uv run tracker ingest geonames  # the GeoNames file (reference data), by hand
 uv run tracker ingest check     # validate the stored files, no network, no store
 uv run tracker rebuild [<name>] # clean tables again from the stored payloads, no download
 uv run tracker build [--out build] # published tables of each licence family
@@ -113,6 +114,27 @@ is sorted by `source, event_id`, so the same input gives the same bytes. A
 Parquet file holds the DuckDB version: after an upgrade, compare contents, not
 hashes. The data job runs the command after the refresh, on a scheduled or
 manual run.
+
+The build also gives approximate coordinates (`sql/02_geocode.sql`). An event
+that has a place and a single country but no coordinates, and whose
+`geo_precision` is `place`, gets the coordinates of the GeoNames town of that
+name in that country. The end of the place after the last comma ("Name,
+Country") is dropped, and names are compared in lower case and without
+diacritics. A country, a sea, a coast or a region is not in the file, so it
+stays empty. Coordinates that a source gives are never changed: the build fails
+if one changes, or if a row gains coordinates with another precision than
+`place`. When several towns share a name in a country, the first of this order
+is taken: a match on the name before one on an alternate name, the larger
+population, the feature code (`PPLC`, `PPLA`, `PPLA2` to `PPLA5`, then `PPL`),
+the smaller GeoNames id. Sections of a town, abandoned, historical and
+destroyed places are left out (`tracker.geonames`). GeoNames regenerates the
+file every day and keeps no version, so `tracker ingest geonames` keeps each
+download in the raw store with its SHA-256 and its date (in the manifest), and
+the build reads the latest one and logs its digest and date. The data job
+downloads the file when the store has none (`ingest static --if-missing`); to
+refresh it, run `uv run tracker ingest geonames` by hand. GeoNames is in
+`REFERENCES` of `src/tracker/sources.py`, not in `SOURCES`: it has no events, no
+clean table and no row in the Sources table.
 
 `uv run tracker quality` runs after the build. It adds one row per source to
 the quality table: rows, rows added and removed since the previous run (by
