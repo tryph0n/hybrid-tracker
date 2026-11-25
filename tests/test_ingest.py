@@ -1,4 +1,5 @@
 import dataclasses
+import hashlib
 import io
 
 import pandas as pd
@@ -239,7 +240,7 @@ def test_registry_matches_the_stored_files():
 
 
 def forbid_download(monkeypatch) -> None:
-    """Make every source fail if its `extract` is called."""
+    """Make every source and reference dataset fail if its `extract` is called."""
 
     def fail() -> list[Payload]:
         raise AssertionError("rebuild must not download")
@@ -248,6 +249,23 @@ def forbid_download(monkeypatch) -> None:
         monkeypatch.setitem(
             sources.SOURCES, name, dataclasses.replace(source, extract=fail)
         )
+    for name, reference in sources.REFERENCES.items():
+        monkeypatch.setitem(
+            sources.REFERENCES, name, dataclasses.replace(reference, extract=fail)
+        )
+
+
+def serve_geonames(monkeypatch, content: bytes = b"zip") -> list[int]:
+    """Make GeoNames download `content`, and count the downloads."""
+    calls: list[int] = []
+
+    def extract() -> list[Payload]:
+        calls.append(1)
+        return [Payload("geonames", "cities500.zip", content, "https://e/g", 200)]
+
+    reference = dataclasses.replace(sources.REFERENCES["geonames"], extract=extract)
+    monkeypatch.setitem(sources.REFERENCES, "geonames", reference)
+    return calls
 
 
 def clean_table(store: Store, name: str) -> pd.DataFrame:
@@ -280,6 +298,7 @@ def test_the_rebuild_command_runs_without_sockets(data_dir, tmp_path, monkeypatc
     monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
     serve_recorded(monkeypatch, "eodi")
     serve_recorded(monkeypatch, "leiden")
+    serve_geonames(monkeypatch)
     cli.main(["ingest", "live"])
     cli.main(["ingest", "static"])
     for name in sources.SOURCES:
@@ -385,6 +404,7 @@ def test_if_missing_writes_the_missing_clean_table_and_skips_a_stored_one(
     monkeypatch.setenv("TRACKER_STORE", "local")
     monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
     serve_recorded(monkeypatch, "leiden")
+    serve_geonames(monkeypatch)
     store = open_store()
     assert store.backend.read(ingest.clean_path("leiden")) is None
 
@@ -401,12 +421,79 @@ def test_if_missing_downloads_again_when_the_clean_table_is_gone(
     monkeypatch.setenv("TRACKER_STORE", "local")
     monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
     serve_recorded(monkeypatch, "leiden")
+    serve_geonames(monkeypatch)
     cli.main(["ingest", "static"])
     store = open_store()
     (tmp_path / "store" / ingest.clean_path("leiden")).unlink()
 
     cli.main(["ingest", "leiden", "--if-missing"])
     assert len(clean_table(store, "leiden")) > 0
+
+
+def test_geonames_is_kept_in_the_store_with_its_digest_and_has_no_clean_table(
+    data_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_geonames(monkeypatch, b"zip bytes")
+
+    cli.main(["ingest", "geonames"])
+
+    store = open_store()
+    (line,) = store.payloads("geonames")
+    assert line["sha256"] == hashlib.sha256(b"zip bytes").hexdigest()
+    assert line["fetched_at"]
+    assert store.latest("geonames", "cities500.zip") == b"zip bytes"
+    assert store.backend.read(ingest.clean_path("geonames")) is None
+    assert not (data_dir / "geonames.csv").exists()
+
+
+def test_geonames_is_a_reference_and_not_an_event_source():
+    assert "geonames" in sources.REFERENCES
+    assert "geonames" not in sources.SOURCES
+    reference = sources.REFERENCES["geonames"]
+    assert reference.licence == "CC BY 4.0"
+    assert reference.family == "open"
+    assert reference.licence_url == "https://creativecommons.org/licenses/by/4.0/"
+    assert reference.citation
+
+
+def test_the_static_target_downloads_geonames_again_by_hand(
+    data_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    calls = serve_geonames(monkeypatch)
+
+    cli.main(["ingest", "static"])
+    cli.main(["ingest", "static"])
+
+    assert len(calls) == 2
+
+
+def test_if_missing_downloads_geonames_once(data_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    calls = serve_geonames(monkeypatch)
+
+    cli.main(["ingest", "static", "--if-missing"])
+    cli.main(["ingest", "static", "--if-missing"])
+
+    assert len(calls) == 1
+    assert len(open_store().payloads("geonames")) == 1
+
+
+def test_the_live_target_does_not_download_geonames(data_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "eodi")
+    calls = serve_geonames(monkeypatch)
+
+    cli.main(["ingest", "live"])
+
+    assert calls == []
 
 
 def test_if_missing_does_not_apply_to_check():

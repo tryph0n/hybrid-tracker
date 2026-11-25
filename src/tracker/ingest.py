@@ -3,10 +3,13 @@
 Run through the `tracker` command, from the repository root after `uv sync`:
 
 - `uv run tracker ingest live`: every live source (scheduled pipeline)
-- `uv run tracker ingest static`: every static source (run by hand)
-- `uv run tracker ingest eodi`: a single source
-- `uv run tracker ingest static --if-missing`: only the sources that have no
-  clean table in the raw store (scheduled pipeline)
+- `uv run tracker ingest static`: every static source and every reference
+  dataset (run by hand)
+- `uv run tracker ingest eodi`: a single source or reference dataset
+  (`geonames`: payloads only, no clean table)
+- `uv run tracker ingest static --if-missing`: only what is not in the raw store:
+  a source with no clean table, a reference dataset with no payload (scheduled
+  pipeline)
 - `uv run tracker ingest check`: validate stored files, download nothing
 - `uv run tracker rebuild [source]`: write the clean tables again from the
   stored payloads, download nothing
@@ -21,7 +24,13 @@ from collections.abc import Mapping
 import pandas as pd
 
 from tracker.schema import validate
-from tracker.sources import SOURCES, events_path, read_all_events, read_events
+from tracker.sources import (
+    REFERENCES,
+    SOURCES,
+    events_path,
+    read_all_events,
+    read_events,
+)
 from tracker.store import Store, open_store
 
 logger = logging.getLogger(__name__)
@@ -121,6 +130,23 @@ def ingest(name: str, store: Store) -> None:
     write_clean(name, {p.name: p.content for p in payloads}, store)
 
 
+def ingest_reference(name: str, store: Store) -> None:
+    """Download one reference dataset and keep its payloads in the raw store.
+
+    The store adds the SHA-256 and the date of the download to its manifest. A
+    file identical to the latest stored one adds a manifest line only.
+
+    Args:
+        name: Key of `REFERENCES`.
+        store: The raw store.
+
+    Raises:
+        KeyError: `name` is not a reference dataset.
+    """
+    for line in store.save_many(REFERENCES[name].extract()):
+        logger.info("%s: %s sha256 %s", name, line["name"], line["sha256"])
+
+
 def latest_payloads(name: str, store: Store) -> dict[str, bytes]:
     """The latest stored payload of each file of a source, empty if it has none."""
     files: dict[str, bytes] = {}
@@ -173,12 +199,15 @@ def check() -> None:
 
 
 def run(target: str, if_missing: bool = False) -> None:
-    """Run one target: a source name, `live`, `static` or `check`.
+    """Run one target: a source or reference name, `live`, `static` or `check`.
+
+    `static` runs the static sources and the reference datasets.
 
     Args:
         target: The target to run.
-        if_missing: Skip each source that already has a clean table in the
-            raw store: it is not downloaded again.
+        if_missing: Skip each source that already has a clean table, and each
+            reference dataset that already has a payload, in the raw store:
+            it is not downloaded again.
 
     Raises:
         ValueError: `target` is not a target, or `if_missing` is set with `check`.
@@ -188,15 +217,22 @@ def run(target: str, if_missing: bool = False) -> None:
             raise ValueError("`--if-missing` does not apply to `check`")
         check()
         return
-    if target in SOURCES:
+    if target in SOURCES or target in REFERENCES:
         names = [target]
     elif target in ("live", "static"):
         names = [n for n, source in SOURCES.items() if source.kind == target]
+        if target == "static":
+            names += list(REFERENCES)
     else:
         raise ValueError(f"Unknown target {target!r}")
     store = open_store()
     for name in names:
-        if if_missing and store.backend.read(clean_path(name)) is not None:
+        if name in REFERENCES:
+            if if_missing and store.payloads(name):
+                logger.info("%s: payload in the store, skipped", name)
+                continue
+            ingest_reference(name, store)
+        elif if_missing and store.backend.read(clean_path(name)) is not None:
             logger.info("%s: clean table in the store, skipped", name)
-            continue
-        ingest(name, store)
+        else:
+            ingest(name, store)

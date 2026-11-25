@@ -3,6 +3,7 @@
 import io
 import re
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -77,3 +78,36 @@ def sample_data_dir(data_dir):
     for path in (FIXTURES / "events").glob("*.csv"):
         shutil.copy(path, data_dir / path.name)
     return data_dir
+
+
+GEONAMES_PLACES = [
+    {"id": 1, "name": "Arna", "country": "NO", "lat": "60.42", "lon": "5.46"},
+    {"id": 2, "name": "Kirkenes", "country": "NO", "lat": "69.73", "lon": "30.05"},
+]
+
+
+def geonames_archive(places: list[dict[str, str | int]] | None = None) -> bytes:
+    """The bytes of a small `cities500.zip`, one tab-separated line per place.
+
+    Each place is a dict with `id`, `name`, `country`, `lat`, `lon` and
+    optionally `ascii`, `alternates`, `code` (default `PPL`) and `population`.
+    The file has 19 fields and no header, as GeoNames serves it.
+    """
+    lines = []
+    for place in GEONAMES_PLACES if places is None else places:
+        fields = [""] * 19
+        fields[0] = str(place["id"])
+        fields[1] = str(place["name"])
+        fields[2] = str(place.get("ascii", place["name"]))
+        fields[3] = str(place.get("alternates", ""))
+        fields[4] = str(place["lat"])
+        fields[5] = str(place["lon"])
+        fields[6] = "P"
+        fields[7] = str(place.get("code", "PPL"))
+        fields[8] = str(place["country"])
+        fields[14] = str(place.get("population", 1000))
+        lines.append("\t".join(fields))
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("cities500.txt", "\n".join(lines) + "\n")
+    return buffer.getvalue()

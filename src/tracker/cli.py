@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from tracker import build, ingest, quality
-from tracker.sources import SOURCES
+from tracker.sources import REFERENCES, SOURCES
 from tracker.store import open_store
 
 
@@ -22,9 +22,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ingest_parser.add_argument(
         "target",
-        choices=[*SOURCES, *ingest.TARGETS],
-        help="a source, every `live` or `static` source, or `check` to validate "
-        "the stored files without a download",
+        choices=[*SOURCES, *REFERENCES, *ingest.TARGETS],
+        help="a source or reference dataset, every `live` source, every `static` "
+        "source with the reference datasets, or `check` to validate the stored "
+        "files without a download",
     )
     ingest_parser.add_argument(
         "--if-missing",

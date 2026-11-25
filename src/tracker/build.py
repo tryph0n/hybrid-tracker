@@ -3,15 +3,22 @@
 Run through the `tracker` command: `uv run tracker build [--out build]`. A raw
 store is needed (see `tracker.store`).
 
-DuckDB runs in memory. Before the SQL files run, two tables exist: `clean`, the
-union of the clean tables of every source, and `registry`, one row per source
-with its metadata and licence family. Each file of `sql/` runs in name order
+DuckDB runs in memory. Before the SQL files run, three tables and one function
+exist: `clean`, the union of the clean tables of every source; `registry`, one
+row per source with its metadata and licence family; `geocode`, one GeoNames
+town per (folded name, country) from the latest stored GeoNames file (see
+`tracker.geonames`); and `fold(text)`, which folds a name as `geocode` is
+folded. A raw store without a GeoNames file fails the build: run
+`tracker ingest geonames`. After the SQL files, a row of `clean` that had
+coordinates must be unchanged, and a row that gained coordinates must have
+`geo_precision` `place`. Each file of `sql/` runs in name order
 and must create `events_<family>` and `sources_<family>` for each of
 `FAMILIES`. The tables are then checked and written to `<out>/<family>/` as
 `events.parquet`, `events.csv` and `sources.parquet`. Nothing is written to
 `<out>` if a check fails.
 """
 
+import hashlib
 import logging
 import shutil
 import tempfile
@@ -21,7 +28,9 @@ import duckdb
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from duckdb.sqltypes import VARCHAR
 
+from tracker import geonames
 from tracker.ingest import clean_path
 from tracker.schema import COLUMNS, read_csv, validate
 from tracker.sources import FAMILIES, SOURCES
@@ -84,12 +93,43 @@ def load_clean(store: Store, work: Path) -> dict[str, int]:
     return counts
 
 
-def prepare(con: duckdb.DuckDBPyConnection, work: Path) -> None:
-    """Create the `clean` and `registry` tables that the SQL files read.
+def load_geocode(store: Store) -> pd.DataFrame:
+    """The GeoNames lookup of the latest stored file, with its digest logged.
+
+    Raises:
+        ValueError: The store has no GeoNames file.
+    """
+    content = store.latest(geonames.SOURCE, geonames.FILE_NAME)
+    if content is None:
+        raise ValueError(
+            f"{geonames.SOURCE}: no stored file, run `tracker ingest {geonames.SOURCE}`"
+        )
+    stored = [
+        line
+        for line in store.payloads(geonames.SOURCE)
+        if line["name"] == geonames.FILE_NAME
+    ]
+    logger.info(
+        "%s: %s sha256 %s, fetched %s",
+        geonames.SOURCE,
+        geonames.FILE_NAME,
+        hashlib.sha256(content).hexdigest(),
+        stored[-1]["fetched_at"],
+    )
+    return geonames.lookup(content)
+
+
+def prepare(con: duckdb.DuckDBPyConnection, work: Path, geocode: pd.DataFrame) -> None:
+    """Create the tables and the function that the SQL files read.
 
     `clean` casts each column to its published type: pandas writes a column
-    with no value as `double`, and the union must not inherit that.
+    with no value as `double`, and the union must not inherit that. `geocode`
+    is the lookup of `tracker.geonames`, and `fold` is its name folding.
     """
+    con.create_function("fold", geonames.fold, [VARCHAR], VARCHAR)
+    con.register("geocode_frame", geocode)
+    con.execute("CREATE TABLE geocode AS SELECT * FROM geocode_frame")
+    con.unregister("geocode_frame")
     files = [str(work / f"{name}.parquet") for name in SOURCES]
     columns = ", ".join(
         f"CAST({column} AS {'DOUBLE' if column in NUMERIC_COLUMNS else 'VARCHAR'}) "
@@ -118,6 +158,32 @@ def prepare(con: duckdb.DuckDBPyConnection, work: Path) -> None:
     con.register("registry_frame", registry)
     con.execute("CREATE TABLE registry AS SELECT * FROM registry_frame")
     con.unregister("registry_frame")
+
+
+def check_coordinates(con: duckdb.DuckDBPyConnection) -> None:
+    """Check that the SQL files kept the coordinates that a source gives.
+
+    Raises:
+        ValueError: A row of `clean` that had coordinates differs in `events`
+            (latitude, longitude or `geo_precision`), or a row that had none
+            has coordinates with a `geo_precision` other than `place`.
+    """
+    changed = con.execute(
+        "SELECT count(*) FROM clean JOIN events USING (event_id) "
+        "WHERE clean.lat IS NOT NULL AND ("
+        "clean.lat IS DISTINCT FROM events.lat "
+        "OR clean.lon IS DISTINCT FROM events.lon "
+        "OR clean.geo_precision IS DISTINCT FROM events.geo_precision)"
+    ).fetchall()[0][0]
+    added = con.execute(
+        "SELECT count(*) FROM clean JOIN events USING (event_id) "
+        "WHERE clean.lat IS NULL AND events.lat IS NOT NULL "
+        "AND events.geo_precision <> 'place'"
+    ).fetchall()[0][0]
+    if changed:
+        raise ValueError(f"{changed} rows with source coordinates were changed")
+    if added:
+        raise ValueError(f"{added} rows gained coordinates without `place` precision")
 
 
 def quote(path: Path) -> str:
@@ -212,12 +278,14 @@ def build(store: Store, out: Path, sql_dir: Path = SQL_DIR) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         counts = load_clean(store, work)
+        geocode = load_geocode(store)
         con = duckdb.connect(":memory:")
         try:
-            prepare(con, work)
+            prepare(con, work, geocode)
             for file in files:
                 logger.info("Running %s", file.name)
                 con.execute(file.read_text())
+            check_coordinates(con)
             staged = work / "out"
             for family in FAMILIES:
                 export(con, family, staged / family)
