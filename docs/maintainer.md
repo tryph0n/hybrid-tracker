@@ -214,7 +214,11 @@ does.
   dataset commit and compares each file. A missing or different file fails the
   job.
 - Render redeploys the tag of the run on every `main` run, also when the tag
-  did not change.
+  did not change. The job then polls
+  `/app/static/version.txt` on the public address for 10 minutes at most, until
+  it shows that tag. The image writes the file from the build argument
+  `IMAGE_TAG`. The poll also wakes a sleeping free service, and the job is
+  skipped with the deploy when the secret is not set.
 - The Docker build check runs on pull requests only. It builds the image
   without pushing it, starts the container, and waits for `/_stcore/health` to
   answer 200. It needs no secret, and it is not a required check yet.
@@ -275,14 +279,14 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `uv run sphinx-build` command above and read the warning. |
 | Docker build check | A broken `Dockerfile`, a missing file in a `COPY`, an app that does not start or does not answer on `/_stcore/health` | Read the log: it shows the build error or the container log. Run `docker build .` locally and fix it. |
 | Docker image | A broken `Dockerfile` that the check missed, an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
-| Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended or the workspace cannot deploy | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Then run the job again. |
+| Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended or the workspace cannot deploy. Or the step "Wait for the new image to answer" failed: the app did not serve the tag of the run at `/app/static/version.txt` within 10 minutes, because the new image does not start or Render keeps the old one | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Wait failure: read the deploy logs in Render, check `PORT` and the health check path, and open the app address to see which tag it serves. Then run the job again. |
 | Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match, or `HF_DATASET` names another dataset; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
 | Hugging Face mirror | "Mirror check failed": the downloaded dataset commit does not hold the same bytes as `data/events/`: a file that the upload skipped, or that differs on the Hub | Run the job again, then compare the files on the Hub. |
 | Read the Docs | A warning or error in the docs build on Read the Docs. On a pull request it shows as a failed check; for `latest`, see Builds in the Read the Docs project. | `latest` stays on the previous version. Fix the docs and push. |
 
-A green Deploy job means only that Render accepted the deploy. If the dashboard
-does not start, read the deploy logs in Render and check `PORT` and the health
-check path.
+A green Deploy job means that Render accepted the deploy and that the app
+serves the tag of the run. When the secret is not set, the job is green and
+checks nothing.
 
 ## Rotate a credential
 
