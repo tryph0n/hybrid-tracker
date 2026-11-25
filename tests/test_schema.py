@@ -1,9 +1,17 @@
 """The rules of tracker.schema.validate on the stored-format samples."""
 
+import re
+
 import pandas as pd
 import pytest
 
-from tracker.schema import CATEGORIES, CATEGORY_DOMAINS, DOMAINS, validate
+from tracker.schema import (
+    CATEGORIES,
+    CATEGORY_DOMAINS,
+    DOMAINS,
+    make_event_id,
+    validate,
+)
 from tracker.sources import read_all_events
 
 
@@ -142,3 +150,19 @@ def test_validate_accepts_a_campaign_end_date(events):
 def test_every_category_has_one_domain_of_the_list():
     assert sorted(CATEGORY_DOMAINS) == sorted(CATEGORIES)
     assert set(CATEGORY_DOMAINS.values()) == set(DOMAINS)
+
+
+def test_make_event_id_keeps_native_id():
+    assert make_event_id("eodi", "EODI-2025-00233") == "eodi:EODI-2025-00233"
+
+
+def test_make_event_id_normalises_the_key():
+    first = make_event_id("leiden", key=("2022", " March ", "Some  event", "Poland"))
+    second = make_event_id("leiden", key=("2022", "march", "some event", "POLAND"))
+    assert first == second
+    assert re.fullmatch(r"leiden:[0-9a-f]{12}", first)
+
+
+def test_make_event_id_needs_an_id_or_a_key():
+    with pytest.raises(ValueError, match="native id or a key"):
+        make_event_id("leiden")

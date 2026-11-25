@@ -1,5 +1,8 @@
 """Unified event schema shared by every source adapter."""
 
+import hashlib
+import re
+from collections.abc import Sequence
 from pathlib import Path
 
 import pandas as pd
@@ -123,6 +126,41 @@ ALLOWED_VALUES = {
     "event_status": EVENT_STATUSES,
     "attribution": ATTRIBUTIONS,
 }
+
+
+def make_event_id(
+    source: str, native_id: str | None = None, key: Sequence[str] = ()
+) -> str:
+    """Build the identifier of an event, in the form "source:id".
+
+    Use `native_id` when the source documents a stable identifier of its own.
+    Otherwise pass the natural key as the parts of `key`. The id is then the
+    first 12 hex characters of the SHA-256 of the key.
+
+    Normalisation of the key (a change of it changes every id of every source
+    that uses a key): each part is stripped, its runs of whitespace are
+    collapsed to one space, and `casefold()` is applied. The parts are joined
+    with a vertical bar and encoded as UTF-8.
+
+    Args:
+        source: Key of the source in `tracker.sources.SOURCES`.
+        native_id: The identifier given by the source, if it documents one.
+        key: The parts of the natural key, used when `native_id` is None.
+
+    Returns:
+        The identifier, for example "eodi:EODI-2025-00233" or
+        "leiden:3f2a9c1b7d04".
+
+    Raises:
+        ValueError: Neither `native_id` nor `key` is given.
+    """
+    if native_id is not None:
+        return f"{source}:{native_id}"
+    if not key:
+        raise ValueError("An event id needs a native id or a key.")
+    parts = [re.sub(r"\s+", " ", part.strip()).casefold() for part in key]
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+    return f"{source}:{digest[:12]}"
 
 
 def validate(events: pd.DataFrame) -> None:

@@ -72,8 +72,7 @@ its module (`src/tracker/leiden.py`): update the file URL, ingest, read the
 diff of the CSV, and update the version in the `citation` of
 `src/tracker/sources.py`, in the README credits and in the dataset card
 (`data/events/README.md`). If the years change, also update the `title` and the
-README source table. Change the pinned version in the docstring too. The `event_id` values are
-spreadsheet rows, so they can move in a new version.
+README source table. Change the pinned version in the docstring too.
 
 ## Add a source
 
