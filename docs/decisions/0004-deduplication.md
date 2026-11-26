@@ -1,6 +1,6 @@
 # 0004. De-duplication across sources
 
-Status: Proposed.
+Status: Accepted.
 Date: 2026-11-25.
 
 ## Context
@@ -193,6 +193,15 @@ date gap comes first, then the pair with the smaller `event_id`. A pair joins
 the clusters of its two rows only when, after the join, no source has two rows
 in the cluster.
 
+A Leiden row can match several EODI rows, for example when it names several
+sites or several nights. It joins one of these rows, in the order above. The
+other EODI rows stay in their own clusters, and each one counts as one
+incident. The app shows no link between these clusters.
+
+The date gap of a pair is the number of days between its two intervals. It is
+0 when the intervals overlap. So for a Leiden row with a `month` date, the gap
+is 0 for each EODI row of that month, and the title score decides.
+
 Reasons:
 
 - One Leiden row can name several incidents that EODI records one by one (see
@@ -205,9 +214,17 @@ Reasons:
   scores 80, and the merged pair with `eodi:EODI-2025-00069` scores 56. If the
   merge came after the rule, the cluster rule would refuse it. With the merges
   first, no split is necessary for the pair with `eodi:EODI-2025-00094`.
+- EODI records one site on one day as one row. On the sample, 6 Leiden rows
+  have more than one EODI row labelled `match` (11 rows more). The count does
+  not depend on the EODI row that the Leiden row joins: the Leiden row counts
+  once, and each EODI row counts once.
+- A link from the Leiden row to its other EODI rows would come from the
+  matched pairs of the rule. For these 6 Leiden rows, 9 of the 20 links are
+  another night at a site that the Leiden row names (`no_match`). A link would
+  show a relation that the sources do not record.
 
-The cluster view shows the date, the place and the domain of each row of
-the cluster, not only those of the canonical record.
+The cluster view shows the date, the place, the domain and the title of each
+row of the cluster, not only those of the canonical record.
 Reason: the rows of one cluster can differ. For example,
 `leiden:be7d76769768` names five airports, and its canonical record
 `eodi:EODI-2025-00459` names three of them.
@@ -235,6 +252,10 @@ gives a month (one row: a year) and a country or a sea, and no coordinates.
   marks `eodi:EODI-2025-00112` (Vilnius) `dismissed`, and Leiden records the
   same incident (`leiden:55e3134992fd`). If the status of the canonical record
   decided, the default view would hide an incident that one source records.
+- A cluster counts once in each source of its rows. On the data at commit
+  `cbad1cd`, with the curation, Leiden has 146 and EODI 431. The counts by
+  source add up to more than the number of incidents, because a cluster with
+  two sources counts in both.
 - On the data at commit `cbad1cd`, with the curation, the 577 rows make 566
   clusters. The default view shows 570 rows and 560 clusters (559 if the
   status of the canonical record decided).
@@ -340,6 +361,11 @@ The rule alone does not reach the targets:
   visit that `eodi:EODI-2025-00077` dates on 1 December.
 - Join all matched pairs into clusters. A Leiden row that names five airports
   would merge five EODI incidents into one.
+- Join one EODI row, and link the Leiden row to its other matched EODI rows.
+  On the sample, 9 of the 20 links are another incident at the same site, and
+  no measure checks the links.
+- A Leiden row with several EODI matches joins none. The 6 incidents of the
+  sample count twice, and the recall by Leiden rows goes down to 0.45.
 - A title score with no place. Titles of other incidents in one country and
   one month score as high as true matches. On the sample, a title score of at
   least 52 keeps 21 of the 22 matches, with 25 false matches. The place and
