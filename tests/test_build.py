@@ -6,15 +6,16 @@ import shutil
 import duckdb
 import pandas as pd
 import pytest
-from conftest import FIXTURES, GEONAMES_PLACES, geonames_archive
+from conftest import FIXTURES, GEONAMES_PLACES, ROOT, geonames_archive
 
-from tracker import build, cli, geonames, ingest, sources
+from tracker import actors, build, cli, geonames, ingest, sources
 from tracker.schema import PUBLISHED_COLUMNS, read_csv
 from tracker.store import LocalBackend, Payload, Store
 
 pytestmark = pytest.mark.disable_socket
 
 FILES = ["events.parquet", "events.csv", "sources.parquet"]
+OPEN_FILES = [*FILES, "threat_actors.parquet"]
 
 
 def put_clean(store: Store, name: str, events: pd.DataFrame) -> None:
@@ -32,12 +33,18 @@ def put_geonames(store: Store, places: list[dict] | None = None) -> None:
     store.save(Payload("geonames", geonames.FILE_NAME, archive, geonames.URL, 200))
 
 
+def put_actors(store: Store, content: bytes | None = None) -> None:
+    content = content or (FIXTURES / "misp_threat_actor.json").read_bytes()
+    store.save(Payload(actors.SOURCE, actors.FILE_NAME, content, actors.URL, 200))
+
+
 @pytest.fixture
 def store(tmp_path) -> Store:
     store = Store(LocalBackend(tmp_path / "store"))
     for name in sources.SOURCES:
         put_clean(store, name, fixture_events(name))
     put_geonames(store)
+    put_actors(store)
     return store
 
 
@@ -58,6 +65,7 @@ def curation_dir(tmp_path, monkeypatch):
     folder.mkdir()
     for name in ("merges.csv", "splits.csv"):
         (folder / name).write_text(CURATION_HEADER, encoding="utf-8")
+    (folder / "actors.csv").write_text("actor,country,source_url\n", encoding="utf-8")
     monkeypatch.setattr(build, "CURATION_DIR", folder)
     return folder
 
@@ -88,7 +96,8 @@ def test_build_writes_the_three_files_of_each_family(store, tmp_path):
     build.build(store, out)
 
     for family in sources.FAMILIES:
-        assert sorted(p.name for p in (out / family).iterdir()) == sorted(FILES)
+        expected = OPEN_FILES if family == "open" else FILES
+        assert sorted(p.name for p in (out / family).iterdir()) == sorted(expected)
         events = pd.read_parquet(out / family / "events.parquet")
         assert list(events.columns) == PUBLISHED_COLUMNS
         assert len(read_csv(out / family / "events.csv")) == len(events)
@@ -104,7 +113,7 @@ def test_two_builds_give_the_same_bytes(store, tmp_path):
     build.build(store, tmp_path / "two")
 
     assert digests(tmp_path / "one") == digests(tmp_path / "two")
-    assert len(digests(tmp_path / "one")) == 2 * len(FILES)
+    assert len(digests(tmp_path / "one")) == len(FILES) + len(OPEN_FILES)
 
 
 def test_the_output_does_not_depend_on_the_input_row_order(store, tmp_path):
@@ -408,6 +417,45 @@ def test_the_build_fails_without_a_geonames_file(tmp_path):
     with pytest.raises(ValueError, match="geonames.*ingest geonames"):
         build.build(store, tmp_path / "out")
     assert not (tmp_path / "out").exists()
+
+
+def test_the_open_family_gets_the_threat_actors_table_and_the_nc_family_does_not(
+    store, tmp_path, curation_dir
+):
+    shutil.copyfile(ROOT / "curation" / "actors.csv", curation_dir / "actors.csv")
+    out = tmp_path / "out"
+    build.build(store, out)
+
+    table = pd.read_parquet(out / "open" / "threat_actors.parquet")
+    assert list(table.columns) == actors.COLUMNS
+    assert len(table) == 7
+    assert table["actor"].is_unique
+    assert table.set_index("actor").loc["Killnet", "country"] == "RU"
+    assert not (out / "nc" / "threat_actors.parquet").exists()
+
+
+def test_the_build_fails_without_a_misp_galaxy_file(tmp_path):
+    store = Store(LocalBackend(tmp_path / "empty"))
+    for name in sources.SOURCES:
+        put_clean(store, name, fixture_events(name))
+    put_geonames(store)
+
+    with pytest.raises(ValueError, match="misp_galaxy.*ingest misp_galaxy"):
+        build.build(store, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_threat_actors_never_change_the_events(store, tmp_path):
+    build.build(store, tmp_path / "one")
+    other = (FIXTURES / "misp_threat_actor.json").read_bytes().replace(b'"RU"', b'"IR"')
+    put_actors(store, other)
+    build.build(store, tmp_path / "two")
+
+    one, two = digests(tmp_path / "one"), digests(tmp_path / "two")
+    assert one["open/threat_actors.parquet"] != two["open/threat_actors.parquet"]
+    for name in ("events.parquet", "events.csv", "sources.parquet"):
+        for family in sources.FAMILIES:
+            assert one[f"{family}/{name}"] == two[f"{family}/{name}"]
 
 
 def test_the_build_logs_the_digest_and_the_date_of_the_geonames_file(

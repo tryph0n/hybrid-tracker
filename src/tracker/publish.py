@@ -103,6 +103,8 @@ def configs(files: set[str]) -> str:
     entries = [("events", "events.parquet"), ("sources", "sources.parquet")]
     if "quality.parquet" in files:
         entries.append(("quality", "quality.parquet"))
+    if "threat_actors.parquet" in files:
+        entries.append(("threat_actors", "threat_actors.parquet"))
     lines = ["configs:"]
     for position, (name, path) in enumerate(entries):
         lines.append(f"  - config_name: {name}")
@@ -152,8 +154,10 @@ def render_card(family: str, files: set[str], versions: str | None = None) -> st
         "",
         (
             "Tables: `events` (one row per event, all sources), `sources` (one row "
-            "per source) and `quality` (one row per source and per run, when "
-            "present). The data is updated by the pipeline of the project."
+            "per source), `quality` (one row per source and per run, when "
+            "present) and, in the open dataset, `threat_actors` (one row per "
+            "threat group, with its aliases and country). The data is updated "
+            "by the pipeline of the project."
         ),
         "",
         "- Code and pipeline: [github.com/tryph0n/hybrid-tracker](https://github.com/tryph0n/hybrid-tracker)",

@@ -151,6 +151,7 @@ Python files and their imports: an arrow points to the imported module.
 ```mermaid
 flowchart TB
   module_streamlit_app_py["streamlit_app.py"]
+  module_tracker_actors["tracker.actors"]
   module_tracker_build["tracker.build"]
   module_tracker_cli["tracker.cli"]
   module_tracker_clock["tracker.clock"]
@@ -173,6 +174,9 @@ flowchart TB
   module_streamlit_app_py --> module_tracker_schema
   module_streamlit_app_py --> module_tracker_sources
   module_streamlit_app_py --> module_tracker_views
+  module_tracker_actors --> module_tracker_errors
+  module_tracker_actors --> module_tracker_store
+  module_tracker_build --> module_tracker_actors
   module_tracker_build --> module_tracker_dedup
   module_tracker_build --> module_tracker_errors
   module_tracker_build --> module_tracker_geonames
@@ -214,6 +218,7 @@ flowchart TB
   module_tracker_quality --> module_tracker_sources
   module_tracker_quality --> module_tracker_store
   module_tracker_schema --> module_tracker_errors
+  module_tracker_sources --> module_tracker_actors
   module_tracker_sources --> module_tracker_eodi
   module_tracker_sources --> module_tracker_geonames
   module_tracker_sources --> module_tracker_leiden
@@ -226,6 +231,7 @@ flowchart TB
 | Module | File | Purpose | Third-party imports |
 | --- | --- | --- | --- |
 | `streamlit_app.py` | `src/streamlit_app.py` | Dashboard: maps and charts of the unified hybrid-incident dataset. | pandas, plotly, pycountry, streamlit |
+| `tracker.actors` | `src/tracker/actors.py` | Threat-group lookup from the MISP galaxy threat-actor cluster. | pandas, pycountry |
 | `tracker.build` | `src/tracker/build.py` | Build the published tables from the clean tables of the raw store. | duckdb, pandas, pyarrow |
 | `tracker.cli` | `src/tracker/cli.py` | The \`tracker\` command: one subcommand per action. |  |
 | `tracker.clock` | `src/tracker/clock.py` | The current day, in UTC like the stored event dates. | pandas |

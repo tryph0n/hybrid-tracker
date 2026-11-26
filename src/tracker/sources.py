@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from tracker import eodi, geonames, leiden
+from tracker import actors, eodi, geonames, leiden
 from tracker.store import Payload
 
 
@@ -139,6 +139,20 @@ REFERENCES = {
             "filtered to populated places. Provided as is, without warranty."
         ),
         extract=geonames.extract,
+    ),
+    actors.SOURCE: Reference(
+        title="MISP galaxy, threat-actor cluster",
+        homepage="https://github.com/MISP/misp-galaxy",
+        licence="CC0 1.0",
+        licence_url="https://creativecommons.org/publicdomain/zero/1.0/",
+        licence_page="https://github.com/MISP/misp-galaxy/blob/main/LICENSE.md",
+        family="open",
+        citation=(
+            "MISP galaxy (MISP Project / CIRCL), threat-actor cluster: names, "
+            "aliases and countries of threat groups, "
+            "https://github.com/MISP/misp-galaxy."
+        ),
+        extract=actors.extract,
     ),
 }
 """Reference datasets by key. Each one is a raw store source with payloads and

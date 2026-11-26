@@ -12,6 +12,11 @@ The branch `main` holds `events.parquet`, `events.csv`, `sources.parquet` and
 the quality table, and no longer holds `eodi.csv` or `leiden.csv`. To read a
 tag, use the file names of that tag.
 
+The table `threat_actors` was added to `main` after 2.2.0: one row per threat
+group, with its aliases, its country of origin and the suspected state sponsor
+when the MISP galaxy gives one. It changes no column of `events` or `sources`,
+so it has no tag of its own yet.
+
 ### 2.2.0
 
 Three new columns: `cluster_id`, `n_sources` and `is_canonical`. A

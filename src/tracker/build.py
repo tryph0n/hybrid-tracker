@@ -14,8 +14,11 @@ coordinates must be unchanged, and a row that gained coordinates must have
 `geo_precision` `place`. Each file of `sql/` runs in name order
 and must create `events_<family>` and `sources_<family>` for each of
 `FAMILIES`. The tables are then checked and written to `<out>/<family>/` as
-`events.parquet`, `events.csv` and `sources.parquet`. Nothing is written to
-`<out>` if a check fails.
+`events.parquet`, `events.csv` and `sources.parquet`. The `open` family also
+gets `threat_actors.parquet`, the threat-group table that `tracker.actors`
+reduces from the latest stored MISP galaxy file and `curation/actors.csv`; a
+store without that file fails the build: run `tracker ingest misp_galaxy`.
+Nothing is written to `<out>` if a check fails.
 """
 
 import hashlib
@@ -30,7 +33,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from duckdb.sqltypes import VARCHAR
 
-from tracker import dedup, geonames
+from tracker import actors, dedup, geonames
 from tracker.errors import UserError
 from tracker.ingest import clean_path
 from tracker.schema import (
@@ -52,6 +55,10 @@ CURATION_DIR = Path(__file__).resolve().parents[2] / "curation"
 NUMERIC_COLUMNS = ("lat", "lon")
 
 CLUSTER_TYPES = {"cluster_id": "string", "n_sources": "int64", "is_canonical": "bool"}
+
+ACTORS_FILE = "threat_actors.parquet"
+ACTORS_FAMILY = "open"
+"""The family whose dataset holds the `threat_actors` table."""
 
 SOURCE_COLUMNS = ["source", "title", "kind", "homepage", "licence", "citation"]
 
@@ -129,6 +136,46 @@ def load_geocode(store: Store) -> pd.DataFrame:
         stored[-1]["fetched_at"],
     )
     return geonames.lookup(content)
+
+
+def load_actors(store: Store, curation_dir: Path) -> pd.DataFrame:
+    """The `threat_actors` table from the latest stored MISP galaxy file.
+
+    The digest of the file is logged. The reduction reads the stored file and
+    `curation/actors.csv` only.
+
+    Raises:
+        UserError: The store has no MISP galaxy file, or the reduction fails
+            (see `tracker.actors.reduce`).
+    """
+    content = store.latest(actors.SOURCE, actors.FILE_NAME)
+    if content is None:
+        raise UserError(
+            f"{actors.SOURCE}: no stored file, run `tracker ingest {actors.SOURCE}`"
+        )
+    logger.info(
+        "%s: %s sha256 %s",
+        actors.SOURCE,
+        actors.FILE_NAME,
+        hashlib.sha256(content).hexdigest(),
+    )
+    return actors.reduce(content, actors.read_curation(curation_dir / "actors.csv"))
+
+
+def export_actors(table: pd.DataFrame, folder: Path) -> None:
+    """Write the `threat_actors` table to `folder` as Parquet."""
+    table.to_parquet(folder / ACTORS_FILE, index=False, compression="zstd")
+
+
+def check_actors(folder: Path, table: pd.DataFrame) -> None:
+    """Check the written `threat_actors` file against the table.
+
+    Raises:
+        UserError: The columns or the row count differ.
+    """
+    written = pd.read_parquet(folder / ACTORS_FILE)
+    if list(written.columns) != actors.COLUMNS or len(written) != len(table):
+        raise UserError(f"{ACTORS_FILE} breaks its schema: {list(written.columns)}")
 
 
 def prepare(con: duckdb.DuckDBPyConnection, work: Path, geocode: pd.DataFrame) -> None:
@@ -334,6 +381,7 @@ def build(
         work = Path(tmp)
         counts = load_clean(store, work)
         geocode = load_geocode(store)
+        threat_actors = load_actors(store, curation_dir or CURATION_DIR)
         con = duckdb.connect(":memory:")
         try:
             prepare(con, work, geocode)
@@ -346,6 +394,9 @@ def build(
             for family in FAMILIES:
                 export(con, family, staged / family)
                 check(family, staged / family, counts)
+                if family == ACTORS_FAMILY:
+                    export_actors(threat_actors, staged / family)
+                    check_actors(staged / family, threat_actors)
         finally:
             con.close()
         for family in FAMILIES:

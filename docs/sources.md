@@ -27,7 +27,7 @@ Usable means "Use now", or "Ask first" with a yes in
 | European Observatory of Drone Incidents | CC BY 4.0 | https://droneobservatory.eu/en | 24 November 2026 |
 | Leiden, Russian Operations Against Europe | CC BY 4.0 | https://doi.org/10.7910/DVN/TQ0FMQ | 24 November 2026 |
 | EuRepoC, Global Dataset of Cyber Incidents 1.3.2 | CC BY-NC 4.0 | https://zenodo.org/records/14965395 | 24 November 2026 |
-| MISP galaxy, threat-actor cluster (lookup) | CC0 1.0 or BSD 2-clause | https://github.com/MISP/misp-galaxy/blob/main/LICENSE.md | 24 November 2026 |
+| MISP galaxy, threat-actor cluster (lookup; used under CC0 1.0) | CC0 1.0 or BSD 2-clause | https://github.com/MISP/misp-galaxy/blob/main/LICENSE.md | 24 November 2026 |
 | GDELT (news discovery, not published as such) | Free reuse with citation | https://www.gdeltproject.org/about.html#termsofuse | 24 November 2026 |
 | OpenSanctions (context) | CC BY-NC 4.0 | https://www.opensanctions.org/docs/commercial/exemption/ | 24 November 2026 |
 | Stanford RFI, GNSS interference (context; JSON files through Python tools in a GitHub gist) | CC BY-NC 4.0 | https://rfi.stanford.edu/resources | 24 November 2026 |

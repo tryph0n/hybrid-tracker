@@ -133,6 +133,19 @@ refresh it, run `uv run tracker ingest geonames` by hand. GeoNames is in
 `REFERENCES` of `src/tracker/sources.py`, not in `SOURCES`: it has no events, no
 clean table and no row in the Sources table.
 
+The open dataset also gets `threat_actors.parquet`: one row per threat group,
+with the columns `actor`, `uuid`, `aliases`, `country`, `state_sponsor`,
+`country_source` and `source_url`. `tracker.actors` reduces the MISP galaxy
+threat-actor cluster at the pinned commit `COMMIT` (the file is kept in the raw
+store by `uv run tracker ingest misp_galaxy`, and a download with another
+SHA-256 than `SHA256` is rejected) and `curation/actors.csv` (columns `actor`,
+`country`, `source_url`: a country for a group that the cluster gives none, with
+a public page that links the group to it). The build fails without the stored
+file. To move to a newer commit, change `COMMIT` and `SHA256`, then ingest and
+build again. `Lookup` maps a name to one group without case: a name that two
+groups carry resolves to nothing. The country is the origin of the group: the
+lookup proposes a state and never sets `attribution`.
+
 `uv run tracker quality` runs after the build. It adds one row per source to
 the quality table: rows, rows added and removed since the previous run (by
 `event_id`), the share of empty values in the key columns (the required columns,

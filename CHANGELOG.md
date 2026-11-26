@@ -10,6 +10,11 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Added
 
+- Threat-group lookup: the open dataset has a `threat_actors` table (group,
+  aliases, country of origin, suspected state sponsor), reduced from the MISP
+  galaxy threat-actor cluster at a pinned commit. `curation/actors.csv` adds the
+  groups that the cluster leaves without a country. A name that two groups
+  carry resolves to nothing.
 - Clusters and canonical records (schema 2.2.0, record 0004): the published
   tables have the columns `cluster_id`, `n_sources` and `is_canonical`, and
   the dashboard counts incidents, not rows. The curation files are

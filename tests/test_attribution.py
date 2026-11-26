@@ -15,7 +15,12 @@ from tracker.errors import UserError
 from tracker.publish import LICENCES, render_card, versions_path
 from tracker.sources import FAMILIES, REFERENCES, SOURCES
 
-FILES = {"events.parquet", "sources.parquet", "quality.parquet"}
+FILES = {
+    "events.parquet",
+    "sources.parquet",
+    "quality.parquet",
+    "threat_actors.parquet",
+}
 NC_CITATION = "Example Institute, a NonCommercial register of incidents."
 
 
@@ -170,9 +175,26 @@ def test_the_configs_declare_only_the_files_that_exist():
     assert [config["config_name"] for config in configs] == ["events", "sources"]
     assert [config.get("default") for config in configs] == [True, None]
     assert configs[0]["data_files"] == [{"split": "train", "path": "events.parquet"}]
-    with_quality = split(render_card("open", FILES))[0]["configs"]
+    with_quality = split(render_card("open", FILES - {"threat_actors.parquet"}))[0][
+        "configs"
+    ]
     assert [config["config_name"] for config in with_quality] == [
         "events",
         "sources",
         "quality",
     ]
+
+
+def test_the_open_card_declares_threat_actors_and_credits_the_misp_galaxy():
+    front_matter, text = split(render_card("open", FILES))
+
+    assert "threat_actors" in [c["config_name"] for c in front_matter["configs"]]
+    assert "MISP galaxy (MISP Project / CIRCL)" in text
+    assert REFERENCES["misp_galaxy"].citation in text
+    assert "CC0 1.0" in text
+
+
+def test_a_card_without_the_threat_actors_file_has_no_such_config():
+    front_matter, _ = split(render_card("open", FILES - {"threat_actors.parquet"}))
+
+    assert "threat_actors" not in [c["config_name"] for c in front_matter["configs"]]

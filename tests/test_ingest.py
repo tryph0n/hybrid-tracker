@@ -234,6 +234,22 @@ def serve_geonames(monkeypatch, content: bytes = b"zip") -> list[int]:
 
     reference = dataclasses.replace(sources.REFERENCES["geonames"], extract=extract)
     monkeypatch.setitem(sources.REFERENCES, "geonames", reference)
+    serve_misp(monkeypatch)
+    return calls
+
+
+def serve_misp(monkeypatch, content: bytes = b"{}") -> list[int]:
+    """Make the MISP galaxy download `content`, and count the downloads."""
+    calls: list[int] = []
+
+    def extract() -> list[Payload]:
+        calls.append(1)
+        return [
+            Payload("misp_galaxy", "threat-actor.json", content, "https://e/m", 200)
+        ]
+
+    reference = dataclasses.replace(sources.REFERENCES["misp_galaxy"], extract=extract)
+    monkeypatch.setitem(sources.REFERENCES, "misp_galaxy", reference)
     return calls
 
 
@@ -398,6 +414,30 @@ def test_geonames_is_kept_in_the_store_with_its_digest_and_has_no_clean_table(
     assert line["fetched_at"]
     assert store.latest("geonames", "cities500.zip") == b"zip bytes"
     assert store.backend.read(ingest.clean_path("geonames")) is None
+
+
+def test_the_misp_galaxy_is_kept_in_the_store_and_has_no_clean_table(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_misp(monkeypatch, b'{"values": []}')
+
+    cli.main(["ingest", "misp_galaxy"])
+
+    store = open_store()
+    (line,) = store.payloads("misp_galaxy")
+    assert line["sha256"] == hashlib.sha256(b'{"values": []}').hexdigest()
+    assert store.latest("misp_galaxy", "threat-actor.json") == b'{"values": []}'
+    assert store.backend.read(ingest.clean_path("misp_galaxy")) is None
+
+
+def test_the_misp_galaxy_is_an_open_cc0_reference_and_not_an_event_source():
+    assert "misp_galaxy" not in sources.SOURCES
+    reference = sources.REFERENCES["misp_galaxy"]
+    assert reference.family == "open"
+    assert reference.licence == "CC0 1.0"
+    assert reference.licence_url.endswith("/publicdomain/zero/1.0/")
 
 
 def test_geonames_is_a_reference_and_not_an_event_source():
