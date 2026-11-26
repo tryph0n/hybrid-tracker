@@ -906,7 +906,7 @@ def test_the_timeline_counts_an_incident_in_the_month_of_its_line(sample_data_di
     assert "2025-09" not in months
 
 
-def test_last_30_days_tests_the_date_of_the_line_and_ignores_the_period(
+def test_last_30_days_tests_the_date_of_the_line(
     sample_data_dir,
 ):
     recent = (utc_today() - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
