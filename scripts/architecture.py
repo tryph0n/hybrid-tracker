@@ -219,7 +219,8 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
             reached.setdefault((file, job), []).append((step, node))
             lines.append(f"  {node}({label(found)})")
     # A step reaches a service with the image of the app, with the stored
-    # events (`tracker publish` sends tables built from them), or with the outputs of a job that reaches another service.
+    # events (`tracker publish` sends tables built from them), or with the
+    # outputs of a job that reaches another service.
     for (file, job), targets in reached.items():
         spec = jobs[file, job]
         text = label(spec.get("name", job) + " job")
