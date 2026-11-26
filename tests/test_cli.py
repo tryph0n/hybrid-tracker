@@ -97,3 +97,14 @@ def bare_value_errors():
 
 def test_only_the_internal_checks_raise_a_bare_value_error():
     assert bare_value_errors() == INTERNAL_CHECKS
+
+
+def test_publish_runs_one_family_with_the_build_folder(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        cli.publish, "run", lambda family, folder: calls.append((family, folder))
+    )
+
+    cli.main(["publish", "nc", "--build", str(tmp_path)])
+
+    assert calls == [("nc", tmp_path)]

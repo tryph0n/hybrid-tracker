@@ -5,9 +5,9 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from tracker import build, ingest, quality
+from tracker import build, ingest, publish, quality
 from tracker.errors import UserError
-from tracker.sources import REFERENCES, SOURCES
+from tracker.sources import FAMILIES, REFERENCES, SOURCES
 from tracker.store import StoreError, open_store
 
 
@@ -68,6 +68,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("build"),
         help="folder of `tracker build` that gets quality.parquet (default: build)",
     )
+    publish_cmd = commands.add_parser(
+        "publish",
+        help="publish one licence family to its public dataset, read it back and tag the version",
+    )
+    publish_cmd.add_argument(
+        "family", choices=FAMILIES, help="the licence family to publish"
+    )
+    publish_cmd.add_argument(
+        "--build",
+        type=Path,
+        default=Path("build"),
+        help="folder of `tracker build` (default: build)",
+    )
     return parser
 
 
@@ -93,5 +106,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             build.build(open_store(), args.out)
         elif args.command == "quality":
             quality.run(open_store(), args.out)
+        elif args.command == "publish":
+            publish.run(args.family, args.build)
     except (UserError, StoreError) as error:
         raise SystemExit(str(error)) from None

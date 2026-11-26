@@ -48,8 +48,8 @@ The data has a version, 2.1.0 today. The first version (1.0.0) used other
 column names. It stays readable at the tag `v1.0.0` of the dataset, for example
 `pd.read_csv("hf://datasets/sam-bot/europe-hybrid-incidents@v1.0.0/eodi.csv")`.
 See the
-[`Versions` section](https://github.com/tryph0n/hybrid-tracker/blob/main/data/events/README.md#versions)
-of the dataset card for the mapping.
+[`Versions` section](https://github.com/tryph0n/hybrid-tracker/blob/main/cards/versions-open.md)
+of the dataset card (its source is `cards/versions-open.md`) for the mapping.
 
 The dashboard hides `dismissed` events by default: add "Dismissed by the
 source" to the Event status filter to show them. The Sources table counts all
