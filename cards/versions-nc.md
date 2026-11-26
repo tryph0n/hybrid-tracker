@@ -7,6 +7,12 @@ never moved.
 
 This dataset starts with schema 2.1.0. It has no earlier version.
 
+### 2.3.0
+
+The same data as 2.2.0. The version follows the other dataset, which gets a new
+table `threat_actors` that this dataset does not have. The tag `v2.3.0` is on
+the commit of the first upload.
+
 ### 2.2.0
 
 Three new columns, the same as in the other dataset: `cluster_id`,

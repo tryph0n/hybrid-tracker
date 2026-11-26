@@ -13,9 +13,15 @@ from conftest import ROOT
 from tracker.build import family_sources
 from tracker.errors import UserError
 from tracker.publish import LICENCES, render_card, versions_path
+from tracker.schema import SCHEMA_VERSION
 from tracker.sources import FAMILIES, REFERENCES, SOURCES
 
-FILES = {"events.parquet", "sources.parquet", "quality.parquet"}
+FILES = {
+    "events.parquet",
+    "sources.parquet",
+    "quality.parquet",
+    "threat_actors.parquet",
+}
 NC_CITATION = "Example Institute, a NonCommercial register of incidents."
 
 
@@ -170,9 +176,90 @@ def test_the_configs_declare_only_the_files_that_exist():
     assert [config["config_name"] for config in configs] == ["events", "sources"]
     assert [config.get("default") for config in configs] == [True, None]
     assert configs[0]["data_files"] == [{"split": "train", "path": "events.parquet"}]
-    with_quality = split(render_card("open", FILES))[0]["configs"]
+    with_quality = split(render_card("open", FILES - {"threat_actors.parquet"}))[0][
+        "configs"
+    ]
     assert [config["config_name"] for config in with_quality] == [
         "events",
         "sources",
         "quality",
     ]
+
+
+def test_the_open_card_declares_threat_actors_and_credits_the_misp_galaxy():
+    front_matter, text = split(render_card("open", FILES))
+
+    assert "threat_actors" in [c["config_name"] for c in front_matter["configs"]]
+    assert "MISP galaxy (MISP Project / CIRCL)" in text
+    assert REFERENCES["misp_galaxy"].citation in text
+    assert "CC0 1.0" in text
+
+
+def test_a_card_without_the_threat_actors_file_has_no_such_config():
+    front_matter, _ = split(render_card("open", FILES - {"threat_actors.parquet"}))
+
+    assert "threat_actors" not in [c["config_name"] for c in front_matter["configs"]]
+
+
+def test_the_open_card_lists_the_curated_countries_with_their_reserve_and_links():
+    _, text = split(render_card("open", FILES))
+
+    assert "## Curated countries" in text
+    assert "not from the MISP galaxy" in text
+    assert (
+        '| Killnet | RU | "likely based in Russia" | '
+        "[Flashpoint](https://www.flashpoint.io/blog/killnet), "
+        "[Mandiant](https://cloud.google.com/blog/topics/threat-intelligence/"
+        "killnet-new-capabilities-older-tactics/) |"
+    ) in text
+    assert (
+        '"including against the main instigators living in the Russian Federation"'
+        in text
+    )
+    assert "[Eurojust](" in text
+    assert "[Europol](" in text
+
+
+def test_a_card_without_the_threat_actors_file_has_no_curated_countries():
+    _, text = split(render_card("open", FILES - {"threat_actors.parquet"}))
+    _, nc_text = split(render_card("nc", FILES - {"threat_actors.parquet"}))
+
+    assert "Curated countries" not in text
+    assert "Curated countries" not in nc_text
+
+
+def newest_version(family):
+    text = versions_path(family).read_text(encoding="utf-8")
+    headings = [
+        line[4:].strip() for line in text.splitlines() if line.startswith("### ")
+    ]
+    return headings[0]
+
+
+def version_section(family, version):
+    text = versions_path(family).read_text(encoding="utf-8")
+    _, _, rest = text.partition(f"### {version}\n")
+    return rest.split("\n### ")[0]
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_the_newest_versions_section_of_each_card_is_the_schema_version(family):
+    assert newest_version(family) == SCHEMA_VERSION
+
+
+def test_the_open_version_section_names_the_threat_actors_table():
+    assert "`threat_actors`" in version_section("open", SCHEMA_VERSION)
+
+
+def test_the_nc_card_has_a_section_for_the_schema_version_and_no_new_table():
+    section = version_section("nc", SCHEMA_VERSION)
+
+    assert section.strip()
+    assert "The same data as 2.2.0" in section
+
+
+def test_the_nc_card_gets_no_threat_actors_config_or_section_from_a_stray_file():
+    front_matter, text = split(render_card("nc", FILES))
+
+    assert "threat_actors" not in [c["config_name"] for c in front_matter["configs"]]
+    assert "Curated countries" not in text

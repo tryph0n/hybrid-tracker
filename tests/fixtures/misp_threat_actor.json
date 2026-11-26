@@ -1,0 +1,178 @@
+{
+ "version": 360,
+ "values": [
+  {
+   "meta": {
+    "cfr-suspected-state-sponsor": "Russian Federation",
+    "country": "RU",
+    "synonyms": [
+     "Pawn Storm",
+     "FANCY BEAR",
+     "Sednit",
+     "SNAKEMACKEREL",
+     "Tsar Team",
+     "TG-4127",
+     "STRONTIUM",
+     "Swallowtail",
+     "IRON TWILIGHT",
+     "Group 74",
+     "SIG40",
+     "Grizzly Steppe",
+     "G0007",
+     "ATK5",
+     "Fighting Ursa",
+     "ITG05",
+     "Blue Athena",
+     "TA422",
+     "T-APT-12",
+     "APT-C-20",
+     "UAC-0028",
+     "UAC-0001",
+     "FROZENLAKE",
+     "Sofacy",
+     "Forest Blizzard",
+     "BlueDelta",
+     "Fancy Bear",
+     "GruesomeLarch",
+     "LAKE RELIC"
+    ]
+   },
+   "uuid": "5b4ee3ea-eee3-4c8e-8323-85ae32658754",
+   "value": "APT28"
+  },
+  {
+   "meta": {
+    "cfr-suspected-state-sponsor": "Korea (Democratic People's Republic of)",
+    "country": "KP",
+    "synonyms": [
+     "Operation DarkSeoul",
+     "Dark Seoul",
+     "Hidden Cobra",
+     "Hastati Group",
+     "Andariel",
+     "Unit 121",
+     "Bureau 121",
+     "NewRomanic Cyber Army Team",
+     "Bluenoroff",
+     "Subgroup: Bluenoroff",
+     "Group 77",
+     "Labyrinth Chollima",
+     "Operation Troy",
+     "Operation GhostSecret",
+     "Operation AppleJeus",
+     "APT38",
+     "APT 38",
+     "Stardust Chollima",
+     "Whois Hacking Team",
+     "Zinc",
+     "Appleworm",
+     "Nickel Academy",
+     "APT-C-26",
+     "NICKEL GLADSTONE",
+     "COVELLITE",
+     "ATK3",
+     "G0032",
+     "ATK117",
+     "G0082",
+     "Citrine Sleet",
+     "DEV-0139",
+     "DEV-1222",
+     "Diamond Sleet",
+     "ZINC",
+     "Sapphire Sleet",
+     "COPERNICIUM",
+     "TA404",
+     "Lazarus group",
+     "BeagleBoyz",
+     "Moonstone Sleet",
+     "Black Artemis"
+    ]
+   },
+   "uuid": "68391641-859f-4a9a-9a1e-3e5cf71ec376",
+   "value": "Lazarus Group"
+  },
+  {
+   "meta": {
+    "cfr-suspected-state-sponsor": "People's Republic of China",
+    "country": "CN",
+    "synonyms": [
+     "G0096",
+     "TA415",
+     "Blackfly",
+     "Grayfly",
+     "LEAD",
+     "BARIUM",
+     "WICKED SPIDER",
+     "WICKED PANDA",
+     "BRONZE ATLAS",
+     "BRONZE EXPORT",
+     "Red Kelpie",
+     "G0044",
+     "Earth Baku",
+     "Amoeba",
+     "HOODOO",
+     "Brass Typhoon",
+     "Winnti",
+     "Double Dragon",
+     "TG-2633",
+     "Leopard Typhoon",
+     "SPIRE CASTLE"
+    ]
+   },
+   "uuid": "9c124874-042d-48cd-b72b-ccdc51ecbbd6",
+   "value": "APT41"
+  },
+  {
+   "meta": {
+    "cfr-suspected-state-sponsor": "Russian Federation",
+    "country": "RU",
+    "synonyms": [
+     "Quedagh",
+     "VOODOO BEAR",
+     "TEMP.Noble",
+     "IRON VIKING",
+     "G0034",
+     "ELECTRUM",
+     "TeleBots",
+     "IRIDIUM",
+     "Blue Echidna",
+     "FROZENBARENTS",
+     "UAC-0113",
+     "Seashell Blizzard",
+     "UAC-0082",
+     "APT44",
+     "SANDWORM RELIC",
+     "UAC-0145"
+    ]
+   },
+   "uuid": "f512de42-f76b-40d2-9923-59e7dbdfec35",
+   "value": "Sandworm"
+  },
+  {
+   "meta": {
+    "country": "IR"
+   },
+   "uuid": "29cfe970-5446-4cfc-a2da-00e9f49e02ba",
+   "value": "IRIDIUM"
+  },
+  {
+   "meta": {
+    "synonyms": [
+     "NoName057",
+     "NoName05716",
+     "05716nnm",
+     "Nnm05716"
+    ]
+   },
+   "uuid": "e62937d0-dec6-4c39-a836-e43b1d138df4",
+   "value": "NoName057(16)"
+  },
+  {
+   "meta": {
+    "synonyms": []
+   },
+   "uuid": "ad2d6946-1ec2-4d77-b864-39980af4e103",
+   "value": "Killnet"
+  }
+ ]
+}

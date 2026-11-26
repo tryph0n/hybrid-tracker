@@ -124,3 +124,16 @@ matched to events by name and country. Reuse must credit it:
 - GeoNames, https://www.geonames.org: place names and coordinates, filtered to
   populated places. Provided as is, without warranty. CC BY 4.0
   ([licence](https://creativecommons.org/licenses/by/4.0/)).
+
+Threat groups: the open dataset has a `threat_actors` table that turns the
+names of a threat group into one canonical name and a country of origin. It
+comes from the MISP galaxy threat-actor cluster at a pinned commit (dual
+licence: CC0 1.0 or BSD 2-clause, used here under CC0 1.0). Changes: the cluster
+is reduced to one row per group, and `curation/actors.csv` adds a country to
+groups that the cluster leaves without one, each with two public pages and
+their exact words (the card of the dataset lists them). The
+country is the origin of the group, not proof of state sponsorship. Credit:
+
+- MISP galaxy (MISP Project / CIRCL), threat-actor cluster: names, aliases and
+  countries of threat groups, https://github.com/MISP/misp-galaxy. CC0 1.0
+  ([licence](https://creativecommons.org/publicdomain/zero/1.0/)).

@@ -133,6 +133,26 @@ refresh it, run `uv run tracker ingest geonames` by hand. GeoNames is in
 `REFERENCES` of `src/tracker/sources.py`, not in `SOURCES`: it has no events, no
 clean table and no row in the Sources table.
 
+The open dataset also gets `threat_actors.parquet`: one row per threat group,
+with the columns `actor`, `uuid`, `aliases`, `country`, `state_sponsor`,
+`country_source`, `country_url`, `country_publisher`, `country_quote`,
+`stance_url`, `stance_publisher` and `stance_quote`. `tracker.actors` reduces the MISP galaxy
+threat-actor cluster at the pinned commit `COMMIT` (the file is kept in the raw
+store by `uv run tracker ingest misp_galaxy`, and a download with another
+SHA-256 than `SHA256` is rejected) and `curation/actors.csv` (columns `actor`,
+`country`, then the six source columns: a country for a group that the cluster
+gives none. `country_url` is a public page whose text says that the group is
+based in, or operates from, the country, and `country_quote` is the exact
+words of that page (the reserve); `stance_url` and `stance_quote` are the page
+and the words that call the group pro-Russian; `*_publisher` is the name of the
+publisher, used as the text of the link in the card. The six columns are all
+filled for a country and all empty for a group with no country; the reduction
+stops otherwise. A country without a page that states the origin stays empty). The build fails without the stored
+file. To move to a newer commit, change `COMMIT` and `SHA256`, then ingest and
+build again. `Lookup` maps a name to one group without case: a name that two
+groups carry resolves to nothing. The country is the origin of the group: the
+lookup proposes a state and never sets `attribution`.
+
 `uv run tracker quality` runs after the build. It adds one row per source to
 the quality table: rows, rows added and removed since the previous run (by
 `event_id`), the share of empty values in the key columns (the required columns,
