@@ -23,8 +23,10 @@ def test_sample_has_the_columns_and_at_least_100_pairs():
 
 def test_every_pair_is_labelled_and_explained():
     for row in read_pairs():
-        assert row["label"] in {"match", "no_match"}, row
+        assert row["label"] in {"match", "no_match", "unsure"}, row
         assert row["note"].strip(), row
+        if row["label"] == "unsure":
+            assert row["note"].startswith("Unsure"), row
 
 
 def test_pairs_join_two_sources_once():
