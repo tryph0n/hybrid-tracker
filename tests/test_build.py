@@ -474,7 +474,7 @@ def test_a_merge_line_joins_two_rows_and_a_split_line_keeps_them_apart(
 
     merged = pd.read_parquet(tmp_path / "merged" / "open" / "events.parquet")
     row = merged.set_index("event_id")
-    assert row.loc[eodi, "cluster_id"] == row.loc[leiden, "cluster_id"] == leiden
+    assert row.loc[eodi, "cluster_id"] == row.loc[leiden, "cluster_id"] == eodi
     assert row.loc[eodi, "n_sources"] == 2
     assert row.loc[eodi, "is_canonical"] and not row.loc[leiden, "is_canonical"]
     split = pd.read_parquet(tmp_path / "split" / "open" / "events.parquet")
@@ -509,7 +509,8 @@ def test_the_open_clusters_use_no_row_of_a_nc_source(
     open_ = pd.read_parquet(tmp_path / "out" / "open" / "events.parquet").set_index(
         "event_id"
     )
-    assert nc.loc[eodi.iloc[0], "cluster_id"] == first
+    assert nc.loc[eodi.iloc[0], "cluster_id"] == eodi.iloc[0]
+    assert nc.loc[first, "cluster_id"] == eodi.iloc[0]
     assert nc.loc[eodi.iloc[0], "n_sources"] == 2
     assert open_.loc[eodi.iloc[0], "cluster_id"] == eodi.iloc[0]
     assert open_.loc[eodi.iloc[0], "n_sources"] == 1

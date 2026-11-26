@@ -39,7 +39,7 @@ COLUMNS = [
 # Columns of the published tables only: the build adds them after it makes the
 # clusters (docs/decisions/0004-deduplication.md).
 CLUSTER_COLUMNS = [
-    "cluster_id",  # the incident: event_id of the cluster's row from the last source in the source order
+    "cluster_id",  # the incident: event_id of the canonical row of the cluster
     "n_sources",  # number of sources that have a row in the cluster
     "is_canonical",  # true on the one row of each cluster that gives the incident its date and place
 ]

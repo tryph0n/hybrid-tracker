@@ -199,8 +199,8 @@ def test_a_merge_takes_the_leiden_row_before_a_better_scoring_rule_pair(
     clustered = dedup.assign_clusters(sample_events, ORDER, merges, splits)
     row = clustered.set_index("event_id")
 
-    assert row.loc["leiden:c8e2a1d1d2c5", "cluster_id"] == "leiden:c8e2a1d1d2c5"
-    assert row.loc["eodi:EODI-2025-00069", "cluster_id"] == "leiden:c8e2a1d1d2c5"
+    assert row.loc["leiden:c8e2a1d1d2c5", "cluster_id"] == "eodi:EODI-2025-00069"
+    assert row.loc["eodi:EODI-2025-00069", "cluster_id"] == "eodi:EODI-2025-00069"
     assert row.loc["eodi:EODI-2025-00094", "n_sources"] == 1
     assert row.loc["eodi:EODI-2025-00094", "cluster_id"] == "eodi:EODI-2025-00094"
 
@@ -298,6 +298,31 @@ def test_the_distance_rule_needs_two_coordinates_under_25_km():
 
     assert len(dedup.matched_pairs(near)) == 1
     assert dedup.matched_pairs(far) == []
+
+
+def test_the_distance_rule_stops_at_25_km():
+    def pair(lat: float) -> pd.DataFrame:
+        return frame(
+            event("a:1", "eodi", lat=54.0, lon=10.0, title="Alpha"),
+            event("b:1", "leiden", lat=lat, lon=10.0, title="Zulu", place="X"),
+        )
+
+    assert dedup.distance_km(54.0, 10.0, 54.22, 10.0) < dedup.DISTANCE_KM
+    assert dedup.distance_km(54.0, 10.0, 54.23, 10.0) > dedup.DISTANCE_KM
+    assert len(dedup.matched_pairs(pair(54.22))) == 1
+    assert dedup.matched_pairs(pair(54.23)) == []
+
+
+def test_the_smaller_date_gap_breaks_a_tie_of_the_title_score():
+    rows = frame(
+        event("a:1", "eodi", date="2025-10-11"),
+        event("a:2", "eodi", date="2025-10-10"),
+        event("b:1", "leiden", date="2025-10-10"),
+    )
+
+    result = dedup.assign_clusters(rows, ["eodi", "leiden"])
+
+    assert clusters_of(result) == {frozenset({"a:2", "b:1"}), frozenset({"a:1"})}
 
 
 def test_the_place_rule_accepts_a_spelling_variant_and_needs_a_similar_title():
@@ -404,16 +429,18 @@ def test_a_split_breaks_a_chain_through_a_third_source():
     assert broken["is_canonical"].sum() == 2
 
 
-def test_the_cluster_id_stays_when_a_source_higher_in_the_order_joins():
+def test_the_cluster_id_is_the_event_id_of_the_canonical_row():
     leiden = event("b:1", "leiden")
     alone = dedup.assign_clusters(frame(leiden), ["eodi", "leiden"])
     joined = dedup.assign_clusters(
         frame(event("a:1", "eodi"), leiden), ["eodi", "leiden"]
     )
+    row = joined.set_index("event_id")
 
     assert alone["cluster_id"].tolist() == ["b:1"]
-    assert set(joined["cluster_id"]) == {"b:1"}
-    assert joined.set_index("event_id").loc["a:1", "is_canonical"]
+    assert set(joined["cluster_id"]) == {"a:1"}
+    assert row.loc["a:1", "is_canonical"]
+    assert row.loc["a:1", "cluster_id"] == row[row["is_canonical"]].index[0]
 
 
 def test_read_curation_needs_the_columns_and_a_reason(tmp_path: Path):

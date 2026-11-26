@@ -285,9 +285,7 @@ def assign_clusters(
     rows of a split pair.
 
     The canonical record of a cluster is its row from the first source of
-    `order`. `cluster_id` is the event id of the row from the last source of
-    `order` that the cluster holds, so that it stays the same when a source
-    higher in the order joins the cluster.
+    `order`. `cluster_id` is the event id of the canonical record.
 
     Args:
         events: Rows with the columns of `tracker.schema.COLUMNS`.
@@ -316,14 +314,8 @@ def assign_clusters(
         if reason:
             raise UserError(f"merge {first} {second} cannot join: {reason}")
         clusters.join(first, second)
-    removed = clusters.splits
     ranked = sorted(
-        (
-            match
-            for match in matched_pairs(events)
-            if frozenset((match.first, match.second)) not in removed
-        ),
-        key=lambda m: (-m.score, m.gap, m.first, m.second),
+        matched_pairs(events), key=lambda m: (-m.score, m.gap, m.first, m.second)
     )
     for match in ranked:
         if not clusters.refusal(match.first, match.second):
@@ -336,10 +328,9 @@ def assign_clusters(
     cluster_ids, counts, canonical = {}, {}, set()
     for members in {id(m): m for m in clusters.members.values()}.values():
         by_rank = sorted(members, key=lambda i: (rank[sources[i]], i))
-        identifier = by_rank[-1]
         canonical.add(by_rank[0])
         for event_id in members:
-            cluster_ids[event_id] = identifier
+            cluster_ids[event_id] = by_rank[0]
             counts[event_id] = len(members)
     return events.assign(
         cluster_id=events["event_id"].map(cluster_ids),

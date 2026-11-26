@@ -19,8 +19,13 @@ A cluster holds at most one row of each source. To count incidents, count the
 rows where `is_canonical` is true. A cluster has one canonical record, the row
 of the first source in the source order.
 
-`cluster_id` stays the same when a source higher in the order joins the
-cluster. It can differ between the open dataset and the nc dataset for one
+`cluster_id` is the `event_id` of the canonical row. It groups the rows of one
+version of the table: to keep a reference across versions, store an `event_id`
+and look up its `cluster_id` in that version. It changes when a row of a source
+higher in the order joins the cluster, when the canonical row leaves it, when
+the `event_id` of the canonical row changes (a Leiden `event_id` is a hash of
+the row text, made by the adapter), when the source order changes, and when a
+curation line or a rule change moves rows. It can differ between the open dataset and the nc dataset for one
 incident, because each dataset clusters its own rows: do not join the two
 datasets on `cluster_id`. Counts are de-duplicated across sources only (see
 [#147](https://github.com/tryph0n/hybrid-tracker/issues/147)).
