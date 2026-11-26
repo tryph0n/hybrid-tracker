@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from tracker.sources import SOURCES
+
 
 def split_codes(cells: pd.Series) -> pd.Series:
     """Split cells of ISO codes joined by ";" into lists. An empty cell gives []."""
@@ -46,35 +48,43 @@ def filter_events(
     attributions: Collection[str],
     actors: Collection[str] = (),
     countries: Collection[str] = (),
+    after: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
-    """Keep the incidents that every filter except the period keeps.
+    """Keep the incidents that the filters keep, each as one row.
 
-    An incident is a cluster of rows (see `tracker.dedup`). It is returned as its
-    canonical record. The source, status, attribution, actor and country filters
-    apply to the rows: an incident stays when one row passes all of them, so an
-    incident that one source dismisses stays while another source keeps it. The
-    domain and category filters apply to the canonical record, so the counts by
-    domain add up to the number of incidents.
+    An incident is a cluster of rows (see `tracker.dedup`). Every filter applies
+    to the rows. An incident stays when one of its rows passes all of them, so
+    an incident that one source dismisses stays while another source keeps it.
+    The incident is returned as the first of these rows in the source order: the
+    canonical record when no filter hides it. It counts once, in the domain and
+    the category of that row, so the counts by domain add up to the number of
+    incidents.
 
-    An empty `actors` or `countries` keeps every event, also the events that name
-    no state or no country: attribution is a filter, never an inclusion test.
-    A frame from `with_code_lists` and `with_clusters` is required.
+    `after` keeps the rows dated after it. An empty `actors` or `countries`
+    keeps every event, also the events that name no state or no country:
+    attribution is a filter, never an inclusion test. A frame from
+    `with_code_lists` and `with_clusters` is required.
     """
     keep = (
         events["source"].isin(sources)
         & events["event_status"].isin(statuses)
         & events["attribution"].isin(attributions)
+        & events["domain"].isin(domains)
+        & events["category"].isin(categories)
     )
     if actors:
         keep &= overlaps(events["actor_codes"], actors)
     if countries:
         keep &= overlaps(events["country_codes"], countries)
-    canonical = events[events["is_canonical"]]
-    return canonical[
-        canonical["cluster_id"].isin(events.loc[keep, "cluster_id"])
-        & canonical["domain"].isin(domains)
-        & canonical["category"].isin(categories)
-    ]
+    if after is not None:
+        keep &= events["date"] > after
+    rows = events[keep]
+    order = {name: position for position, name in enumerate(SOURCES)}
+    ranked = rows.assign(rank=rows["source"].map(order).fillna(len(order))).sort_values(
+        ["rank", "event_id"]
+    )
+    first = ranked.drop_duplicates("cluster_id").index
+    return rows[rows.index.isin(first)]
 
 
 def official_by_actor(events: pd.DataFrame) -> dict[str, int]:

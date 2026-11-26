@@ -614,3 +614,101 @@ def test_where_text_gives_the_events_on_no_map_like_the_helper(sample_data_dir):
     assert coverage.on_no_map == 2
     note = f"{coverage.on_no_map} events have no country (open sea) and are on no map."
     assert note in captions(at)
+
+
+STATUS_LABELS = {"confirmed": "Confirmed", "unconfirmed": "Reported, not confirmed"}
+
+
+def publish_clusters(monkeypatch, tmp_path):
+    """Publish the samples with three two-source clusters, each led by its EODI row.
+
+    The first cluster has a dismissed EODI row and a confirmed Leiden row.
+    """
+    events = read_all_events().assign(n_sources=1, is_canonical=True)
+    events["cluster_id"] = events["event_id"]
+    eodi = events.index[events["source"] == "eodi"][:3]
+    leiden = events.index[events["source"] == "leiden"][:3]
+    for number, (first, second) in enumerate(zip(eodi, leiden, strict=True)):
+        events.loc[first, "title"] = f"EODI row {number}"
+        events.loc[second, "title"] = f"LEIDEN row {number}"
+        events.loc[second, "cluster_id"] = events.loc[first, "event_id"]
+        events.loc[[first, second], "n_sources"] = 2
+        events.loc[second, "is_canonical"] = False
+    events.loc[eodi[0], "event_status"] = "dismissed"
+    events.loc[leiden[0], "event_status"] = "confirmed"
+    path = tmp_path / "clustered.parquet"
+    events.to_parquet(path)
+    monkeypatch.setattr(hub, "fetch", lambda revision: (path, REVISION, REVISION_DATE))
+    return events
+
+
+def shown_table(at: AppTest) -> pd.DataFrame:
+    return at.dataframe[0].value.reset_index(drop=True)
+
+
+def domain_total(at: AppTest) -> int:
+    total = 0
+    for trace in chart(at, 0).data:
+        y = trace.y
+        if isinstance(y, dict):
+            y = np.frombuffer(base64.b64decode(y["bdata"]), dtype=y["dtype"])
+        total += int(sum(y))
+    return total
+
+
+def test_a_cluster_shows_its_leiden_row_when_the_source_filter_is_leiden_only(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    events = publish_clusters(monkeypatch, tmp_path)
+    at = run_app()
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+
+    table = shown_table(at)
+    leiden = events[events["title"].str.startswith("LEIDEN row")].set_index("title")
+    row = table[table["title"] == "LEIDEN row 1"].iloc[0]
+    assert not table["title"].str.startswith("EODI row").any()
+    assert {"LEIDEN row 0", "LEIDEN row 1", "LEIDEN row 2"} <= set(table["title"])
+    assert row["date"] == pd.Timestamp(leiden.loc["LEIDEN row 1", "date"])
+    assert row["Status"] == STATUS_LABELS[leiden.loc["LEIDEN row 1", "event_status"]]
+
+
+def test_an_incident_dismissed_by_eodi_and_confirmed_by_leiden_shows_the_leiden_row(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    events = publish_clusters(monkeypatch, tmp_path)
+    at = run_app()
+
+    table = shown_table(at)
+    assert "EODI row 0" not in set(table["title"])
+    assert table.loc[table["title"] == "LEIDEN row 0", "Status"].tolist() == [
+        "Confirmed"
+    ]
+    shown = expected_events(events)
+    assert len(table) == shown["cluster_id"].nunique()
+    assert metrics(at)["Incidents"] == str(len(table))
+
+
+def test_a_filter_changed_and_undone_restores_the_counts_and_the_rows(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    publish_clusters(monkeypatch, tmp_path)
+    at = run_app()
+    first_metrics, first_table = metrics(at), shown_table(at)
+
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    assert metrics(at) != first_metrics
+    at.multiselect(key="sources").set_value(list(SOURCES)).run()
+
+    assert metrics(at) == first_metrics
+    assert shown_table(at).equals(first_table)
+
+
+def test_the_counts_by_domain_add_up_to_the_incidents(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    publish_clusters(monkeypatch, tmp_path)
+    at = run_app()
+    assert domain_total(at) == int(metrics(at)["Incidents"].replace(",", ""))
+
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    assert domain_total(at) == int(metrics(at)["Incidents"].replace(",", ""))

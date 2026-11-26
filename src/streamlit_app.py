@@ -3,6 +3,8 @@
 Run from the repository root: streamlit run src/streamlit_app.py
 """
 
+from collections.abc import Collection
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -413,17 +415,17 @@ with st.sidebar:
         key="countries",
     )
 
+filters: dict[str, Collection[str]] = {
+    "sources": source_names,
+    "domains": domains,
+    "categories": categories,
+    "statuses": statuses,
+    "attributions": attributions,
+    "actors": actors,
+    "countries": countries,
+}
 # Every filter except the period: used for the "last 30 days" figure.
-scoped = filter_events(
-    all_events,
-    sources=source_names,
-    domains=domains,
-    categories=categories,
-    statuses=statuses,
-    attributions=attributions,
-    actors=actors,
-    countries=countries,
-)
+scoped = filter_events(all_events, **filters)
 
 today = utc_today()
 days = PERIODS[period_label]
@@ -440,7 +442,9 @@ if days is not None and len(month_sources):
         "period start can be left out."
     )
 events = (
-    scoped if days is None else scoped[scoped["date"] > today - pd.Timedelta(days=days)]
+    scoped
+    if days is None
+    else filter_events(all_events, **filters, after=today - pd.Timedelta(days=days))
 )
 
 if events.empty:
