@@ -40,3 +40,30 @@ curation line or a rule change moves rows. It can differ between the open datase
 incident, because each dataset clusters its own rows: do not join the two
 datasets on `cluster_id`. Counts are de-duplicated across sources only (see
 [#147](https://github.com/tryph0n/hybrid-tracker/issues/147)).
+
+## Threat actors
+
+The open dataset has a second table, `threat_actors` (added in 2.3.0): one row
+per threat group, from the MISP galaxy threat-actor cluster and the curation of
+the project. It has no `event_id` and no join key with `events`: look a name up
+with `tracker.actors.Lookup`. The country is where the group is based; it is
+not proof of state sponsorship, and the lookup never sets `attribution`.
+
+| Column | Meaning |
+| --- | --- |
+| `actor` | Canonical name of the group. |
+| `uuid` | UUID of the group in the MISP galaxy. Empty for a group added by the curation. |
+| `aliases` | Other names of the group, as a list. |
+| `country` | ISO 3166-1 alpha-2 code of the country where the group is based. Empty when no source gives it. |
+| `state_sponsor` | ISO alpha-2 code of the suspected state sponsor that the MISP galaxy gives. Empty when it gives none. |
+| `country_source` | Where `country` comes from: `misp-galaxy` or `curation`. |
+| `country_url` | Curated countries only: the public page that says that the group is based in, or operates from, the country. |
+| `country_publisher` | Curated countries only: the publisher of that page. |
+| `country_quote` | Curated countries only: the exact words of that page that support the country. They give the strength of the source, for example "likely based in Russia". |
+| `stance_url` | Curated countries only: a public page that calls the group pro-Russian. |
+| `stance_publisher` | Curated countries only: the publisher of that page. |
+| `stance_quote` | Curated countries only: the exact words of that page. |
+
+The six columns from `country_url` to `stance_quote` are empty for a country that
+comes from the MISP galaxy, and for a group with no country. The dataset card of the open dataset
+lists the curated countries with these words and links.

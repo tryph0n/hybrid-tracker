@@ -51,9 +51,27 @@ COLUMNS = [
     "country",
     "state_sponsor",
     "country_source",
-    "source_url",
+    "country_url",
+    "country_publisher",
+    "country_quote",
+    "stance_url",
+    "stance_publisher",
+    "stance_quote",
 ]
 """Columns of the `threat_actors` table."""
+
+CURATION_COLUMNS = [
+    "actor",
+    "country",
+    "country_url",
+    "country_publisher",
+    "country_quote",
+    "stance_url",
+    "stance_publisher",
+    "stance_quote",
+]
+"""Columns of `curation/actors.csv`. The six last ones are all filled for a
+curated country and all empty for a group with no country."""
 
 FROM_CLUSTER = "misp-galaxy"
 FROM_CURATION = "curation"
@@ -118,45 +136,90 @@ def alpha2(code: str, where: str) -> str:
 
 @dataclass(frozen=True)
 class Curation:
-    """A line of `curation/actors.csv`."""
+    """A line of `curation/actors.csv`.
+
+    `country_*` is the page that links the group to the country, with the exact
+    words of the page that support it (the reserve). `stance_*` is the page that
+    calls the group pro-Russian, with its exact words.
+    """
 
     actor: str
-    country: str | None
-    source_url: str | None
+    country: str | None = None
+    country_url: str | None = None
+    country_publisher: str | None = None
+    country_quote: str | None = None
+    stance_url: str | None = None
+    stance_publisher: str | None = None
+    stance_quote: str | None = None
+
+    def sources(self) -> dict[str, str | None]:
+        """The six source fields, by column name."""
+        return {
+            "country_url": self.country_url,
+            "country_publisher": self.country_publisher,
+            "country_quote": self.country_quote,
+            "stance_url": self.stance_url,
+            "stance_publisher": self.stance_publisher,
+            "stance_quote": self.stance_quote,
+        }
+
+
+def check_sources(line: Curation, where: str) -> None:
+    """A curated country has its six source fields, a group with none has no one.
+
+    Raises:
+        UserError: A field is missing or filled against that rule, or a URL is
+            not http(s).
+    """
+    fields = line.sources()
+    if line.country is None:
+        filled = [name for name, value in fields.items() if value]
+        if filled:
+            raise UserError(f"{where}: no country, but {', '.join(filled)} is filled")
+        return
+    missing = [name for name, value in fields.items() if not value]
+    if missing:
+        raise UserError(f"{where}: a country needs {', '.join(missing)}")
+    for name in ("country_url", "stance_url"):
+        if not str(fields[name]).startswith(("http://", "https://")):
+            raise UserError(f"{where}: {name} must be an http(s) URL")
 
 
 def read_curation(path: Path) -> list[Curation]:
-    """Read `curation/actors.csv`: the columns `actor`, `country`, `source_url`.
+    """Read `curation/actors.csv`: the columns `CURATION_COLUMNS`.
 
-    The country is where the group is based, and `source_url` is a public page
-    whose text says so. A group with no such page keeps an empty country.
+    The country is where the group is based. `country_url`, `country_quote` and
+    `country_publisher` give the public page that says so and its exact words;
+    the `stance_*` columns give the page that calls the group pro-Russian. A
+    group with no such page keeps an empty country and empty sources.
 
     Raises:
         UserError: A column is missing, the actor is empty, a country is not
-            an alpha-2 code or has no http(s) URL, or a group is listed twice.
+            an alpha-2 code, the source fields break the rule of
+            `check_sources`, or a group is listed twice.
     """
     with path.open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
-        if reader.fieldnames != ["actor", "country", "source_url"]:
-            raise UserError(f"{path.name}: columns must be actor, country, source_url")
+        if reader.fieldnames != CURATION_COLUMNS:
+            raise UserError(
+                f"{path.name}: columns must be {', '.join(CURATION_COLUMNS)}"
+            )
         rows = list(reader)
     lines: list[Curation] = []
     seen: set[str] = set()
     for number, row in enumerate(rows, start=2):
         where = f"{path.name} line {number}"
-        actor = row["actor"].strip()
-        country = row["country"].strip()
-        url = row["source_url"].strip()
+        values = {name: (row[name] or "").strip() or None for name in CURATION_COLUMNS}
+        actor = values.pop("actor")
         if not actor:
             raise UserError(f"{where}: an actor is needed")
-        if country and not url.startswith(("http://", "https://")):
-            raise UserError(f"{where}: a country needs an http(s) source_url")
         if fold(actor) in seen:
             raise UserError(f"{where}: {actor!r} is listed twice")
         seen.add(fold(actor))
-        lines.append(
-            Curation(actor, alpha2(country, where) if country else None, url or None)
-        )
+        country = values.pop("country")
+        line = Curation(actor, alpha2(country, where) if country else None, **values)
+        check_sources(line, where)
+        lines.append(line)
     return lines
 
 
@@ -183,7 +246,12 @@ def entry_row(entry: dict[str, Any]) -> dict[str, Any]:
         "country": country,
         "state_sponsor": SPONSOR_COUNTRIES[sponsor] if sponsor is not None else None,
         "country_source": FROM_CLUSTER if country else None,
-        "source_url": None,
+        "country_url": None,
+        "country_publisher": None,
+        "country_quote": None,
+        "stance_url": None,
+        "stance_publisher": None,
+        "stance_quote": None,
     }
 
 
@@ -199,8 +267,9 @@ def reduce(content: bytes, curation: list[Curation]) -> pd.DataFrame:
 
     Raises:
         UserError: The file has no `values`, a group name is not unique, a
-            country is not valid, or a curation line names a group that the
-            cluster already gives a country.
+            country is not valid, a curated country lacks one of its source
+            fields, or a curation line names a group that the cluster already
+            gives a country.
     """
     values = json.loads(content.decode("utf-8")).get("values")
     if not values:
@@ -211,6 +280,7 @@ def reduce(content: bytes, curation: list[Curation]) -> pd.DataFrame:
         raise UserError(f"{FILE_NAME}: a group name is not unique")
     by_name = {fold(row["actor"]): row for row in rows}
     for line in curation:
+        check_sources(line, line.actor)
         row = by_name.get(fold(line.actor))
         if row is None:
             row = entry_row({"value": line.actor})
@@ -223,7 +293,7 @@ def reduce(content: bytes, curation: list[Curation]) -> pd.DataFrame:
             )
         row["country"] = line.country
         row["country_source"] = FROM_CURATION
-        row["source_url"] = line.source_url
+        row.update(line.sources())
     frame = pd.DataFrame(rows, columns=COLUMNS)
     return frame.sort_values("actor", ignore_index=True)
 

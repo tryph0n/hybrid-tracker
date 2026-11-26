@@ -20,7 +20,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from tracker.build import family_sources
+from tracker import actors
+from tracker.build import CURATION_DIR, family_sources
 from tracker.errors import UserError
 from tracker.quality import write_summary
 from tracker.schema import SCHEMA_VERSION
@@ -116,7 +117,50 @@ def configs(files: set[str]) -> str:
     return "\n".join(lines)
 
 
-def render_card(family: str, files: set[str], versions: str | None = None) -> str:
+def curated_countries(lines: list[actors.Curation]) -> list[str]:
+    """The "Curated countries" section: one table row per curated country.
+
+    Returns:
+        Lines of Markdown, or an empty list when no line has a country.
+    """
+    rows = [line for line in lines if line.country]
+    if not rows:
+        return []
+    table = [
+        "| Group | Country | Reserve (words of the source) | Sources |",
+        "| --- | --- | --- | --- |",
+    ]
+    for line in sorted(rows, key=lambda row: row.actor.casefold()):
+        table.append(
+            f"| {line.actor} | {line.country} | "
+            f'"{line.country_quote}" | '
+            f"[{line.country_publisher}]({line.country_url}), "
+            f"[{line.stance_publisher}]({line.stance_url}) |"
+        )
+    return [
+        "## Curated countries",
+        "",
+        (
+            "These countries come from the curation of the project "
+            "(`curation/actors.csv`), not from the MISP galaxy. The quoted "
+            "words give the strength of each source: the first link is the page "
+            "that links the group to the country, the second is the page that "
+            "calls the group pro-Russian. Columns `country_url`, "
+            "`country_publisher`, `country_quote`, `stance_url`, "
+            "`stance_publisher` and `stance_quote` hold the same fields."
+        ),
+        "",
+        *table,
+        "",
+    ]
+
+
+def render_card(
+    family: str,
+    files: set[str],
+    versions: str | None = None,
+    curation: list[actors.Curation] | None = None,
+) -> str:
     """The dataset card of one family.
 
     Args:
@@ -125,6 +169,8 @@ def render_card(family: str, files: set[str], versions: str | None = None) -> st
             only when its file is in the set.
         versions: The "Versions" section. Default: the file of the family in
             `cards/`.
+        curation: The lines of the curated countries. Default: `curation/actors.csv`.
+            Used only for the open card with `threat_actors.parquet` in `files`.
 
     Returns:
         The card, front matter first.
@@ -137,6 +183,11 @@ def render_card(family: str, files: set[str], versions: str | None = None) -> st
         versions = versions_path(family).read_text(encoding="utf-8")
     if not versions.lstrip().startswith(VERSIONS_HEADING):
         raise UserError(f"The Versions section of {family} must start with a heading")
+    if curation is None and family == "open" and "threat_actors.parquet" in files:
+        curation = actors.read_curation(CURATION_DIR / "actors.csv")
+    curated = (
+        curated_countries(curation or []) if "threat_actors.parquet" in files else []
+    )
     licence, licence_url = LICENCE_LINKS[family]
     front_matter = "\n".join(
         [
@@ -181,6 +232,7 @@ def render_card(family: str, files: set[str], versions: str | None = None) -> st
             "country, with `geo_precision` `place`, matched by name and country."
         ),
         "",
+        *curated,
         versions.strip(),
         "",
     ]

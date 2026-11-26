@@ -65,7 +65,9 @@ def curation_dir(tmp_path, monkeypatch):
     folder.mkdir()
     for name in ("merges.csv", "splits.csv"):
         (folder / name).write_text(CURATION_HEADER, encoding="utf-8")
-    (folder / "actors.csv").write_text("actor,country,source_url\n", encoding="utf-8")
+    (folder / "actors.csv").write_text(
+        ",".join(actors.CURATION_COLUMNS) + "\n", encoding="utf-8"
+    )
     monkeypatch.setattr(build, "CURATION_DIR", folder)
     return folder
 
@@ -431,7 +433,7 @@ def test_the_open_family_gets_the_threat_actors_table_and_the_nc_family_does_not
     assert len(table) == 7
     assert table["actor"].is_unique
     assert table.set_index("actor").loc["NoName057(16)", "country"] == "RU"
-    assert pd.isna(table.set_index("actor").loc["Killnet", "country"])
+    assert table.set_index("actor").loc["Killnet", "country"] == "RU"
     assert not (out / "nc" / "threat_actors.parquet").exists()
 
 

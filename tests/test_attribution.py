@@ -198,3 +198,30 @@ def test_a_card_without_the_threat_actors_file_has_no_such_config():
     front_matter, _ = split(render_card("open", FILES - {"threat_actors.parquet"}))
 
     assert "threat_actors" not in [c["config_name"] for c in front_matter["configs"]]
+
+
+def test_the_open_card_lists_the_curated_countries_with_their_reserve_and_links():
+    _, text = split(render_card("open", FILES))
+
+    assert "## Curated countries" in text
+    assert "not from the MISP galaxy" in text
+    assert (
+        '| Killnet | RU | "likely based in Russia" | '
+        "[Flashpoint](https://www.flashpoint.io/blog/killnet), "
+        "[Mandiant](https://cloud.google.com/blog/topics/threat-intelligence/"
+        "killnet-new-capabilities-older-tactics/) |"
+    ) in text
+    assert (
+        '"including against the main instigators living in the Russian Federation"'
+        in text
+    )
+    assert "[Eurojust](" in text
+    assert "[Europol](" in text
+
+
+def test_a_card_without_the_threat_actors_file_has_no_curated_countries():
+    _, text = split(render_card("open", FILES - {"threat_actors.parquet"}))
+    _, nc_text = split(render_card("nc", FILES - {"threat_actors.parquet"}))
+
+    assert "Curated countries" not in text
+    assert "Curated countries" not in nc_text

@@ -16,7 +16,10 @@ tag, use the file names of that tag.
 
 New table `threat_actors`: one row per threat group, with its aliases, its
 country of origin and the suspected state sponsor when the MISP galaxy gives
-one. It changes no column of `events` or `sources`. The tag `v2.3.0` is on the
+one. For a curated country, the columns `country_url`, `country_publisher`,
+`country_quote`, `stance_url`, `stance_publisher` and `stance_quote` give the
+sources and their exact words; they are empty for a country of the MISP
+galaxy. It changes no column of `events` or `sources`. The tag `v2.3.0` is on the
 commit of the first upload.
 
 ### 2.2.0

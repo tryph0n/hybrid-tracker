@@ -171,71 +171,145 @@ def test_the_cluster_must_have_unique_group_names():
         actors.reduce(cluster(entry("Alpha"), entry("Alpha")), [])
 
 
-def test_the_curation_file_gives_a_source_to_each_country_and_leaves_killnet_empty():
+HEADER = ",".join(actors.CURATION_COLUMNS)
+FULL = (
+    "RU,https://example.org/a,Alpha News,based in Russia,"
+    "https://example.org/b,Beta Press,pro-Russian group"
+)
+
+
+def example_line(**changes):
+    fields = {
+        "actor": "Example Front",
+        "country": "RU",
+        "country_url": "https://example.org/a",
+        "country_publisher": "Alpha News",
+        "country_quote": "based in Russia",
+        "stance_url": "https://example.org/b",
+        "stance_publisher": "Beta Press",
+        "stance_quote": "pro-Russian group",
+    }
+    return actors.Curation(**{**fields, **changes})
+
+
+def test_the_curation_file_gives_two_sources_and_the_exact_words_to_each_country():
     lines = {line.actor: line for line in actors.read_curation(CURATION)}
 
-    assert lines["NoName057(16)"].country == "RU"
-    assert lines["NoName057(16)"].source_url.startswith("https://")
-    assert lines["Killnet"].country is None
-    assert lines["Killnet"].source_url is None
+    assert set(lines) == {"NoName057(16)", "Killnet"}
+    for line in lines.values():
+        assert line.country == "RU"
+        assert all(line.sources().values())
+        assert line.country_url.startswith("https://")
+        assert line.stance_url.startswith("https://")
+    assert lines["Killnet"].country_quote == "likely based in Russia"
+    assert lines["Killnet"].country_publisher == "Flashpoint"
+    assert lines["Killnet"].stance_quote == "pro-Russia hacktivist collective"
+    assert lines["Killnet"].stance_publisher == "Mandiant"
+    assert lines["NoName057(16)"].country_quote == (
+        "including against the main instigators living in the Russian Federation"
+    )
+    assert lines["NoName057(16)"].country_publisher == "Eurojust"
+    assert lines["NoName057(16)"].stance_quote == "pro-Russian cybercrime network"
+    assert lines["NoName057(16)"].stance_publisher == "Europol"
 
 
-def test_the_curation_gives_a_country_only_where_a_source_states_it(table, lookup):
+def test_a_curated_row_has_its_sources_and_a_cluster_row_has_none(table, lookup):
     rows = table.set_index("actor")
+    source_columns = [
+        name for name in actors.COLUMNS if name.startswith(("country_", "stance_"))
+    ]
 
-    assert rows.loc["NoName057(16)", "country"] == "RU"
-    assert rows.loc["NoName057(16)", "country_source"] == actors.FROM_CURATION
-    assert rows.loc["NoName057(16)", "source_url"].startswith("https://")
-    assert pd.isna(rows.loc["Killnet", "country"])
-    assert pd.isna(rows.loc["Killnet", "country_source"])
-    assert pd.isna(rows.loc["Killnet", "source_url"])
-    assert rows.loc["APT28", "country_source"] == actors.FROM_CLUSTER
-    assert pd.isna(rows.loc["APT28", "source_url"])
+    for name in ("NoName057(16)", "Killnet"):
+        assert rows.loc[name, "country"] == "RU"
+        assert rows.loc[name, "country_source"] == actors.FROM_CURATION
+        assert rows.loc[name, source_columns].notna().all()
+    assert rows.loc["Killnet", "country_quote"] == "likely based in Russia"
+    cluster = rows[rows["country_source"] == actors.FROM_CLUSTER]
+    assert len(cluster) > 0
+    assert (
+        cluster[[c for c in source_columns if c != "country_source"]].isna().all().all()
+    )
     assert lookup.state("NoName05716") == "RU"
-    assert lookup.state("killnet") is None
+    assert lookup.state("killnet") == "RU"
 
 
 def test_the_curation_adds_a_group_that_the_cluster_lacks():
-    line = actors.Curation("Example Front", "RU", "https://example.org/report")
-
-    table = actors.reduce(cluster(entry("Alpha", country="IR")), [line])
+    table = actors.reduce(cluster(entry("Alpha", country="IR")), [example_line()])
 
     rows = table.set_index("actor")
     assert rows.loc["Example Front", "country"] == "RU"
+    assert rows.loc["Example Front", "country_quote"] == "based in Russia"
     assert list(rows.loc["Example Front", "aliases"]) == []
     assert rows.loc["Alpha", "country"] == "IR"
 
 
 def test_the_curation_does_not_change_a_country_that_the_cluster_gives():
-    line = actors.Curation("Alpha", "RU", "https://example.org/report")
-
     with pytest.raises(UserError, match="already gives"):
-        actors.reduce(cluster(entry("Alpha", country="IR")), [line])
+        actors.reduce(
+            cluster(entry("Alpha", country="IR")), [example_line(actor="Alpha")]
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "country_url",
+        "country_publisher",
+        "country_quote",
+        "stance_url",
+        "stance_publisher",
+        "stance_quote",
+    ],
+)
+def test_a_curated_country_without_one_source_field_stops_the_reduction(field):
+    with pytest.raises(UserError, match=field):
+        actors.reduce(cluster(entry("Alpha")), [example_line(**{field: None})])
+
+
+def test_a_curated_source_url_must_be_http():
+    with pytest.raises(UserError, match="http"):
+        actors.reduce(cluster(entry("Alpha")), [example_line(country_url="not a url")])
+
+
+def test_a_source_field_without_a_country_stops_the_reduction():
+    line = actors.Curation("Alpha", stance_quote="pro-Russian group")
+
+    with pytest.raises(UserError, match="stance_quote"):
+        actors.reduce(cluster(entry("Alpha")), [line])
 
 
 @pytest.mark.parametrize(
     "row",
     [
-        "Alpha,RU,",
-        "Alpha,RU,not a url",
-        ",RU,https://example.org/x",
-        "Alpha,Russia,https://example.org/x",
-        "Alpha,ru,https://example.org/x",
+        f",{FULL}",
+        "Alpha,Russia,https://example.org/a,A,q,https://example.org/b,B,q",
+        "Alpha,ru,https://example.org/a,A,q,https://example.org/b,B,q",
+        "Alpha,RU,,A,q,https://example.org/b,B,q",
+        "Alpha,RU,https://example.org/a,A,,https://example.org/b,B,q",
+        "Alpha,RU,https://example.org/a,A,q,,B,q",
+        "Alpha,RU,https://example.org/a,A,q,https://example.org/b,B,",
+        "Alpha,,https://example.org/a,,,,,",
     ],
 )
-def test_a_curation_line_needs_an_actor_and_a_valid_country_with_a_source_url(
-    tmp_path, row
-):
+def test_a_curation_line_needs_an_actor_a_valid_country_and_its_sources(tmp_path, row):
     path = tmp_path / "actors.csv"
-    path.write_text(f"actor,country,source_url\n{row}\n", encoding="utf-8")
+    path.write_text(f"{HEADER}\n{row}\n", encoding="utf-8")
 
     with pytest.raises(UserError):
         actors.read_curation(path)
 
 
+def test_the_old_curation_columns_are_refused(tmp_path):
+    path = tmp_path / "actors.csv"
+    path.write_text("actor,country,source_url\n", encoding="utf-8")
+
+    with pytest.raises(UserError, match="columns"):
+        actors.read_curation(path)
+
+
 def test_a_curation_line_without_country_keeps_the_group_with_no_country(tmp_path):
     path = tmp_path / "actors.csv"
-    path.write_text("actor,country,source_url\nAlpha,,\n", encoding="utf-8")
+    path.write_text(f"{HEADER}\nAlpha,,,,,,,\n", encoding="utf-8")
 
     lines = actors.read_curation(path)
     table = actors.reduce(cluster(entry("Beta")), lines)
@@ -248,11 +322,7 @@ def test_a_curation_line_without_country_keeps_the_group_with_no_country(tmp_pat
 
 def test_a_group_listed_twice_in_the_curation_is_refused(tmp_path):
     path = tmp_path / "actors.csv"
-    path.write_text(
-        "actor,country,source_url\n"
-        "Alpha,RU,https://example.org/a\nALPHA,RU,https://example.org/b\n",
-        encoding="utf-8",
-    )
+    path.write_text(f"{HEADER}\nAlpha,{FULL}\nALPHA,{FULL}\n", encoding="utf-8")
 
     with pytest.raises(UserError, match="twice"):
         actors.read_curation(path)

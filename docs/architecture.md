@@ -205,6 +205,7 @@ flowchart TB
   module_tracker_leiden --> module_tracker_errors
   module_tracker_leiden --> module_tracker_schema
   module_tracker_leiden --> module_tracker_store
+  module_tracker_publish --> module_tracker_actors
   module_tracker_publish --> module_tracker_build
   module_tracker_publish --> module_tracker_errors
   module_tracker_publish --> module_tracker_quality
