@@ -3,7 +3,7 @@
 Run from the repository root: streamlit run src/streamlit_app.py
 """
 
-from collections.abc import Collection
+from functools import partial
 
 import pandas as pd
 import plotly.express as px
@@ -415,17 +415,19 @@ with st.sidebar:
         key="countries",
     )
 
-filters: dict[str, Collection[str]] = {
-    "sources": source_names,
-    "domains": domains,
-    "categories": categories,
-    "statuses": statuses,
-    "attributions": attributions,
-    "actors": actors,
-    "countries": countries,
-}
+select = partial(
+    filter_events,
+    all_events,
+    sources=source_names,
+    domains=domains,
+    categories=categories,
+    statuses=statuses,
+    attributions=attributions,
+    actors=actors,
+    countries=countries,
+)
 # Every filter except the period: used for the "last 30 days" figure.
-scoped = filter_events(all_events, **filters)
+scoped = select()
 
 today = utc_today()
 days = PERIODS[period_label]
@@ -441,11 +443,7 @@ if days is not None and len(month_sources):
         "date falls inside it, so an event of the month that contains the "
         "period start can be left out."
     )
-events = (
-    scoped
-    if days is None
-    else filter_events(all_events, **filters, after=today - pd.Timedelta(days=days))
-)
+events = scoped if days is None else select(after=today - pd.Timedelta(days=days))
 
 if events.empty:
     st.info("No event matches these filters.")
