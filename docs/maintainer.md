@@ -162,9 +162,9 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    purpose.
 3. Set `PINNED_VERSION` in `src/tracker/leiden.py` and run the ingest again.
 4. Read the diff of the CSV, then update the version in the `citation` of
-   `src/tracker/sources.py`, in the README credits and in the dataset card
-   (`data/events/README.md`). If the years change, also update the `title` and
-   the README source table, and the version in the docstring of the module.
+   `src/tracker/sources.py` and in the README credits. The dataset cards take
+   the citation from the registry. If the years change, also update the `title`
+   and the README source table, and the version in the docstring of the module.
 
 ## Add a source
 
@@ -209,11 +209,12 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    label.
 8. Credit the source in `README.md`: a row in the source table, with the
    homepage, and a line in "Licence and credits", with the citation and the
-   licence. Add the citation and the homepage to the dataset card,
-   `data/events/README.md`. If the scope grows, update the intro of the card.
-   If its events start before 2022, also update "since 2022" in the README
-   description, the card intro and the app caption (`src/streamlit_app.py`).
-   `tests/test_attribution.py` checks the credits.
+   licence. The dataset cards are generated from the registry
+   (`src/tracker/publish.py`): an `open` source is credited in both cards, an
+   `nc` source in the `nc` card only. If the scope grows, update the card
+   intros in `publish.py`. If its events start before 2022, also update "since
+   2022" in the README description, the card intros and the app caption
+   (`src/streamlit_app.py`). `tests/test_attribution.py` checks the credits.
 9. A live source that needs a secret: add `env:` to the "Refresh live
    sources" step and set the secret in the repository.
 10. Run `uv run python scripts/architecture.py` and commit `docs/architecture.md`.
@@ -235,13 +236,16 @@ or `attribution`, the "Reading the data" section of `README.md`.
 
 Raise `SCHEMA_VERSION` in `src/tracker/schema.py`: a removed or renamed column
 is a major version. Add an entry with the mapping from the old version to the
-`Versions` section of `data/events/README.md`. The mirror job tags the dataset
-`v<SCHEMA_VERSION>` on the commit of the first upload with that version. Check
-the tag after the first run on `main`: if the job warns that it could not create
-the tag, create it by hand (the tag is never moved or recreated):
+`Versions` section of `cards/versions-open.md`, and of `cards/versions-nc.md`
+for the new dataset. The publish job tags each dataset `v<SCHEMA_VERSION>` on
+the commit of the first upload with that version. Check the tags after the
+first run on `main`. The run token may not be allowed to create a tag. Then the
+job warns and goes on, and the run summary gives the tag and the commit. Create
+the tag by hand with your own login (the tag is never moved or recreated):
 
 ```bash
-hf repos tag create <HF_DATASET> v<SCHEMA_VERSION> --repo-type dataset --revision <upload commit>
+hf repos tag create sam-bot/europe-hybrid-incidents v<SCHEMA_VERSION> --repo-type dataset --revision <upload commit>
+hf repos tag create sam-bot/europe-hybrid-incidents-nc v<SCHEMA_VERSION> --repo-type dataset --revision <upload commit>
 ```
 
 ## Record a decision
@@ -307,27 +311,36 @@ on the next scheduled or manual run.
 
 `.github/workflows/pipeline.yml` runs on each push to `main`, on each pull
 request, each day at 04:17 UTC, and by hand. It has seven jobs: Lint, Data, Docs,
-Docker build check, Docker image, Deploy to Render and Hugging Face mirror. The
+Docker build check, Docker image, Deploy to Render and Hugging Face publish. The
 [architecture page](architecture.md) shows how they connect and what each one
 does.
 
 - On a scheduled or manual run, Data refreshes the live sources, validates and
   tests the data, and commits the changes to `data/events`. The commit does not
-  start a new run: the image and the mirror use that commit in the same run.
+  start a new run: the image and the publish job use that commit in the same run.
 - The daily commits come from a bot. Pull before you create a branch.
 - The image tag is a hash of the `Dockerfile` and of every file the build
   reads: `README.md`, `pyproject.toml`, `uv.lock`, `.streamlit`, `src` and
   `data`. The packages come from `uv.lock`, so a lockfile change gives a new
-  tag. A change to any of them, the dataset card included, gives a new tag.
+  tag. A change to any of them gives a new tag.
   A new `COPY` line or a new bind mount in the `Dockerfile` must also go in
   the `git ls-tree` line of the Docker image job (`tests/test_image.py` checks it) and in the tag command of
   [Roll back](#roll-back). The same inputs give
   the same tag, and nothing is pushed to Docker Hub. `latest` moves only when a
   new tag is built. After a revert to an earlier tag, `latest` stays on the
   newer image.
-- The mirror job uploads `data/events/` to the dataset, then downloads that
-  dataset commit and compares each file. A missing or different file fails the
-  job.
+- On a scheduled or manual run on `main`, the publish job takes the published
+  tables of the Data job (`tracker build` and `tracker quality`) and runs
+  `tracker publish` once per dataset: `open` to `sam-bot/europe-hybrid-incidents`
+  and `nc` to `sam-bot/europe-hybrid-incidents-nc`. Each dataset gets one
+  commit with the tables, a card generated from the source registry and from
+  `cards/versions-<family>.md`, and (for `open`) the deletion of `eodi.csv` and
+  `leiden.csv`. The job then downloads that commit and compares each file
+  byte for byte. A missing or different file fails the job. A push to `main`
+  does not publish: the next scheduled or manual run does. The job creates the
+  tag `v<SCHEMA_VERSION>` when it does not exist, and never moves or deletes a
+  tag. If the Hub refuses the tag, the job warns, goes on, and the run summary
+  gives the tag and the commit: see [Change the schema](#change-the-schema).
 - Render redeploys the tag of the run on every `main` run, also when the tag
   did not change. The job then polls
   `/app/static/version.txt` on the public address for 10 minutes at most, until
@@ -348,8 +361,9 @@ does.
   attestation existed or after a failed attestation step, is built, scanned,
   pushed and attested again from the new run. Run the pipeline again after a
   failed attestation step: `latest` has not moved.
-- The Docker image, Deploy and mirror jobs run on `main` only. Each one does
-  nothing until its variable or secret is set.
+- The Docker image and Deploy jobs run on `main` only, and the publish job on
+  `main` for a scheduled or manual run. The image and Deploy jobs do nothing
+  until their variable or secret is set.
 
 ### Run the pipeline by hand
 
@@ -372,7 +386,6 @@ In the GitHub repository settings, Secrets and variables, Actions:
 | `DOCKER_IMAGE` | variable | Public Docker Hub repository, `<user>/<repository>`. The namespace must be the Docker Hub login: the job logs in with it. |
 | `DOCKERHUB_TOKEN` | secret | Docker Hub access token with Repo Read & Write scope |
 | `RENDER_DEPLOY_HOOK_URL` | secret | Deploy hook of the Render service (Settings, Deploy Hook). The service image must be the repository in `DOCKER_IMAGE`: Render rejects an image from another repository. |
-| `HF_DATASET` | variable | `<user>/<dataset>` on Hugging Face |
 | `HEARTBEAT_URL` | secret | Ping address of the heartbeat monitor (see "Alerts"). Until it is set, the Heartbeat job is green and sends nothing. |
 
 The Render service is a web service created from the image
@@ -382,11 +395,12 @@ minutes without visits. Set `DOCKER_IMAGE` and `DOCKERHUB_TOKEN`, and let one
 `main` run push the image, before you create the service. Then set
 `RENDER_DEPLOY_HOOK_URL`.
 
-The mirror needs no secret. Create the public dataset on Hugging Face first. In
-its settings, add a Trusted Publisher with repository `tryph0n/hybrid-tracker`,
+The publish job needs no secret. Create the two public datasets on Hugging Face
+first. In the settings of each one, add a Trusted Publisher with repository `tryph0n/hybrid-tracker`,
 branch `main` and workflow `pipeline.yml`. Renaming the repository, the branch
 or the workflow file breaks the trust: delete the Trusted Publisher and add it
-again with the new values. Then set `HF_DATASET`.
+again with the new values. A Trusted Publisher token writes to one dataset only,
+so the job has one step per dataset, each with its own `HF_OIDC_RESOURCE`.
 
 The docs are built on Read the Docs (project `hybrid-tracker`) from the `docs/`
 folder, with `.readthedocs.yaml`. It sets `fail_on_warning`, so a warning fails
@@ -407,8 +421,9 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Docker build check | A broken `Dockerfile`, a missing file in a `COPY`, an app that does not start or does not answer on `/_stcore/health` | Read the log: it shows the build error or the container log. Run `docker build .` locally and fix it. |
 | Docker image | A broken `Dockerfile` that the check missed, an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
 | Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended or the workspace cannot deploy. Or the step "Wait for the new image to answer" failed: the app did not serve the tag of the run at `/app/static/version.txt` within 10 minutes, because the new image does not start or Render keeps the old one | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Wait failure: read the deploy logs in Render, check `PORT` and the health check path, and open the app address to see which tag it serves. Then run the job again. |
-| Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match, or `HF_DATASET` names another dataset; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
-| Hugging Face mirror | "Mirror check failed": the downloaded dataset commit does not hold the same bytes as `data/events/`: a file that the upload skipped, or that differs on the Hub | Run the job again, then compare the files on the Hub. |
+| Hugging Face publish | `invalid_grant`: the Trusted Publisher claims do not match, or one of the two datasets has no Trusted Publisher; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
+| Hugging Face publish | "Read-back failed": the downloaded dataset commit does not hold the same bytes as the build folder, or still holds a deleted file: a file that the upload skipped, or that differs on the Hub | Run the job again, then compare the files on the Hub. |
+| Hugging Face publish | A warning "Could not create the tag": the run token cannot create tags | Create the tag by hand, see [Change the schema](#change-the-schema). |
 | Read the Docs | A warning or error in the docs build on Read the Docs. On a pull request it shows as a failed check; for `latest`, see Builds in the Read the Docs project. | `latest` stays on the previous version. Fix the docs and push. |
 
 A green Deploy job means that Render accepted the deploy and that the app

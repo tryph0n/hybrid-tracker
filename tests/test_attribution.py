@@ -1,11 +1,22 @@
-"""CC BY duty: every source is credited where the data is distributed."""
+"""CC BY duty: every source is credited where the data is distributed.
 
+That is the README and the two generated dataset cards.
+"""
+
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
 import yaml
 from conftest import ROOT
 
-from tracker.sources import REFERENCES, SOURCES
+from tracker.build import family_sources
+from tracker.errors import UserError
+from tracker.publish import LICENCES, render_card, versions_path
+from tracker.sources import FAMILIES, REFERENCES, SOURCES
+
+FILES = {"events.parquet", "sources.parquet", "quality.parquet"}
+NC_CITATION = "Example Institute, a NonCommercial register of incidents."
 
 
 def one_line(path: Path) -> str:
@@ -30,11 +41,138 @@ def test_readme_credits_every_reference_dataset_with_its_licence_page():
         assert reference.licence_url in text
 
 
-def test_dataset_card_credits_every_source_and_reference_dataset():
-    card = (ROOT / "data" / "events" / "README.md").read_text(encoding="utf-8")
+@pytest.fixture
+def nc_source(monkeypatch):
+    """A registry with one extra source whose licence is NonCommercial."""
+    source = replace(
+        SOURCES["eodi"],
+        title="Example NonCommercial register",
+        homepage="https://example.org/nc-register",
+        licence="CC BY-NC 4.0",
+        family="nc",
+        citation=NC_CITATION,
+    )
+    monkeypatch.setitem(SOURCES, "example_nc", source)
+    return source
+
+
+def split(card: str) -> tuple[dict, str]:
+    """The front matter of a card as a dict, and its body on one line."""
     _, front_matter, body = card.split("---\n", 2)
-    assert yaml.safe_load(front_matter)["license"] == "cc-by-4.0"
-    text = " ".join(body.split())
-    for source in [*SOURCES.values(), *REFERENCES.values()]:
-        assert source.citation in text
-        assert source.homepage in text
+    return yaml.safe_load(front_matter), " ".join(body.split())
+
+
+def card_problems(family: str, card: str) -> list[str]:
+    """What the card of `family` gets wrong about credits.
+
+    A source that the family holds must be credited with its citation and its
+    homepage. A source that the family does not hold must not appear.
+    """
+    _, text = split(card)
+    held = family_sources(family)
+    problems = []
+    for name, source in SOURCES.items():
+        credited = source.citation in text and source.homepage in text
+        if name in held and not credited:
+            problems.append(f"{name} is missing")
+        if name not in held and (source.citation in text or source.homepage in text):
+            problems.append(f"{name} must be absent")
+    for reference in REFERENCES.values():
+        if (family == "nc" or reference.family == family) and not (
+            reference.citation in text and reference.homepage in text
+        ):
+            problems.append(f"{reference.title} is missing")
+    return problems
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_each_card_credits_every_source_and_reference_dataset_it_must(family):
+    card = render_card(family, FILES)
+
+    assert card_problems(family, card) == []
+    assert split(card)[0]["license"] == LICENCES[family]
+
+
+def test_an_open_source_is_credited_in_both_cards(nc_source):
+    for family in FAMILIES:
+        text = split(render_card(family, FILES))[1]
+        for source in SOURCES.values():
+            if source.family == "open":
+                assert source.citation in text
+                assert source.homepage in text
+
+
+def test_an_nc_source_is_in_the_nc_card_only(nc_source):
+    open_card = render_card("open", FILES)
+    nc_card = render_card("nc", FILES)
+
+    assert NC_CITATION not in open_card
+    assert nc_source.homepage not in open_card
+    assert NC_CITATION in split(nc_card)[1]
+    assert card_problems("open", open_card) == []
+    assert card_problems("nc", nc_card) == []
+    assert split(nc_card)[0]["license"] == "cc-by-nc-4.0"
+
+
+def test_the_check_fails_when_a_source_is_missing_from_a_card_where_it_must_be(
+    nc_source,
+):
+    card = render_card("nc", FILES)
+
+    assert card_problems("nc", card.replace(NC_CITATION, "")) == [
+        "example_nc is missing"
+    ]
+    first = SOURCES["eodi"].citation
+    assert card_problems("nc", card.replace(first, "")) == ["eodi is missing"]
+    assert card_problems("open", render_card("open", FILES).replace(first, "")) == [
+        "eodi is missing"
+    ]
+
+
+def test_the_check_fails_when_an_nc_source_is_in_the_open_card(nc_source):
+    card = render_card("nc", FILES)
+
+    assert card_problems("open", card) == ["example_nc must be absent"]
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_each_generated_card_has_a_versions_section(family):
+    card = render_card(family, FILES)
+
+    assert "\n## Versions\n" in card
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_a_card_without_a_versions_section_is_refused(family):
+    with pytest.raises(UserError, match="Versions"):
+        render_card(family, FILES, versions="Some text with no heading.\n")
+
+
+def test_the_open_versions_say_that_old_tags_hold_csv_files():
+    text = one_line(versions_path("open"))
+
+    assert "no `events.parquet`" in text
+    assert "`v1.0.0`" in text
+    assert "`v2.0.0`" in text
+
+
+def test_the_nc_versions_list_no_v1():
+    text = versions_path("nc").read_text(encoding="utf-8")
+
+    assert "### 1.0.0" not in text
+    assert "### 2.1.0" in text
+
+
+def test_the_configs_declare_only_the_files_that_exist():
+    front_matter, _ = split(render_card("open", {"events.parquet", "sources.parquet"}))
+
+    configs = front_matter["configs"]
+    assert [config["config_name"] for config in configs] == ["events", "sources"]
+    assert [config.get("default") for config in configs] == [True, None]
+    assert configs[0]["data_files"] == [{"split": "train", "path": "events.parquet"}]
+    with_quality = split(render_card("open", FILES))[0]["configs"]
+    assert [config["config_name"] for config in with_quality] == [
+        "events",
+        "sources",
+        "quality",
+    ]

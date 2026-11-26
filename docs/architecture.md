@@ -8,8 +8,8 @@
    the repository, and as a clean Parquet table in the raw store.
 3. The Streamlit page `src/streamlit_app.py` reads these files and nothing else.
 4. The pipeline refreshes the live sources every day, publishes the app and
-   mirrors `data/events/` to a public Hugging Face dataset. The app does not
-   read the mirror.
+   publishes the published tables to two public Hugging Face datasets. The app
+   does not read them.
 
 This page is generated from the code by `scripts/architecture.py`: do not edit
 it by hand. After a change, run this command and commit the result:
@@ -41,7 +41,6 @@ flowchart TB
   events --> app
   app -->|"Docker image job"| service_Docker_Hub
   service_Docker_Hub -->|"Deploy to Render job"| service_Render
-  events -->|"Hugging Face mirror job"| service_Hugging_Face
 ```
 
 | Source | Name | Kind | Licence | Stored as |
@@ -64,7 +63,7 @@ flowchart LR
   job_image_check["Docker build check"]:::conditional
   job_image["Docker image"]:::conditional
   job_deploy["Deploy to Render"]:::conditional
-  job_mirror["Hugging Face mirror"]:::conditional
+  job_publish["Hugging Face publish"]:::conditional
   job_report_failure["Report failure"]:::conditional
   job_close_failure["Close failure issue"]:::conditional
   job_heartbeat["Heartbeat"]:::conditional
@@ -73,25 +72,25 @@ flowchart LR
   job_data -->|sha| job_image
   job_docs --> job_image
   job_image -->|image| job_deploy
-  job_data -->|sha| job_mirror
+  job_data -->|sha| job_publish
   job_lint --> job_report_failure
   job_data --> job_report_failure
   job_docs --> job_report_failure
   job_image --> job_report_failure
   job_deploy --> job_report_failure
-  job_mirror --> job_report_failure
+  job_publish --> job_report_failure
   job_lint --> job_close_failure
   job_data --> job_close_failure
   job_docs --> job_close_failure
   job_image --> job_close_failure
   job_deploy --> job_close_failure
-  job_mirror --> job_close_failure
+  job_publish --> job_close_failure
   job_lint --> job_heartbeat
   job_data --> job_heartbeat
   job_docs --> job_heartbeat
   job_image --> job_heartbeat
   job_deploy --> job_heartbeat
-  job_mirror --> job_heartbeat
+  job_publish --> job_heartbeat
 ```
 
 | Job | Runs if | Secrets and variables |
@@ -102,7 +101,7 @@ flowchart LR
 | Docker build check | `github.event_name == 'pull_request'` |  |
 | Docker image | `github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''` | `DOCKERHUB_TOKEN` (secret), `DOCKER_IMAGE` (variable) |
 | Deploy to Render | `needs.image.outputs.image != ''` | `RENDER_DEPLOY_HOOK_URL` (secret) |
-| Hugging Face mirror | `github.ref == 'refs/heads/main' && vars.HF_DATASET != ''` | `HF_DATASET` (variable) |
+| Hugging Face publish | `github.ref == 'refs/heads/main' && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
 | Report failure | `failure() && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
 | Close failure issue | `${{ !failure() && !cancelled() && github.event_name == 'schedule' }}` |  |
 | Heartbeat | `${{ !failure() && !cancelled() && github.event_name == 'schedule' }}` | `HEARTBEAT_URL` (secret) |
@@ -117,6 +116,7 @@ flowchart LR
 | Data | Ingest static sources missing from the store | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest static --if-missing` |
 | Data | Build the published tables | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker build` |
 | Data | Write the quality table and the run summary | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker quality` |
+| Data | Keep the published tables for the publish job | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
 | Data | Validate stored data |  | `uv run tracker ingest check` |
 | Data | Run the tests |  | `uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"` |
 | Data | Commit refreshed data | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | a script |
@@ -137,9 +137,10 @@ flowchart LR
 | Docker image | Move latest to the attested image | `steps.image.outputs.published != 'true'` | `docker buildx imagetools create --tag "$DOCKER_IMAGE:latest" "$DOCKER_IMAGE@$DIGEST"` |
 | Deploy to Render | Deploy to Render |  | a script |
 | Deploy to Render | Wait for the new image to answer | `steps.deploy.outputs.called == 'true'` | a script |
-| Hugging Face mirror | Install |  | `uv sync --locked` |
-| Hugging Face mirror | Mirror the data to Hugging Face |  | a script |
-| Hugging Face mirror | Tag the dataset with the schema version |  | a script |
+| Hugging Face publish | Install |  | `uv sync --locked` |
+| Hugging Face publish | Get the published tables |  | `actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333` |
+| Hugging Face publish | Publish the open dataset |  | `uv run tracker publish open` |
+| Hugging Face publish | Publish the NonCommercial dataset |  | `uv run tracker publish nc` |
 | Report failure | Open an issue, or comment on the open one |  | a script |
 | Close failure issue | Close the open failure issues |  | a script |
 | Heartbeat | Ping the heartbeat monitor |  | a script |
@@ -159,6 +160,7 @@ flowchart TB
   module_tracker_geonames["tracker.geonames"]
   module_tracker_ingest["tracker.ingest"]
   module_tracker_leiden["tracker.leiden"]
+  module_tracker_publish["tracker.publish"]
   module_tracker_quality["tracker.quality"]
   module_tracker_schema["tracker.schema"]
   module_tracker_sources["tracker.sources"]
@@ -178,6 +180,7 @@ flowchart TB
   module_tracker_cli --> module_tracker_build
   module_tracker_cli --> module_tracker_errors
   module_tracker_cli --> module_tracker_ingest
+  module_tracker_cli --> module_tracker_publish
   module_tracker_cli --> module_tracker_quality
   module_tracker_cli --> module_tracker_sources
   module_tracker_cli --> module_tracker_store
@@ -193,6 +196,11 @@ flowchart TB
   module_tracker_leiden --> module_tracker_errors
   module_tracker_leiden --> module_tracker_schema
   module_tracker_leiden --> module_tracker_store
+  module_tracker_publish --> module_tracker_build
+  module_tracker_publish --> module_tracker_errors
+  module_tracker_publish --> module_tracker_quality
+  module_tracker_publish --> module_tracker_schema
+  module_tracker_publish --> module_tracker_sources
   module_tracker_quality --> module_tracker_build
   module_tracker_quality --> module_tracker_clock
   module_tracker_quality --> module_tracker_errors
@@ -221,6 +229,7 @@ flowchart TB
 | `tracker.geonames` | `src/tracker/geonames.py` | GeoNames populated places - reference data, not an event source. | pandas |
 | `tracker.ingest` | `src/tracker/ingest.py` | Download sources, keep their payloads in the raw store and write clean tables. | pandas |
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | openpyxl, pandas, pycountry |
+| `tracker.publish` | `src/tracker/publish.py` | Publish the tables of \`tracker build\` to the two public Hugging Face datasets. | huggingface_hub |
 | `tracker.quality` | `src/tracker/quality.py` | Quality table and run summary: one row per source and per run. | pandas |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
 | `tracker.sources` | `src/tracker/sources.py` | Registry of data sources and access to their stored events. | pandas |
