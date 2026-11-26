@@ -131,7 +131,6 @@ LINE_FIELDS = [
     "actor_names",
     "attributed_by_label",
     "country_names",
-    "url",
 ]
 
 
@@ -489,6 +488,11 @@ lines = incident_lines(scope, rows, fields=LINE_FIELDS, names=SOURCE_NAMES).sort
     "date", ascending=False, kind="stable"
 )
 listed = scope[scope["cluster_id"].isin(lines["cluster_id"])]
+link_sources = [name for name in SOURCES if name in source_names]
+for name in link_sources:
+    own = listed[listed["source"] == name].drop_duplicates("cluster_id")
+    links = own.set_index("cluster_id")["url"]
+    lines[f"link_{name}"] = lines["cluster_id"].map(links)
 in_domain = memberships(rows, "domain_label")
 by_country = count_by_country(memberships(rows, "country_codes"))
 if countries:
@@ -632,7 +636,7 @@ st.dataframe(
             "attribution_label",
             "actor_names",
             "attributed_by_label",
-            "url",
+            *[f"link_{name}" for name in link_sources],
         ]
     ],
     hide_index=True,
@@ -647,7 +651,12 @@ st.dataframe(
         "attribution_label": "Attribution",
         "actor_names": "Actors",
         "attributed_by_label": "Attributed by",
-        "url": st.column_config.TextColumn("Details"),
+        **{
+            f"link_{name}": st.column_config.LinkColumn(
+                SOURCE_NAMES[name], display_text="Open"
+            )
+            for name in link_sources
+        },
     },
 )
 st.download_button(

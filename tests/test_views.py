@@ -232,7 +232,7 @@ def test_values_that_differ_show_with_the_name_of_each_source(events):
 def test_an_empty_value_stays_empty_for_its_source(events):
     scope = scope_of(events)
 
-    assert per_source_values(scope, "actors", NAMES)["e1"] == "(EODI); RU;BY (Leiden)"
+    assert per_source_values(scope, "actors", NAMES)["e1"] == "— (EODI); RU;BY (Leiden)"
 
 
 def test_the_line_takes_title_and_date_from_the_first_row_and_values_from_all(events):

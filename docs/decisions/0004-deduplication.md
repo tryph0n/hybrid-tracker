@@ -285,10 +285,15 @@ that pass the filters. The rules:
   scope, in the source order. When that source is out of scope, the next one
   gives them.
 - The line shows the domain, category, status, attribution level, actors,
-  attributed by, countries and link of every row in scope. One value shows
-  when the rows agree. Otherwise each value shows with the name of its source:
-  "Air (EODI); Espionage (Leiden)". An empty value stays empty for its source.
-  A filter does not change a line. Only the source filter does.
+  attributed by and countries of every row in scope. One value shows when
+  the rows agree. Otherwise each value shows with the name of its source:
+  "Air (EODI); Espionage (Leiden)". When the rows disagree, an empty value
+  shows as an em dash and its source: "— (EODI); Russian Federation
+  (Leiden)". When every row is empty, the cell stays empty. The source links
+  are one column for each selected source, in the source order, with the
+  link of the row of that source: the cell is empty when the source has no
+  row for the incident. A filter does not change a line. Only the source
+  filter does.
 - A filter on a field of one source keeps an incident when one row in scope
   passes all these filters together. The period filter tests the date of the
   line. A row of the incident that passes decides: an incident whose EODI row

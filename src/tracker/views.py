@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+EMPTY = "—"
+
 
 def split_codes(cells: pd.Series) -> pd.Series:
     """Split cells of ISO codes joined by ";" into lists. An empty cell gives []."""
@@ -113,8 +115,9 @@ def per_source_values(
 
     The text is the value when the rows agree. Otherwise it is each value with
     the name of its source, in the source order: "Air (EODI); Espionage
-    (Leiden)". An empty value stays empty: it shows as the name of its source
-    alone, "(EODI)".
+    (Leiden)". An empty value shows as an em dash and its source, "— (EODI)",
+    when the rows disagree. When every row is empty, the rows agree and the
+    text is empty.
 
     Args:
         scope: A frame from `scope_rows`.
@@ -136,8 +139,7 @@ def per_source_values(
             values[cluster] = pairs[0][1]
         else:
             values[cluster] = "; ".join(
-                f"{text} ({names[source]})" if text else f"({names[source]})"
-                for source, text in pairs
+                f"{text or EMPTY} ({names[source]})" for source, text in pairs
             )
     return pd.Series(values, dtype=object)
 

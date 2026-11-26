@@ -3,6 +3,7 @@
 import base64
 import importlib
 import io
+import json
 import logging
 import re
 
@@ -725,6 +726,12 @@ def app_state(at: AppTest) -> dict:
         "figures": metrics(at),
         "charts": [item.proto.spec for item in at.get("plotly_chart")],
         "table": event_table(at).to_dict("list") if at.dataframe else None,
+        "columns": str(at.dataframe[0].proto.columns) if at.dataframe else None,
+        "links": (
+            at.dataframe[0].value.filter(like="link_").to_dict("list")
+            if at.dataframe
+            else None
+        ),
         "texts": captions(at) + " ".join(info.value for info in at.info),
     }
 
@@ -753,7 +760,7 @@ def test_the_line_of_two_sources_shows_the_value_of_each(sample_data_dir):
         "No attribution in the source (EODI); "
         "Assessed by the source's analysts (Leiden)"
     )
-    assert line["actor_names"] == "(EODI); Russian Federation (Leiden)"
+    assert line["actor_names"] == "— (EODI); Russian Federation (Leiden)"
     assert line["country_names"] == "Belgium (EODI); Belgium, Sweden (Leiden)"
 
 
@@ -967,3 +974,66 @@ def test_a_change_of_a_filter_and_its_undo_restore_the_whole_state(
     widget.set_value(original).run()
     assert not at.exception
     assert app_state(at) == before
+
+
+def link_columns(at: AppTest) -> dict[str, str]:
+    """The link columns of the table, by column id, with their headers."""
+    columns = json.loads(str(at.dataframe[0].proto.columns))
+    return {
+        name: config["label"]
+        for name, config in columns.items()
+        if name.startswith("link_")
+    }
+
+
+def links_of(at: AppTest, title: str) -> dict[str, object]:
+    table = at.dataframe[0].value
+    row = table[table["title"] == title].iloc[0]
+    return {
+        name: None if pd.isna(row[name]) else row[name] for name in link_columns(at)
+    }
+
+
+def test_the_table_has_a_link_column_for_each_selected_source(sample_data_dir):
+    link_incidents()
+    at = run_app()
+    default = app_state(at)
+    rows = read_all_events().set_index("event_id")
+    assert "url" not in at.dataframe[0].value.columns
+    assert link_columns(at) == {"link_eodi": "EODI", "link_leiden": "Leiden"}
+    assert links_of(at, BROGEL_TITLE) == {
+        "link_eodi": rows.loc[BROGEL_EODI, "url"],
+        "link_leiden": rows.loc["leiden:K", "url"],
+    }
+    hanover = "Drones over Hanover airport force flight diversions"
+    assert links_of(at, hanover) == {
+        "link_eodi": rows.loc["eodi:EODI-2025-00001", "url"],
+        "link_leiden": None,
+    }
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    assert not at.exception
+    assert link_columns(at) == {"link_leiden": "Leiden"}
+    assert links_of(at, LEIDEN_ONLY["leiden:K"]) == {
+        "link_leiden": rows.loc["leiden:K", "url"]
+    }
+    at.multiselect(key="sources").set_value(["eodi"]).run()
+    assert not at.exception
+    assert link_columns(at) == {"link_eodi": "EODI"}
+    assert links_of(at, BROGEL_TITLE) == {"link_eodi": rows.loc[BROGEL_EODI, "url"]}
+    at.multiselect(key="sources").set_value(list(SOURCES)).run()
+    assert not at.exception
+    assert app_state(at) == default
+
+
+def test_an_empty_value_shows_as_a_dash_and_its_source_when_the_rows_disagree(
+    sample_data_dir,
+):
+    link_incidents()
+    line = line_of(run_app(), BROGEL_TITLE)
+    assert line["actor_names"] == "— (EODI); Russian Federation (Leiden)"
+
+
+def test_a_value_that_every_row_leaves_empty_stays_empty(sample_data_dir):
+    link_incidents(**{"leiden:K": {"actors": "", "attribution": "none"}})
+    line = line_of(run_app(), BROGEL_TITLE)
+    assert line["actor_names"] == ""
