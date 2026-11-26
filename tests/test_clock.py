@@ -45,4 +45,4 @@ def test_period_filter_and_last_30_days_share_the_utc_day(
     assert metrics(at)["Last 30 days"] == str(expected)
     at.selectbox(key="period").set_value("Last 30 days").run()
     assert not at.exception
-    assert metrics(at)["Events"] == str(expected)
+    assert metrics(at)["Incidents"] == str(expected)

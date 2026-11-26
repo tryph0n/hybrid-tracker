@@ -94,7 +94,7 @@ def test_counts_on_the_samples(sample_data_dir):
     shown = expected_events(read_all_events())
     codes = {code for cell in shown["countries"].dropna() for code in cell.split(";")}
     kpis = metrics(at)
-    assert kpis["Events"] == str(len(shown))
+    assert kpis["Incidents"] == str(len(shown))
     assert kpis["Countries"] == str(len(codes))
     assert kpis["Officially attributed"] == str(
         (shown["attribution"] == "official").sum()
@@ -140,10 +140,10 @@ def test_attribution_filter_never_hides_events_by_default(sample_data_dir):
     at = run_app()
     shown = expected_events(read_all_events())
     assert (shown["attribution"] == "none").any()
-    assert metrics(at)["Events"] == str(len(shown))
+    assert metrics(at)["Incidents"] == str(len(shown))
     at.multiselect(key="attributions").set_value(["official"]).run()
     assert not at.exception
-    assert metrics(at)["Events"] == str((shown["attribution"] == "official").sum())
+    assert metrics(at)["Incidents"] == str((shown["attribution"] == "official").sum())
 
 
 def test_official_counts_only_official_events_of_the_selection(sample_data_dir):
@@ -154,7 +154,7 @@ def test_official_counts_only_official_events_of_the_selection(sample_data_dir):
     assert metrics(at)["Officially attributed"] == str(len(official))
     at.multiselect(key="sources").set_value(["leiden"]).run()
     assert metrics(at)["Officially attributed"] == "0"
-    assert metrics(at)["Events"] == str((shown["source"] == "leiden").sum())
+    assert metrics(at)["Incidents"] == str((shown["source"] == "leiden").sum())
     help_text = next(m.help for m in at.metric if m.label == "Officially attributed")
     assert "No event of this selection" in help_text
 
@@ -169,10 +169,10 @@ def test_empty_actor_selection_keeps_events_with_no_state(sample_data_dir):
     at = run_app()
     shown = expected_events(read_all_events())
     assert at.multiselect(key="actors").value == []
-    assert metrics(at)["Events"] == str(len(shown))
+    assert metrics(at)["Incidents"] == str(len(shown))
     at.multiselect(key="actors").set_value(["RU"]).run()
     assert not at.exception
-    assert metrics(at)["Events"] == str(
+    assert metrics(at)["Incidents"] == str(
         shown["actors"].fillna("").str.contains("RU").sum()
     )
 
@@ -452,7 +452,7 @@ def categories_of(domains):
 @pytest.mark.parametrize("domain", DOMAINS)
 def test_adding_a_domain_back_selects_its_categories_again(sample_data_dir, domain):
     at = run_app()
-    before = metrics(at)["Events"]
+    before = metrics(at)["Incidents"]
     at.multiselect(key="domains").set_value([d for d in DOMAINS if d != domain]).run()
     assert not at.exception
     assert at.multiselect(key="categories").value == categories_of(
@@ -461,7 +461,7 @@ def test_adding_a_domain_back_selects_its_categories_again(sample_data_dir, doma
     at.multiselect(key="domains").set_value(DOMAINS).run()
     assert not at.exception
     assert at.multiselect(key="categories").value == list(CATEGORY_DOMAINS)
-    assert metrics(at)["Events"] == before
+    assert metrics(at)["Incidents"] == before
     assert not at.warning
 
 

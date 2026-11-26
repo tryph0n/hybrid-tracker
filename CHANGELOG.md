@@ -8,6 +8,14 @@ The version number is set by hand in `pyproject.toml` only.
 
 ## [Unreleased]
 
+### Added
+
+- Clusters and canonical records (schema 2.2.0, record 0004): the published
+  tables have the columns `cluster_id`, `n_sources` and `is_canonical`, and
+  the dashboard counts incidents, not rows. The curation files are
+  `curation/merges.csv` and `curation/splits.csv`. RapidFuzz is a new
+  dependency.
+
 ### Changed
 
 - The data left git: `data/events/` is removed, `tracker ingest` writes only to

@@ -10,7 +10,7 @@ import pandas as pd
 
 from tracker.errors import UserError
 
-SCHEMA_VERSION = "2.1.0"
+SCHEMA_VERSION = "2.2.0"
 
 # Column order of the clean and published tables.
 COLUMNS = [
@@ -35,6 +35,16 @@ COLUMNS = [
     "attributed_by",  # who made the link between the event and the actors
     "url",  # page with details and references
 ]
+
+# Columns of the published tables only: the build adds them after it makes the
+# clusters (docs/decisions/0004-deduplication.md).
+CLUSTER_COLUMNS = [
+    "cluster_id",  # the incident: event_id of the canonical row of the cluster
+    "n_sources",  # number of sources that have a row in the cluster
+    "is_canonical",  # true on the one row of each cluster that gives the incident its date and place
+]
+
+PUBLISHED_COLUMNS = [*COLUMNS, *CLUSTER_COLUMNS]
 
 DOMAINS = [
     "air",
@@ -240,6 +250,34 @@ def validate(events: pd.DataFrame) -> None:
         raise UserError("lat out of range")
     if not events["lon"].dropna().between(-180, 180).all():
         raise UserError("lon out of range")
+
+
+def validate_published(events: pd.DataFrame) -> None:
+    """Raise UserError if a published table does not follow the schema.
+
+    The columns are exactly `PUBLISHED_COLUMNS`, the first ones pass
+    `validate`, and the clusters are sound: each `cluster_id` has one
+    canonical row, and `n_sources` is the number of sources of its rows.
+
+    Raises:
+        UserError: A check fails.
+    """
+    if list(events.columns) != PUBLISHED_COLUMNS:
+        raise UserError(f"Unexpected columns: {list(events.columns)}")
+    validate(events[COLUMNS])
+    if events["cluster_id"].isna().any():
+        raise UserError("Rows without cluster_id")
+    if not events["cluster_id"].isin(events["event_id"]).all():
+        raise UserError("cluster_id is not the event_id of a row")
+    canonical = events.groupby("cluster_id")["is_canonical"].sum()
+    if not (canonical == 1).all():
+        raise UserError("Each cluster needs exactly one canonical row")
+    sources = events.groupby("cluster_id")["source"].agg(["nunique", "size"])
+    if (sources["nunique"] != sources["size"]).any():
+        raise UserError("A cluster has two rows of one source")
+    expected = events["cluster_id"].map(sources["nunique"])
+    if (events["n_sources"] != expected).any():
+        raise UserError("n_sources differs from the sources of the cluster")
 
 
 def read_csv(source: str | Path | IO[bytes]) -> pd.DataFrame:

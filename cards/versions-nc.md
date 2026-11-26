@@ -7,6 +7,13 @@ never moved.
 
 This dataset starts with schema 2.1.0. It has no earlier version.
 
+### 2.2.0
+
+Three new columns, the same as in the other dataset: `cluster_id`,
+`n_sources` and `is_canonical`. See its "Versions" section. `cluster_id` can
+differ from the one of the other dataset for one incident. The tag `v2.2.0` is
+on the commit of the first upload.
+
 ### 2.1.0
 
 Schema 2.1.0, with the same columns as the other dataset, [Europe Hybrid

@@ -21,15 +21,16 @@ from tracker.schema import (
     ATTRIBUTIONS,
     CATEGORIES,
     CATEGORY_DOMAINS,
-    COLUMNS,
     DOMAINS,
     EVENT_STATUSES,
+    PUBLISHED_COLUMNS,
 )
 from tracker.sources import SOURCES
 from tracker.views import (
     coordinate_coverage,
     filter_events,
     official_by_actor,
+    with_clusters,
     with_code_lists,
 )
 
@@ -144,7 +145,7 @@ def load_events(revision: str) -> tuple[pd.DataFrame, str, str, str]:
         )
     )
     return (
-        with_code_lists(events),
+        with_code_lists(with_clusters(events)),
         published.revision,
         published.date,
         published.failure,
@@ -456,7 +457,11 @@ previous_30 = (
 ).sum()
 
 kpi_events, kpi_countries, kpi_recent, kpi_official = st.columns(4)
-kpi_events.metric("Events", f"{len(events):,}")
+kpi_events.metric(
+    "Incidents",
+    f"{len(events):,}",
+    help="Events that more than one source reports count once.",
+)
 kpi_countries.metric("Countries", len(by_country))
 kpi_recent.metric(
     "Last 30 days",
@@ -601,7 +606,7 @@ st.download_button(
     data=events.assign(
         date=events["date"].dt.strftime("%Y-%m-%d"),
         end_date=events["end_date"].dt.strftime("%Y-%m-%d"),
-    )[COLUMNS].to_csv(index=False),
+    )[PUBLISHED_COLUMNS].to_csv(index=False),
     file_name="hybrid_incidents.csv",
     mime="text/csv",
 )
@@ -613,10 +618,7 @@ st.dataframe(
     column_config={"Link": st.column_config.LinkColumn("Link")},
 )
 st.caption(
-    "Sources are not yet de-duplicated against each other: an incident reported "
-    "by more than one source can appear more than once where source periods "
-    "overlap (see the Sources table). "
-    + " ".join(f"{source.citation} {source.licence}." for source in SOURCES.values())
+    " ".join(f"{source.citation} {source.licence}." for source in SOURCES.values())
 )
 revision_note = f"revision {data_revision[:7]}" + (
     f" of {data_date}" if data_date else ""

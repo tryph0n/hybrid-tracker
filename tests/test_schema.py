@@ -12,6 +12,7 @@ from tracker.schema import (
     DOMAINS,
     make_event_id,
     validate,
+    validate_published,
 )
 
 
@@ -166,3 +167,27 @@ def test_make_event_id_normalises_the_key():
 def test_make_event_id_needs_an_id_or_a_key():
     with pytest.raises(ValueError, match="native id or a key"):
         make_event_id("leiden")
+
+
+def clustered(events):
+    return events.assign(cluster_id=events["event_id"], n_sources=1, is_canonical=True)
+
+
+def test_a_clean_table_has_no_cluster_columns(events):
+    assert not {"cluster_id", "n_sources", "is_canonical"} & set(events.columns)
+    validate(events)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda frame: frame.drop(columns="is_canonical"), "Unexpected columns"),
+        (lambda frame: frame.assign(is_canonical=False), "exactly one canonical"),
+        (lambda frame: frame.assign(n_sources=2), "n_sources differs"),
+        (lambda frame: frame.assign(cluster_id="eodi:none"), "not the event_id"),
+    ],
+)
+def test_validate_published_rejects(events, change, message):
+    validate_published(clustered(events))
+    with pytest.raises(ValueError, match=message):
+        validate_published(change(clustered(events)))

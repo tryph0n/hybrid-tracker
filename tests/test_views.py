@@ -7,6 +7,7 @@ from tracker.views import (
     coordinate_coverage,
     filter_events,
     official_by_actor,
+    with_clusters,
     with_code_lists,
 )
 
@@ -34,7 +35,9 @@ def events():
             "countries",
         ],
     )
-    return with_code_lists(frame)
+    return with_code_lists(
+        with_clusters(frame.assign(event_id=frame.index.astype(str)))
+    )
 
 
 ALL = {
@@ -107,3 +110,130 @@ def test_an_event_with_coordinates_and_a_country_counts_once():
     coverage = coordinate_coverage(frame)
     assert (coverage.located, coverage.countries_only, coverage.on_no_map) == (1, 0, 0)
     assert coverage.sources_without == []
+
+
+CLUSTER_ALL = ALL | {
+    "domains": ["air", "espionage", "other"],
+    "categories": [
+        "drone_overflight",
+        "airport_disruption",
+        "reconnaissance",
+        "unclassified",
+    ],
+}
+
+
+@pytest.fixture
+def clustered():
+    rows = [
+        (
+            "e1",
+            "eodi",
+            "air",
+            "drone_overflight",
+            "dismissed",
+            "none",
+            "",
+            "DE",
+            "e1",
+            True,
+        ),
+        (
+            "l1",
+            "leiden",
+            "espionage",
+            "reconnaissance",
+            "confirmed",
+            "assessed",
+            "RU",
+            "DE",
+            "e1",
+            False,
+        ),
+        (
+            "e2",
+            "eodi",
+            "air",
+            "airport_disruption",
+            "confirmed",
+            "none",
+            "",
+            "PL",
+            "e2",
+            True,
+        ),
+        (
+            "l3",
+            "leiden",
+            "other",
+            "unclassified",
+            "confirmed",
+            "claimed",
+            "IR",
+            "FR",
+            "l3",
+            True,
+        ),
+    ]
+    frame = pd.DataFrame(
+        rows,
+        columns=[
+            "event_id",
+            "source",
+            "domain",
+            "category",
+            "event_status",
+            "attribution",
+            "actors",
+            "countries",
+            "cluster_id",
+            "is_canonical",
+        ],
+    ).assign(n_sources=[2, 2, 1, 1])
+    return with_code_lists(frame)
+
+
+def test_a_cluster_is_returned_as_its_canonical_record(clustered):
+    kept = filter_events(clustered, **CLUSTER_ALL)
+
+    assert list(kept["event_id"]) == ["e1", "e2", "l3"]
+
+
+def test_a_cluster_stays_when_one_source_dismisses_it_and_another_does_not(clustered):
+    confirmed = filter_events(clustered, **(CLUSTER_ALL | {"statuses": ["confirmed"]}))
+    dismissed = filter_events(clustered, **(CLUSTER_ALL | {"statuses": ["dismissed"]}))
+
+    assert list(confirmed["event_id"]) == ["e1", "e2", "l3"]
+    assert list(dismissed["event_id"]) == ["e1"]
+
+
+def test_a_cluster_counts_once_in_each_source_of_its_rows(clustered):
+    leiden = filter_events(clustered, **(CLUSTER_ALL | {"sources": ["leiden"]}))
+    eodi = filter_events(clustered, **(CLUSTER_ALL | {"sources": ["eodi"]}))
+
+    assert list(leiden["event_id"]) == ["e1", "l3"]
+    assert list(eodi["event_id"]) == ["e1", "e2"]
+
+
+def test_a_cluster_counts_once_in_the_domain_of_its_canonical_record(clustered):
+    air = filter_events(clustered, **(CLUSTER_ALL | {"domains": ["air"]}))
+    espionage = filter_events(clustered, **(CLUSTER_ALL | {"domains": ["espionage"]}))
+
+    assert list(air["event_id"]) == ["e1", "e2"]
+    assert espionage.empty
+
+
+def test_the_row_filters_apply_to_one_row_of_the_cluster(clustered):
+    both = CLUSTER_ALL | {"sources": ["leiden"], "statuses": ["dismissed"]}
+
+    assert filter_events(clustered, **both).empty
+
+
+def test_a_table_without_cluster_columns_counts_each_row_once():
+    frame = pd.DataFrame({"event_id": ["a", "b"]})
+
+    result = with_clusters(frame)
+
+    assert list(result["cluster_id"]) == ["a", "b"]
+    assert result["is_canonical"].all()
+    assert (result["n_sources"] == 1).all()

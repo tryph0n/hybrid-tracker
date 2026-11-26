@@ -19,6 +19,17 @@ def with_code_lists(events: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def with_clusters(events: pd.DataFrame) -> pd.DataFrame:
+    """Give each event its own cluster when the table has no cluster columns.
+
+    Versions of the published tables before 2.2.0, and the snapshot that the
+    app bundles, have no `cluster_id`: each row then counts as one incident.
+    """
+    if "cluster_id" in events.columns:
+        return events
+    return events.assign(cluster_id=events["event_id"], n_sources=1, is_canonical=True)
+
+
 def overlaps(codes: pd.Series, selected: Collection[str]) -> pd.Series:
     """True where a list of codes holds at least one selected code."""
     chosen = set(selected)
@@ -36,16 +47,21 @@ def filter_events(
     actors: Collection[str] = (),
     countries: Collection[str] = (),
 ) -> pd.DataFrame:
-    """Keep the events that every filter except the period keeps.
+    """Keep the incidents that every filter except the period keeps.
+
+    An incident is a cluster of rows (see `tracker.dedup`). It is returned as its
+    canonical record. The source, status, attribution, actor and country filters
+    apply to the rows: an incident stays when one row passes all of them, so an
+    incident that one source dismisses stays while another source keeps it. The
+    domain and category filters apply to the canonical record, so the counts by
+    domain add up to the number of incidents.
 
     An empty `actors` or `countries` keeps every event, also the events that name
     no state or no country: attribution is a filter, never an inclusion test.
-    A frame from `with_code_lists` is required.
+    A frame from `with_code_lists` and `with_clusters` is required.
     """
     keep = (
         events["source"].isin(sources)
-        & events["domain"].isin(domains)
-        & events["category"].isin(categories)
         & events["event_status"].isin(statuses)
         & events["attribution"].isin(attributions)
     )
@@ -53,7 +69,12 @@ def filter_events(
         keep &= overlaps(events["actor_codes"], actors)
     if countries:
         keep &= overlaps(events["country_codes"], countries)
-    return events[keep]
+    canonical = events[events["is_canonical"]]
+    return canonical[
+        canonical["cluster_id"].isin(events.loc[keep, "cluster_id"])
+        & canonical["domain"].isin(domains)
+        & canonical["category"].isin(categories)
+    ]
 
 
 def official_by_actor(events: pd.DataFrame) -> dict[str, int]:

@@ -1,0 +1,5 @@
+event_id_a,event_id_b,reason
+eodi:EODI-2025-00077,leiden:3757f59ed926,"Dublin, 1 December 2025. The drones of the visit of the Ukrainian president. The Leiden title names Ireland, not Dublin."
+eodi:EODI-2025-00112,leiden:55e3134992fd,"Vilnius, 4 October 2025. Balloons at the airport. The Leiden title names Lithuania, not Vilnius."
+eodi:EODI-2025-00314,leiden:d8677c266eca,"Kiel, 25 September 2025. Drones over Schleswig-Holstein. The Leiden title names the province, not Kiel."
+eodi:EODI-2025-00069,leiden:c8e2a1d1d2c5,"Brønnøysund, 28 September 2025. The day of the Leiden row. The rule gives the Leiden row to eodi:EODI-2025-00094 (30 September), another incident, because that pair has a higher title score."
