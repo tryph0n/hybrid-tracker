@@ -17,5 +17,6 @@ template
 0001-record-decisions
 0002-schema-v2
 0003-storage
+0005-pages-and-design
 0006-news
 ```
