@@ -430,7 +430,8 @@ def test_the_open_family_gets_the_threat_actors_table_and_the_nc_family_does_not
     assert list(table.columns) == actors.COLUMNS
     assert len(table) == 7
     assert table["actor"].is_unique
-    assert table.set_index("actor").loc["Killnet", "country"] == "RU"
+    assert table.set_index("actor").loc["NoName057(16)", "country"] == "RU"
+    assert pd.isna(table.set_index("actor").loc["Killnet", "country"])
     assert not (out / "nc" / "threat_actors.parquet").exists()
 
 

@@ -10,7 +10,7 @@ import pandas as pd
 
 from tracker.errors import UserError
 
-SCHEMA_VERSION = "2.2.0"
+SCHEMA_VERSION = "2.3.0"
 
 # Column order of the clean and published tables.
 COLUMNS = [

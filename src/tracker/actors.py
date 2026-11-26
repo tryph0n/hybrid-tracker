@@ -121,16 +121,19 @@ class Curation:
     """A line of `curation/actors.csv`."""
 
     actor: str
-    country: str
-    source_url: str
+    country: str | None
+    source_url: str | None
 
 
 def read_curation(path: Path) -> list[Curation]:
     """Read `curation/actors.csv`: the columns `actor`, `country`, `source_url`.
 
+    The country is where the group is based, and `source_url` is a public page
+    whose text says so. A group with no such page keeps an empty country.
+
     Raises:
-        UserError: A column is missing, a value is empty, the country is not
-            an alpha-2 code, the URL is not http(s), or a group is listed twice.
+        UserError: A column is missing, the actor is empty, a country is not
+            an alpha-2 code or has no http(s) URL, or a group is listed twice.
     """
     with path.open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -142,13 +145,18 @@ def read_curation(path: Path) -> list[Curation]:
     for number, row in enumerate(rows, start=2):
         where = f"{path.name} line {number}"
         actor = row["actor"].strip()
+        country = row["country"].strip()
         url = row["source_url"].strip()
-        if not actor or not url.startswith(("http://", "https://")):
-            raise UserError(f"{where}: an actor and an http(s) source_url are needed")
+        if not actor:
+            raise UserError(f"{where}: an actor is needed")
+        if country and not url.startswith(("http://", "https://")):
+            raise UserError(f"{where}: a country needs an http(s) source_url")
         if fold(actor) in seen:
             raise UserError(f"{where}: {actor!r} is listed twice")
         seen.add(fold(actor))
-        lines.append(Curation(actor, alpha2(row["country"].strip(), where), url))
+        lines.append(
+            Curation(actor, alpha2(country, where) if country else None, url or None)
+        )
     return lines
 
 
@@ -207,7 +215,9 @@ def reduce(content: bytes, curation: list[Curation]) -> pd.DataFrame:
         if row is None:
             row = entry_row({"value": line.actor})
             rows.append(row)
-        elif row["country"] is not None:
+        if line.country is None:
+            continue
+        if row["country"] is not None:
             raise UserError(
                 f"{line.actor}: the cluster already gives the country {row['country']}"
             )

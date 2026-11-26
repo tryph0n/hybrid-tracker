@@ -10,7 +10,7 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Added
 
-- Threat-group lookup: the open dataset has a `threat_actors` table (group,
+- Threat-group lookup (schema 2.3.0): the open dataset has a `threat_actors` table (group,
   aliases, country of origin, suspected state sponsor), reduced from the MISP
   galaxy threat-actor cluster at a pinned commit. `curation/actors.csv` adds the
   groups that the cluster leaves without a country. A name that two groups

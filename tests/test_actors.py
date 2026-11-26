@@ -171,25 +171,28 @@ def test_the_cluster_must_have_unique_group_names():
         actors.reduce(cluster(entry("Alpha"), entry("Alpha")), [])
 
 
-def test_the_curation_file_has_the_two_hacktivist_fronts_with_a_source():
+def test_the_curation_file_gives_a_source_to_each_country_and_leaves_killnet_empty():
     lines = {line.actor: line for line in actors.read_curation(CURATION)}
 
-    for name in ("NoName057(16)", "Killnet"):
-        assert lines[name].country == "RU"
-        assert lines[name].source_url.startswith("https://")
+    assert lines["NoName057(16)"].country == "RU"
+    assert lines["NoName057(16)"].source_url.startswith("https://")
+    assert lines["Killnet"].country is None
+    assert lines["Killnet"].source_url is None
 
 
-def test_the_curation_gives_a_country_to_a_group_that_has_none(table, lookup):
+def test_the_curation_gives_a_country_only_where_a_source_states_it(table, lookup):
     rows = table.set_index("actor")
 
-    for name in ("NoName057(16)", "Killnet"):
-        assert rows.loc[name, "country"] == "RU"
-        assert rows.loc[name, "country_source"] == actors.FROM_CURATION
-        assert rows.loc[name, "source_url"].startswith("https://")
+    assert rows.loc["NoName057(16)", "country"] == "RU"
+    assert rows.loc["NoName057(16)", "country_source"] == actors.FROM_CURATION
+    assert rows.loc["NoName057(16)", "source_url"].startswith("https://")
+    assert pd.isna(rows.loc["Killnet", "country"])
+    assert pd.isna(rows.loc["Killnet", "country_source"])
+    assert pd.isna(rows.loc["Killnet", "source_url"])
     assert rows.loc["APT28", "country_source"] == actors.FROM_CLUSTER
     assert pd.isna(rows.loc["APT28", "source_url"])
     assert lookup.state("NoName05716") == "RU"
-    assert lookup.state("killnet") == "RU"
+    assert lookup.state("killnet") is None
 
 
 def test_the_curation_adds_a_group_that_the_cluster_lacks():
@@ -220,12 +223,27 @@ def test_the_curation_does_not_change_a_country_that_the_cluster_gives():
         "Alpha,ru,https://example.org/x",
     ],
 )
-def test_a_curation_line_needs_an_actor_a_valid_country_and_a_source_url(tmp_path, row):
+def test_a_curation_line_needs_an_actor_and_a_valid_country_with_a_source_url(
+    tmp_path, row
+):
     path = tmp_path / "actors.csv"
     path.write_text(f"actor,country,source_url\n{row}\n", encoding="utf-8")
 
     with pytest.raises(UserError):
         actors.read_curation(path)
+
+
+def test_a_curation_line_without_country_keeps_the_group_with_no_country(tmp_path):
+    path = tmp_path / "actors.csv"
+    path.write_text("actor,country,source_url\nAlpha,,\n", encoding="utf-8")
+
+    lines = actors.read_curation(path)
+    table = actors.reduce(cluster(entry("Beta")), lines)
+
+    rows = table.set_index("actor")
+    assert list(rows.index) == ["Alpha", "Beta"]
+    assert pd.isna(rows.loc["Alpha", "country"])
+    assert pd.isna(rows.loc["Alpha", "country_source"])
 
 
 def test_a_group_listed_twice_in_the_curation_is_refused(tmp_path):
