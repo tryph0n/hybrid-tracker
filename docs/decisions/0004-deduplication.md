@@ -41,9 +41,9 @@ commit `cbad1cd`):
 ## Decision
 
 We compare pairs of rows from different sources. A pair matches when it is a
-candidate and its rows are close. Matched pairs make clusters, and a fixed
-source order picks the canonical record of each cluster. A cluster counts as
-one incident.
+candidate and its rows are close. Two curation files correct the matched pairs
+that the rule gets wrong. Matched pairs make clusters, and a fixed source order
+picks the canonical record of each cluster. A cluster counts as one incident.
 
 ### Date rule
 
@@ -83,11 +83,24 @@ A pair is a candidate when its two rows:
 
 - come from different sources,
 - share at least one country of `countries`,
-- have the same `domain`,
 - and have dates that match under the date rule.
 
-Reason: one country in one month has incidents of different kinds, for example
-a disinformation campaign and a drone flight. The domain keeps them apart.
+The domain is not a condition. Reasons:
+
+- The sources give different domains to one incident. EODI records all its
+  rows in `air`. Leiden records some drone flights with the `EventCategory`
+  "Reconnaissance" or "Unknown", which the adapter maps to `espionage` or
+  `other`. With a domain condition, 8 of the 22 matches of the sample are not
+  candidates, and each of these incidents counts twice: once in `air` and once
+  in `espionage` or `other`.
+- One country in one month has incidents of different kinds, for example a
+  disinformation campaign and a drone flight. The match rule keeps them apart.
+  On the data at commit `cbad1cd`, the candidates go from 113 to 318 with no
+  domain condition, and the matched pairs go from 22 to 30. All 30 matched
+  pairs are in the sample. Each of the 8 new matched pairs has an EODI row and
+  a Leiden row about drones at a Belgian military base, and the Leiden row has
+  the `EventCategory` "Reconnaissance" (7 pairs) or "Unknown" (1 pair). 7 of
+  them are `match`, and 1 is `no_match` (a later night at the same base).
 
 ### Match rule
 
@@ -117,36 +130,87 @@ or sea names is never similar. Reasons:
   Gothenburg (78). At 85, the rule loses three matches, two with Munich and
   one with Gothenburg, and one false match, Munich on 18 October.
 
-Titles: the titles are similar when their token-set ratio is at least 40 out of
-100. Reasons:
+The place rule cannot read a negation. `leiden:9a23b38abc09` says "Drones
+spotted over Luik (BUT NOT BRUSSELS, see VRT NEWS) airport", and the rule
+finds Brussels in this title. The splits of the curation remove these pairs.
 
-- On the sample, the lowest title score of a match with a similar place is 45.
+Titles: the titles are similar when their token-set ratio is at least 40 out of
+100. The numbers below count pairs (see the units in "Measures and targets").
+Reasons:
+
+- On the sample, the lowest title score of a match with a similar place is 49.
   The threshold 40 keeps a margin.
 - A higher threshold removes false matches and true matches. At 60, the false
-  matches go from 9 to 2 and the true matches from 13 to 7 (precision 0.78,
-  recall 0.27). At 70, the precision is 0.80 and the recall 0.15. At any
-  threshold, the precision is at most 0.83 and the recall at most 0.50, so no
-  threshold reaches the targets. Of the candidates with a similar place, the
-  pair with the highest title score is a false match: `eodi:EODI-2025-00094`
-  (Brønnøysund on 30 September) scores 80 against the Leiden row of
-  28 September.
+  matches go from 11 to 3 and the true matches from 19 to 13 (precision 0.81,
+  recall 0.59). At 70, the precision is 0.91 and the recall 0.45. A precision
+  of 0.95 or more needs a threshold of 81 or more, and then the recall is
+  at most 0.18. At a threshold that gives a recall of 0.80 or more, the
+  precision is 0.73 or less. A false match can have a high title score:
+  `eodi:EODI-2025-00094` (Brønnøysund on 30 September) scores 80 against
+  the Leiden row of 28 September, and only 4 of the 19 true matches score
+  more.
 
 The trial measure below used RapidFuzz 3.14: `fuzz.token_set_ratio` for the
-titles and `fuzz.ratio` for the words.
+titles and `fuzz.ratio` for the words. RapidFuzz is not a dependency of the
+project yet. The clusters ticket (#94) adds it.
+
+### Curation
+
+The clusters ticket (#94) adds two files: `curation/merges.csv` and
+`curation/splits.csv`. Each line names an EODI row and a Leiden row, and gives
+the reason. A split removes the pair from the matched pairs. A merge adds the
+pair to the matched pairs, and it joins clusters before the pairs of the rule
+(see "Clusters").
+
+| File | EODI row | Leiden row | Reason |
+| --- | --- | --- | --- |
+| Splits | `eodi:EODI-2025-00072` (Brussels, 4 November 2025) | `leiden:9a23b38abc09` | The Leiden title says "BUT NOT BRUSSELS". |
+| Splits | `eodi:EODI-2025-00335` (Brussels, 6 November 2025) | `leiden:9a23b38abc09` | The same. |
+| Merges | `eodi:EODI-2025-00077` (Dublin, 1 December 2025) | `leiden:3757f59ed926` | The drones of the visit of the Ukrainian president. The Leiden title names Ireland, not Dublin. |
+| Merges | `eodi:EODI-2025-00112` (Vilnius, 4 October 2025) | `leiden:55e3134992fd` | Balloons at the airport. The Leiden title names Lithuania, not Vilnius. |
+| Merges | `eodi:EODI-2025-00314` (Kiel, 25 September 2025) | `leiden:d8677c266eca` | Drones over Schleswig-Holstein. The Leiden title names the province, not Kiel. |
+| Merges | `eodi:EODI-2025-00069` (Brønnøysund, 28 September 2025) | `leiden:c8e2a1d1d2c5` | The day of the Leiden row. The rule gives the Leiden row to `eodi:EODI-2025-00094` (30 September), another incident, because that pair has a higher title score. |
+
+The files do not hold these pairs:
+
+- `eodi:EODI-2025-00005` and `leiden:018349739d34` (`unsure`). The EODI row
+  can be a copy of `eodi:EODI-2025-00335` in EODI. The ticket for duplicates
+  in one source (#147) decides it.
+- `eodi:EODI-2025-00309` (Skrydstrup) and `leiden:eddd659ee167` (`no_match`).
+  The news puts the Skrydstrup sightings on another night. The rule joins the
+  Leiden row to `eodi:EODI-2025-00015` (Karup), the incident of its night.
+
+Reason: on the sample, the rule alone gets some pairs wrong, and no threshold
+fixes them (see "Measures and targets"). The curation files keep the decision
+of a person and its reason in the data, and the rule stays the same.
 
 ### Clusters
 
-A cluster holds at most one row of each source. The matched pairs join clusters
-in the order of their title score, highest first. On a tie, the pair with the
-smaller date gap comes first, then the pair with the smaller `event_id`. A pair
-joins the clusters of its two rows only when, after the join, no source has
-two rows in the cluster.
+A cluster holds at most one row of each source. The merges of the curation
+join clusters first. Then the matched pairs of the rule join clusters in the
+order of their title score, highest first. On a tie, the pair with the smaller
+date gap comes first, then the pair with the smaller `event_id`. A pair joins
+the clusters of its two rows only when, after the join, no source has two rows
+in the cluster.
 
-Reason: one Leiden row can name several incidents that EODI records one by one
-(see the facts). If all matched pairs joined, the five EODI rows of the Danish
-airports would make one cluster, and the count would go down. With one row of
-each source, two rows of one source never join. A false match can put a Leiden
-row in the wrong cluster, but it cannot merge two EODI incidents.
+Reasons:
+
+- One Leiden row can name several incidents that EODI records one by one (see
+  the facts). If all matched pairs joined, the five EODI rows of the Danish
+  airports would make one cluster, and the count would go down. With one row
+  of each source, two rows of one source never join. A false match can put a
+  Leiden row in the wrong cluster, but it cannot merge two EODI incidents.
+- A pair of the rule can take the place of a source in a cluster before a
+  merge. The rule pair of `leiden:c8e2a1d1d2c5` and `eodi:EODI-2025-00094`
+  scores 80, and the merged pair with `eodi:EODI-2025-00069` scores 56. If the
+  merge came after the rule, the cluster rule would refuse it. With the merges
+  first, no split is necessary for the pair with `eodi:EODI-2025-00094`.
+
+The cluster view shows the date, the place and the domain of each row of
+the cluster, not only those of the canonical record.
+Reason: the rows of one cluster can differ. For example,
+`leiden:be7d76769768` names five airports, and its canonical record
+`eodi:EODI-2025-00459` names three of them.
 
 ### Source order
 
@@ -158,60 +222,109 @@ Reason: the canonical record gives the date and the place of the incident.
 EODI gives a day for each row, and coordinates for 365 of its 431 rows. Leiden
 gives a month (one row: a year) and a country or a sea, and no coordinates.
 
+### Counts
+
+- A cluster counts once, in the domain of its canonical record. The other rows
+  of the cluster keep their own domain, and the cluster view shows it. With
+  this rule, the counts by domain add up to the number of incidents. On the
+  data at commit `cbad1cd`, with the curation, `espionage` goes from 17 rows
+  to 14 incidents and `other` from 9 rows to 8 incidents, because 3
+  "Reconnaissance" rows and 1 "Unknown" row of Leiden join EODI rows in `air`.
+- A cluster stays in the default view when one of its rows is not
+  `dismissed`. Reason: the default status filter hides `dismissed` rows. EODI
+  marks `eodi:EODI-2025-00112` (Vilnius) `dismissed`, and Leiden records the
+  same incident (`leiden:55e3134992fd`). If the status of the canonical record
+  decided, the default view would hide an incident that one source records.
+- On the data at commit `cbad1cd`, with the curation, the 577 rows make 566
+  clusters. The default view shows 570 rows and 560 clusters (559 if the
+  status of the canonical record decided).
+
 ### Labelled sample
 
 `tests/fixtures/dedup_pairs.csv` holds 130 pairs from the late-2025 overlap:
 EODI rows from 31 August 2025 to 1 January 2026, and Leiden rows that end on or
 after 1 September 2025. The columns are `event_id_a` (the EODI row),
-`event_id_b` (the Leiden row), `label` (`match` or `no_match`) and `note`. The
-labels come from the content of the rows: titles, places, dates, domains and
-links. A note that starts with "Unsure" marks a label that the rows do not
-settle (8 pairs). The Leiden adapter makes each id from a hash of the year,
-the month, and the `What` and `Where` text (`event_ids` in
-`src/tracker/leiden.py`), so an upstream edit of that text changes the id with
-no error: the measure in #94 must fail when a pair names an `event_id` that is
-not in the data.
+`event_id_b` (the Leiden row), `label` (`match`, `no_match` or `unsure`) and
+`note`.
 
-| Pairs | Total | `match` | `no_match` |
-| --- | --- | --- | --- |
-| Candidates | 83 | 17 | 66 |
-| Other domain, dates match | 30 | 9 | 21 |
-| Same domain, other dates | 10 | 0 | 10 |
-| Other domain, other dates | 7 | 0 | 7 |
-| All | 130 | 26 | 104 |
+A pair is a `match` when its two rows record the same site on the same night
+that the source of the Leiden row covers. The next night of a wave at the same
+site is another incident. The labels come from the content of the rows:
+titles, places, dates, domains and links. When the rows do not tell the night
+or the site, news reports decide the label, and the note names the report and
+gives its link (4 pairs).
 
-All 26 matches have dates that match under the date rule.
+A pair is `unsure` when the rows and the news do not settle it. Its note starts
+with "Unsure", and the measures leave it out (1 pair). On a `match` or
+`no_match` pair, a note that starts with "Unsure" marks a label that the rows
+do not settle (5 pairs).
 
-### Targets
+The Leiden adapter makes each id from a hash of the year, the month, and the
+`What` and `Where` text (`event_ids` in `src/tracker/leiden.py`), so an
+upstream edit of that text changes the id with no error: the measure in #94
+must fail when a pair of the sample or a line of the curation files names an
+`event_id` that is not in the data.
 
-On the sample, counted by pairs: precision at least 0.95 and recall at least
-0.80. These are objectives. The clusters and canonical records ticket (#94)
-measures them on its code.
-
-Trial measure on the sample. The same sample set the thresholds, so the
-numbers are a best case.
-
-| Rule | Pairs that match | True matches | Precision | Recall |
+| Pairs | Total | `match` | `no_match` | `unsure` |
 | --- | --- | --- | --- | --- |
-| This record | 22 | 13 | 0.59 | 0.50 |
-| All candidates match | 83 | 17 | 0.20 | 0.65 |
-| This record with no domain condition | 30 | 21 | 0.70 | 0.81 |
+| Candidates, same domain | 83 | 14 | 68 | 1 |
+| Candidates, other domain | 30 | 8 | 22 | 0 |
+| Dates that do not match | 17 | 0 | 17 | 0 |
+| All | 130 | 22 | 107 | 1 |
 
-The rules of this record do not reach the targets on the sample:
+All 22 matches have dates that match under the date rule.
 
-- Recall: the domain condition removes 9 of the 26 matches. In these 9 pairs,
-  the EODI row is in `air`, and the Leiden row has the `EventCategory`
-  "Reconnaissance" (8 pairs) or "Unknown" (1 pair), which the adapter maps to
-  `espionage` or `other`. So the candidates hold at most 0.65 of the matches.
-  The place rule misses 4 more: the Leiden title does not name the place
-  (Dublin, Vilnius, Skrydstrup), or the EODI place is not the airport of its
-  title (`eodi:EODI-2025-00005` is at Charleroi, and its title names
-  Brussels).
-- Precision: 7 of the 9 false matches are another incident at the same site
-  in the same month, for example Liège on 8 and 9 November 2025, and
-  Brønnøysund and Bardufoss on 30 September 2025. A `month` date cannot tell
-  them apart. In the 2 other false matches, the Leiden row names Brussels to
-  exclude it ("BUT NOT BRUSSELS").
+### Measures and targets
+
+The measures use two units:
+
+- By pairs, before clusters. Each labelled pair is one unit, and the pairs
+  labelled `unsure` are out. A pair is matched when the match rule accepts it.
+  The precision is the number of matched pairs labelled `match`, divided by
+  the number of matched pairs. The recall is the number of matched pairs
+  labelled `match`, divided by the number of pairs labelled `match`.
+- By Leiden rows, after clusters. Each Leiden row of the sample is one unit
+  (23 rows). A Leiden row is joined when its cluster holds an EODI row, and
+  the join is right when the sample labels this pair `match`. The precision is
+  the number of right joins, divided by the number of joined Leiden rows. The
+  recall is the number of right joins, divided by the number of Leiden rows
+  that have at least one pair labelled `match` (11 rows). This unit gives the
+  count of incidents.
+
+Targets: after the curation, by Leiden rows, precision at least 0.95 and
+recall at least 0.80. The clusters and canonical records ticket (#94) measures
+them on its code.
+
+Floor: the test of #94 prints the precision and the recall of the rule alone,
+by pairs, and fails when one of them is less than the floor: precision 0.63
+(19 of 30) and recall 0.86 (19 of 22). Reason: the targets apply after the
+curation, so a change that makes the rule worse can pass the targets. The
+floor finds it. When the labels change, measure the floor again and change it
+in this record.
+
+Trial measure on the sample, on the data at commit `cbad1cd`. The same sample
+set the thresholds and the curation, so the numbers are a best case.
+
+| Rule | Unit | Matched | Right | Precision | Recall |
+| --- | --- | --- | --- | --- | --- |
+| This record: rule alone | Pairs | 30 | 19 | 0.63 | 0.86 |
+| This record: rule and curation | Leiden rows | 11 | 11 | 1.00 | 1.00 |
+| Rule alone | Leiden rows | 9 | 7 | 0.78 | 0.64 |
+| Rule with a domain condition | Pairs | 22 | 12 | 0.55 | 0.55 |
+| All candidates match | Pairs | 112 | 22 | 0.20 | 1.00 |
+
+The rule alone does not reach the targets:
+
+- Recall: the place rule misses 3 matches, because the Leiden title does not
+  name the EODI place: Dublin, Vilnius and Kiel. The merges add them.
+- Precision: 9 of the 11 false matches are another incident at a site that the
+  Leiden row names, in the same month. Examples: Liège on 8 and 9 November
+  2025, Brønnøysund and Bardufoss on 30 September 2025, and Aalborg and
+  Kleine Brogel on the next night of a wave. A `month` date cannot tell them
+  apart. In the 2 other false matches, the Leiden row names Brussels to
+  exclude it. The splits remove these 2. After the merges, each Leiden row
+  with one of the 9 false matches joins an EODI row that the sample labels
+  `match`, so these false matches do not change the count.
 
 ## Alternatives rejected
 
@@ -228,31 +341,40 @@ The rules of this record do not reach the targets on the sample:
 - Join all matched pairs into clusters. A Leiden row that names five airports
   would merge five EODI incidents into one.
 - A title score with no place. Titles of other incidents in one country and
-  one month score as high as true matches. On the sample, at the threshold
-  that keeps half of the matches (55), 12 false matches come with 13 true
-  matches.
+  one month score as high as true matches. On the sample, a title score of at
+  least 53 keeps 20 of the 22 matches, with 25 false matches. The place and
+  title rule keeps 19 matches, with 11 false matches.
+- A domain condition on the candidates. 8 of the 22 matches are not
+  candidates, the recall by pairs goes down to 0.55, and an incident that the
+  two sources record in different domains counts twice.
 
 ## Consequences
 
-- The clusters and canonical records ticket (#94) applies these rules and
-  measures the targets on this sample.
-- The domain condition keeps the recall under the target. Review it before #94
-  closes. With no domain condition, the trial recall is 0.81 and the precision
-  0.70.
-- The precision stays under the target while a source has `month` dates only.
-  The cluster rule limits the effect: a false match moves a Leiden row to
-  another cluster, and it lowers the count only when the Leiden row has no
-  true match.
+- The clusters and canonical records ticket (#94) applies these rules, adds
+  the curation files, and measures this sample with both units.
+- The rule alone stays under the targets while a source has `month` dates
+  only. The curation files fix the pairs of the sample only, so the rule can
+  get a new row wrong with no failed test.
+- No pair in the sample tests two rows of different kinds, for example a
+  disinformation campaign and a drone flight, that the match rule accepts.
+  With no domain condition, such a pair makes one cluster. On the data at
+  commit `cbad1cd`, no such pair matches (see "Candidate pairs"). Look at the
+  matched pairs of different domains when a source is added.
 - No pair in the sample tests the distance rule or the `year` rule. 14 pairs
   have an EODI row with an `approximate` date, and 2 of them are matches. An
   interval wider than the day changes one of these pairs only from 4 days on
   each side of the date (see the date rule). Three pairs match on the date
   only through the margin of one day, and all three are `no_match`: on the
-  sample, the margin adds 2 candidates and no match. Review these rules when a
+  sample, the margin adds 3 candidates and no match. Review these rules when a
   second source with coordinates or day dates arrives.
-- This record does not cover duplicates in one source. EODI has some: for
-  example, `eodi:EODI-2025-00005` and `eodi:EODI-2025-00335` both record a
-  closure of Brussels Airport on 6 November 2025. A rule for them needs its
-  own sample.
+- 36 EODI rows have no coordinates and a place of country or sea names only
+  (30 name a country, 6 a sea and a country). The match rule can never join
+  them to a Leiden row: there is no distance, and no place word. Only a merge
+  can join them.
+- This record does not cover duplicates in one source (#147). EODI has some:
+  for example, `eodi:EODI-2025-00005` and `eodi:EODI-2025-00335` both record
+  a closure of Brussels Airport on 6 November 2025. Until #147 is done, the
+  counts are de-duplicated across sources only. The README text that #94
+  writes says "de-duplicated across sources only" and links to #147.
 - The sample covers one period and two sources. Extend it when a source is
   added.
