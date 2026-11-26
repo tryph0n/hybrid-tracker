@@ -95,7 +95,7 @@ eodi:EODI-2025-00099,leiden:43ab1de44e6f,no_match,"A flying object over Vilnius 
 eodi:EODI-2025-00131,leiden:2b17621a2c51,match,"Kleine Brogel air base on 1 November, inside the three days that the Leiden row records as one incident. Other domain: Leiden codes it as reconnaissance."
 eodi:EODI-2025-00344,leiden:2b17621a2c51,match,"Kleine Brogel on 1 November, inside the three days of the Leiden row. Other domain."
 eodi:EODI-2025-00080,leiden:2b17621a2c51,match,"Kleine Brogel on 2 November, inside the three days of the Leiden row. Other domain."
-eodi:EODI-2025-00445,leiden:2b17621a2c51,match,"Kleine Brogel on 3 November, inside the three days of the Leiden row. Other domain."
+eodi:EODI-2025-00445,leiden:2b17621a2c51,match,"Kleine Brogel on 3 November in the EODI row, inside the span of 1 to 3 November that the Leiden row gives. Other domain. The news has no sighting on 3 November; the label follows the dates of the two rows."
 eodi:EODI-2025-00446,leiden:2b17621a2c51,no_match,"Kleine Brogel on the evening of 4 November, a later night than the series of the Leiden row. VRT NWS reports six drones at about 18:30 on 4 November (5 November 2025, https://www.vrt.be/vrtnws/en/2025/11/05/air-traffic-halted-last-night-due-to-drones-at-brussels-airport.consumer/). The news gives the first series as three nights from 31 October to 2 November, and no sighting on 3 November."
 eodi:EODI-2025-00016,leiden:2b17621a2c51,no_match,"Schaffen military base, not Kleine Brogel. Other domain."
 eodi:EODI-2025-00248,leiden:2b17621a2c51,no_match,"Mechelen industrial area, not Kleine Brogel. Other domain."

@@ -342,7 +342,7 @@ The rule alone does not reach the targets:
   would merge five EODI incidents into one.
 - A title score with no place. Titles of other incidents in one country and
   one month score as high as true matches. On the sample, a title score of at
-  least 53 keeps 20 of the 22 matches, with 25 false matches. The place and
+  least 52 keeps 21 of the 22 matches, with 25 false matches. The place and
   title rule keeps 19 matches, with 11 false matches.
 - A domain condition on the candidates. 8 of the 22 matches are not
   candidates, the recall by pairs goes down to 0.55, and an incident that the
