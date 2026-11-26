@@ -48,8 +48,8 @@ The data has a version, 2.1.0 today. The first version (1.0.0) used other
 column names. It stays readable at the tag `v1.0.0` of the dataset, for example
 `pd.read_csv("hf://datasets/sam-bot/europe-hybrid-incidents@v1.0.0/eodi.csv")`.
 See the
-[`Versions` section](https://github.com/tryph0n/hybrid-tracker/blob/main/data/events/README.md#versions)
-of the dataset card for the mapping.
+[`Versions` section](https://github.com/tryph0n/hybrid-tracker/blob/main/cards/versions-open.md)
+of the dataset card (its source is `cards/versions-open.md`) for the mapping.
 
 The dashboard hides `dismissed` events by default: add "Dismissed by the
 source" to the Event status filter to show them. The Sources table counts all
@@ -112,3 +112,13 @@ must credit the original sources:
   incidents in Europe. CC BY 4.0.
 - Bart Schuurman, Russian Operations Against Europe Dataset, 2022-2025, Harvard
   Dataverse, V4. CC BY 4.0.
+
+Approximate coordinates: an event that has a place and no coordinates gets those of
+the town of that name in its country, with `geo_precision` `place`. The town
+centre comes from GeoNames, which is not an event source. Changes: the file is
+filtered to populated places with at least 500 inhabitants (`cities500`), and
+matched to events by name and country. Reuse must credit it:
+
+- GeoNames, https://www.geonames.org: place names and coordinates, filtered to
+  populated places. Provided as is, without warranty. CC BY 4.0
+  ([licence](https://creativecommons.org/licenses/by/4.0/)).

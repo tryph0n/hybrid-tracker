@@ -47,30 +47,113 @@ A source is live or static (`Source.kind` in `src/tracker/sources.py`).
 - A live source is fetched in full at each run and replaces the stored file.
   The pipeline refreshes it each day.
 - A static source is a frozen historical snapshot, pinned to one upstream file
-  version. You re-ingest it by hand.
+  version. You re-ingest it by hand. The pipeline runs
+  `tracker ingest static --if-missing` before the build: it downloads only a
+  static source that has no clean table in the raw store, so a new or reset
+  store gets them with no manual step.
 
-Each source is stored as `data/events/<name>.csv`. Commands, from the
-repository root:
+Each source goes through two steps. `extract()` downloads the files and saves
+them, as served, in the raw store with a manifest line each. `normalize()` maps
+the stored payloads to the unified schema and uses no network, so a mapping fix
+can be replayed on the stored payloads. The clean table is written to the raw
+store as `clean/<name>.parquet` (private) and, until the data leaves git, to
+`data/events/<name>.csv`.
+
+The commands need a raw store. Set `TRACKER_STORE=local` and
+`TRACKER_STORE_DIR=<folder>` to work on a local folder, or `TRACKER_STORE=hf`
+for the private dataset (see `src/tracker/store.py`). From the repository
+root:
 
 ```bash
-uv run python -m tracker.ingest live      # every live source
-uv run python -m tracker.ingest static    # every static source
-uv run python -m tracker.ingest <name>    # one source, for example eodi
-uv run python -m tracker.ingest check     # validate the stored files, no network
+export TRACKER_STORE=local TRACKER_STORE_DIR=/tmp/raw-store
+uv run tracker ingest live      # every live source
+uv run tracker ingest static    # every static source
+uv run tracker ingest static --if-missing # only the ones with no clean table
+uv run tracker ingest <name>    # one source, for example eodi
+uv run tracker ingest geonames  # the GeoNames file (reference data), by hand
+uv run tracker ingest check     # validate the stored files, no network, no store
+uv run tracker rebuild [<name>] # clean tables again from the stored payloads, no download
+uv run tracker build [--out build] # published tables of each licence family
+uv run tracker quality [--out build] # quality table and run summary
 ```
 
-`ingest` validates the events before it writes the file. It rejects a refresh
-that loses more than 5% of the stored events (`MAX_SHRINK` in
-`src/tracker/ingest.py`): an upstream outage is more likely than a real
-correction. An unknown upstream label also stops the ingest, in the adapter or
-in `validate`.
-If the drop is a real correction, delete `data/events/<name>.csv`, run
-`uv run python -m tracker.ingest <name>`, read the diff and commit.
+`ingest` saves the payloads first, so a payload that fails to map stays in the
+raw store. It validates the events before it writes the clean table and the
+CSV file. It rejects a refresh that loses more than 5% of the stored events
+(`MAX_SHRINK` in `src/tracker/ingest.py`): an upstream outage is more likely
+than a real correction. The guard compares with the clean table of the raw
+store, or with the CSV file while a source has no clean table. An unknown
+upstream label also stops the ingest, in the adapter or in `validate`.
+If the drop is a real correction, delete `data/events/<name>.csv` and
+`clean/<name>.parquet` in the raw store, run `uv run tracker ingest <name>`,
+read the diff and commit.
+
+To apply a mapping fix, use `uv run tracker rebuild` (every source) or
+`uv run tracker rebuild <name>`. It reads the latest stored payload of each
+file, runs `normalize()`, validates, and writes the clean table and the CSV
+file. It downloads nothing, so the diff shows the fix and no upstream change.
+With the local store it makes no network call; with the Hugging Face store
+each read is a network call to the dataset. It applies the same checks as
+`ingest`: nothing is written for a source that fails `validate` or loses more
+than 5% of its stored events. If a fix drops rows on purpose, add
+`--allow-shrink`; the log then holds a warning that the guard was skipped. A
+source with no stored payload (today `leiden`, which is ingested by hand) is
+skipped with a warning when you rebuild every source, and is an error when you
+name it. A rebuild from an older payload is not available.
+
+`uv run tracker build` reads the clean tables of the raw store, runs the files
+of `sql/` in name order with DuckDB (in memory), and writes `events.parquet`,
+`events.csv` and `sources.parquet` to `build/open/` and `build/nc/`. The
+`open` family holds the rows of `open` sources. The `nc` family holds the rows
+of both families, because a NonCommercial source cannot be merged into a CC BY
+table. The SQL files must create `events_<family>` and `sources_<family>`.
+Before it writes anything, the command fails if a published table has another
+row count for a source than its clean table (the message names the source),
+or if an output breaks the schema (column types, then `validate`). The output
+is sorted by `source, event_id`, so the same input gives the same bytes. A
+Parquet file holds the DuckDB version: after an upgrade, compare contents, not
+hashes. The data job runs the command after the refresh, on a scheduled or
+manual run.
+
+The build also gives approximate coordinates (`sql/02_geocode.sql`). An event
+that has a place and a single country but no coordinates, and whose
+`geo_precision` is `place`, gets the coordinates of the GeoNames town of that
+name in that country. The end of the place after the last comma ("Name,
+Country") is dropped, and names are compared in lower case and without
+diacritics. A country, a sea, a coast or a region is not in the file, so it
+stays empty. Coordinates that a source gives are never changed: the build fails
+if one changes, or if a row gains coordinates with another precision than
+`place`. When several towns share a name in a country, the first of this order
+is taken: a match on the name before one on an alternate name, the larger
+population, the feature code (`PPLC`, `PPLA`, `PPLA2` to `PPLA5`, then `PPL`),
+the smaller GeoNames id. Sections of a town, abandoned, historical and
+destroyed places are left out (`tracker.geonames`). GeoNames regenerates the
+file every day and keeps no version, so `tracker ingest geonames` keeps each
+download in the raw store with its SHA-256 and its date (in the manifest), and
+the build reads the latest one and logs its digest and date. The data job
+downloads the file when the store has none (`ingest static --if-missing`); to
+refresh it, run `uv run tracker ingest geonames` by hand. GeoNames is in
+`REFERENCES` of `src/tracker/sources.py`, not in `SOURCES`: it has no events, no
+clean table and no row in the Sources table.
+
+`uv run tracker quality` runs after the build. It adds one row per source to
+the quality table: rows, rows added and removed since the previous run (by
+`event_id`), the share of empty values in the key columns (the required columns,
+`lat`, `lon`, and `actors` on the rows whose attribution is not `none`), the
+latest event date and the time of the last successful fetch from the manifest.
+The master copy is `quality/quality.parquet` in the raw store, with the event
+ids of the last run in `quality/event_ids.parquet`. Each run appends its rows.
+The command also writes `quality.parquet` to `build/open/` and `build/nc/` (the
+rows of the sources of that family), and appends the rows of the run to the
+run summary on GitHub, with the number of events with attribution `none` and
+how many are new. It fails, after it writes these, when a source has no row or
+when a live source has no successful fetch for more than three days. A static
+source skips the three-day rule.
 
 When a new version of a static source is published, follow the docstring of
 its module (`src/tracker/leiden.py`). For the Leiden dataset:
 
-1. Run `uv run python -m tracker.ingest leiden`. It reads the latest version
+1. Run `uv run tracker ingest leiden`. It reads the latest version
    from Harvard Dataverse and stops, with a message, when the licence is not
    "CC BY 4.0" or when the version is not `PINNED_VERSION`. Do not go on if
    the licence changed: the stored data is published under CC BY 4.0.
@@ -79,23 +162,34 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    purpose.
 3. Set `PINNED_VERSION` in `src/tracker/leiden.py` and run the ingest again.
 4. Read the diff of the CSV, then update the version in the `citation` of
-   `src/tracker/sources.py`, in the README credits and in the dataset card
-   (`data/events/README.md`). If the years change, also update the `title` and
-   the README source table, and the version in the docstring of the module.
+   `src/tracker/sources.py` and in the README credits. The dataset cards take
+   the citation from the registry. If the years change, also update the `title`
+   and the README source table, and the version in the docstring of the module.
 
 ## Add a source
 
-1. Check the licence. It must allow redistribution under CC BY 4.0, because
-   the stored data is published under CC BY 4.0. Write down the citation.
-2. Write `src/tracker/<name>.py`. It defines `fetch()`, which returns a
-   DataFrame in the columns of `tracker.schema.COLUMNS`. Put the mapping in a
-   `normalize()` function, so tests can run it without network. An unknown
+1. Check the licence. It must allow redistribution under CC BY 4.0 (family
+   `open`) or CC BY-NC 4.0 (family `nc`), because
+   the published data of each family carries its licence. Write down the
+   citation, the licence and the page that states it.
+   Add no adapter for a source that `docs/sources.md` does not list as
+   usable. Usable means "Use now", or "Ask first" with a yes in
+   `docs/permissions.md`: no source is collected without a recorded licence,
+   and an "Ask first" source waits for a written yes. Record the source in
+   `docs/sources.md` first.
+2. Write `src/tracker/<name>.py`. It defines `extract()`, which only downloads
+   and returns a list of `tracker.store.Payload` (file name, bytes as served,
+   URL, HTTP status), and `normalize(files)`, which takes a mapping of file
+   name to bytes and returns a DataFrame in the columns of
+   `tracker.schema.COLUMNS`. `normalize()` must not use the network: a test runs
+   it on recorded files with sockets disabled. An unknown
    upstream label must stop the ingest: raise, or leave the cell empty so that
    `validate` rejects it. Start the module docstring with `<Title> - <kind>
    source.`: the architecture page shows that first line. Use the existing
    adapters as examples.
 3. Import the module in `src/tracker/sources.py` and add a `Source` entry:
-   title, `kind`, homepage, licence, citation, `fetch`. The key is lowercase.
+   title, `kind`, homepage, licence, `licence_page`, `family` (`open` or `nc`), citation,
+   `extract`, `normalize`. The key is lowercase.
    It is the CSV name, the `source` value, the prefix of `event_id`
    (`<name>:<id>`) and the ingest target. Do not use `check`, `live` or
    `static`.
@@ -107,7 +201,7 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    colour-blind check again). For a status or attribution value, also update
    the list in `README.md`, "Reading the data".
 6. If the source needs a secret, export it locally first. Run
-   `uv run python -m tracker.ingest <name>`, then `uv run python -m tracker.ingest check`.
+   `uv run tracker ingest <name>`, then `uv run tracker ingest check`.
    Commit `data/events/<name>.csv`.
 7. Add `tests/fixtures/events/<name>.csv`: a few rows in the stored format. Add
    `tests/test_<name>.py` with a recorded upstream sample in
@@ -115,11 +209,12 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    label.
 8. Credit the source in `README.md`: a row in the source table, with the
    homepage, and a line in "Licence and credits", with the citation and the
-   licence. Add the citation and the homepage to the dataset card,
-   `data/events/README.md`. If the scope grows, update the intro of the card.
-   If its events start before 2022, also update "since 2022" in the README
-   description, the card intro and the app caption (`src/streamlit_app.py`).
-   `tests/test_attribution.py` checks the credits.
+   licence. The dataset cards are generated from the registry
+   (`src/tracker/publish.py`): an `open` source is credited in both cards, an
+   `nc` source in the `nc` card only. If the scope grows, update the card
+   intros in `publish.py`. If its events start before 2022, also update "since
+   2022" in the README description, the card intros and the app caption
+   (`src/streamlit_app.py`). `tests/test_attribution.py` checks the credits.
 9. A live source that needs a secret: add `env:` to the "Refresh live
    sources" step and set the secret in the repository.
 10. Run `uv run python scripts/architecture.py` and commit `docs/architecture.md`.
@@ -130,8 +225,9 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
 ## Change the schema
 
 A new or renamed column changes every stored file. Update every adapter, run
-`uv run python -m tracker.ingest live` and `uv run python -m tracker.ingest static`
-(network needed), and update `tests/fixtures/events/` and the `HEADER` in
+`uv run tracker rebuild` (a raw store needed, no download: it replays the
+stored payloads, so the diff shows only the schema change; add `--allow-shrink`
+if the change drops rows on purpose), and update `tests/fixtures/events/` and the `HEADER` in
 `tests/test_ingest.py`. `docs/conf.py` reads
 `schema.py` without importing it: keep `COLUMNS`, `REQUIRED` and the lists of
 `ALLOWED_VALUES` as literal lists, and one comment on each column line.
@@ -140,13 +236,16 @@ or `attribution`, the "Reading the data" section of `README.md`.
 
 Raise `SCHEMA_VERSION` in `src/tracker/schema.py`: a removed or renamed column
 is a major version. Add an entry with the mapping from the old version to the
-`Versions` section of `data/events/README.md`. The mirror job tags the dataset
-`v<SCHEMA_VERSION>` on the commit of the first upload with that version. Check
-the tag after the first run on `main`: if the job warns that it could not create
-the tag, create it by hand (the tag is never moved or recreated):
+`Versions` section of `cards/versions-open.md`, and of `cards/versions-nc.md`
+for the new dataset. The publish job tags each dataset `v<SCHEMA_VERSION>` on
+the commit of the first upload with that version. Check the tags after the
+first run on `main`. The run token may not be allowed to create a tag. Then the
+job warns and goes on, and the run summary gives the tag and the commit. Create
+the tag by hand with your own login (the tag is never moved or recreated):
 
 ```bash
-hf repos tag create <HF_DATASET> v<SCHEMA_VERSION> --repo-type dataset --revision <upload commit>
+hf repos tag create sam-bot/europe-hybrid-incidents v<SCHEMA_VERSION> --repo-type dataset --revision <upload commit>
+hf repos tag create sam-bot/europe-hybrid-incidents-nc v<SCHEMA_VERSION> --repo-type dataset --revision <upload commit>
 ```
 
 ## Record a decision
@@ -186,7 +285,7 @@ In the order of the pipeline:
 uv sync --locked --group docs
 uv run ruff check . && uv run ruff format --check .
 uv run --locked mypy
-uv run python -m tracker.ingest check
+uv run tracker ingest check
 uv run pytest
 uv run python scripts/architecture.py --check
 uv run sphinx-build -W --keep-going -b html docs docs/_build/html
@@ -212,27 +311,36 @@ on the next scheduled or manual run.
 
 `.github/workflows/pipeline.yml` runs on each push to `main`, on each pull
 request, each day at 04:17 UTC, and by hand. It has seven jobs: Lint, Data, Docs,
-Docker build check, Docker image, Deploy to Render and Hugging Face mirror. The
+Docker build check, Docker image, Deploy to Render and Hugging Face publish. The
 [architecture page](architecture.md) shows how they connect and what each one
 does.
 
 - On a scheduled or manual run, Data refreshes the live sources, validates and
   tests the data, and commits the changes to `data/events`. The commit does not
-  start a new run: the image and the mirror use that commit in the same run.
+  start a new run: the image and the publish job use that commit in the same run.
 - The daily commits come from a bot. Pull before you create a branch.
 - The image tag is a hash of the `Dockerfile` and of every file the build
   reads: `README.md`, `pyproject.toml`, `uv.lock`, `.streamlit`, `src` and
   `data`. The packages come from `uv.lock`, so a lockfile change gives a new
-  tag. A change to any of them, the dataset card included, gives a new tag.
+  tag. A change to any of them gives a new tag.
   A new `COPY` line or a new bind mount in the `Dockerfile` must also go in
   the `git ls-tree` line of the Docker image job (`tests/test_image.py` checks it) and in the tag command of
   [Roll back](#roll-back). The same inputs give
   the same tag, and nothing is pushed to Docker Hub. `latest` moves only when a
   new tag is built. After a revert to an earlier tag, `latest` stays on the
   newer image.
-- The mirror job uploads `data/events/` to the dataset, then downloads that
-  dataset commit and compares each file. A missing or different file fails the
-  job.
+- On a scheduled or manual run on `main`, the publish job takes the published
+  tables of the Data job (`tracker build` and `tracker quality`) and runs
+  `tracker publish` once per dataset: `open` to `sam-bot/europe-hybrid-incidents`
+  and `nc` to `sam-bot/europe-hybrid-incidents-nc`. Each dataset gets one
+  commit with the tables, a card generated from the source registry and from
+  `cards/versions-<family>.md`, and (for `open`) the deletion of `eodi.csv` and
+  `leiden.csv`. The job then downloads that commit and compares each file
+  byte for byte. A missing or different file fails the job. A push to `main`
+  does not publish: the next scheduled or manual run does. The job creates the
+  tag `v<SCHEMA_VERSION>` when it does not exist, and never moves or deletes a
+  tag. If the Hub refuses the tag, the job warns, goes on, and the run summary
+  gives the tag and the commit: see [Change the schema](#change-the-schema).
 - Render redeploys the tag of the run on every `main` run, also when the tag
   did not change. The job then polls
   `/app/static/version.txt` on the public address for 10 minutes at most, until
@@ -253,8 +361,9 @@ does.
   attestation existed or after a failed attestation step, is built, scanned,
   pushed and attested again from the new run. Run the pipeline again after a
   failed attestation step: `latest` has not moved.
-- The Docker image, Deploy and mirror jobs run on `main` only. Each one does
-  nothing until its variable or secret is set.
+- The Docker image and Deploy jobs run on `main` only, and the publish job on
+  `main` for a scheduled or manual run. The image and Deploy jobs do nothing
+  until their variable or secret is set.
 
 ### Run the pipeline by hand
 
@@ -277,7 +386,6 @@ In the GitHub repository settings, Secrets and variables, Actions:
 | `DOCKER_IMAGE` | variable | Public Docker Hub repository, `<user>/<repository>`. The namespace must be the Docker Hub login: the job logs in with it. |
 | `DOCKERHUB_TOKEN` | secret | Docker Hub access token with Repo Read & Write scope |
 | `RENDER_DEPLOY_HOOK_URL` | secret | Deploy hook of the Render service (Settings, Deploy Hook). The service image must be the repository in `DOCKER_IMAGE`: Render rejects an image from another repository. |
-| `HF_DATASET` | variable | `<user>/<dataset>` on Hugging Face |
 | `HEARTBEAT_URL` | secret | Ping address of the heartbeat monitor (see "Alerts"). Until it is set, the Heartbeat job is green and sends nothing. |
 
 The Render service is a web service created from the image
@@ -287,11 +395,12 @@ minutes without visits. Set `DOCKER_IMAGE` and `DOCKERHUB_TOKEN`, and let one
 `main` run push the image, before you create the service. Then set
 `RENDER_DEPLOY_HOOK_URL`.
 
-The mirror needs no secret. Create the public dataset on Hugging Face first. In
-its settings, add a Trusted Publisher with repository `tryph0n/hybrid-tracker`,
+The publish job needs no secret. Create the two public datasets on Hugging Face
+first. In the settings of each one, add a Trusted Publisher with repository `tryph0n/hybrid-tracker`,
 branch `main` and workflow `pipeline.yml`. Renaming the repository, the branch
 or the workflow file breaks the trust: delete the Trusted Publisher and add it
-again with the new values. Then set `HF_DATASET`.
+again with the new values. A Trusted Publisher token writes to one dataset only,
+so the job has one step per dataset, each with its own `HF_OIDC_RESOURCE`.
 
 The docs are built on Read the Docs (project `hybrid-tracker`) from the `docs/`
 folder, with `.readthedocs.yaml`. It sets `fail_on_warning`, so a warning fails
@@ -304,7 +413,7 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Failed job | Likely cause | Action |
 |---|---|---|
 | Lint | Style error | Run `uv run ruff check --fix . && uv run ruff format .` and commit. |
-| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `uv run python -m tracker.ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
+| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `uv run tracker ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
 | Data, validate or tests | A hand edit of a CSV, or an adapter bug. The error usually names the column. | Find the cause, fix it, push. |
 | Data, commit | A push to main during the run changed the same data file, so the rebase stopped; or a branch rule on main blocks the bot | Run the pipeline again. Keep main open to pushes from github-actions[bot]. |
 | Docs, architecture | The page does not match the code | Run `uv run python scripts/architecture.py` and commit the page. |
@@ -312,8 +421,9 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Docker build check | A broken `Dockerfile`, a missing file in a `COPY`, an app that does not start or does not answer on `/_stcore/health` | Read the log: it shows the build error or the container log. Run `docker build .` locally and fix it. |
 | Docker image | A broken `Dockerfile` that the check missed, an expired token, a wrong namespace, a Docker Hub outage | For a build error, run `docker build .` locally and fix it. Else check `DOCKERHUB_TOKEN` and `DOCKER_IMAGE`, then run the job again. |
 | Deploy to Render | Render rejected the hook call: 404, the hook URL is old or wrong; 400, the image is not in the repository of the Render service; 409, the service is suspended or the workspace cannot deploy. Or the step "Wait for the new image to answer" failed: the app did not serve the tag of the run at `/app/static/version.txt` within 10 minutes, because the new image does not start or Render keeps the old one | 404: copy the hook from Render (Settings, Deploy Hook) and set the secret again. 400: make `DOCKER_IMAGE` the repository of the Render service. 409: resume the service. Wait failure: read the deploy logs in Render, check `PORT` and the health check path, and open the app address to see which tag it serves. Then run the job again. |
-| Hugging Face mirror | `invalid_grant`: the Trusted Publisher claims do not match, or `HF_DATASET` names another dataset; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
-| Hugging Face mirror | "Mirror check failed": the downloaded dataset commit does not hold the same bytes as `data/events/`: a file that the upload skipped, or that differs on the Hub | Run the job again, then compare the files on the Hub. |
+| Hugging Face publish | `invalid_grant`: the Trusted Publisher claims do not match, or one of the two datasets has no Trusted Publisher; or a Hugging Face outage | Check the Trusted Publisher settings, then run the job again. The upload is idempotent. |
+| Hugging Face publish | "Read-back failed": the downloaded dataset commit does not hold the same bytes as the build folder, or still holds a deleted file: a file that the upload skipped, or that differs on the Hub | Run the job again, then compare the files on the Hub. |
+| Hugging Face publish | A warning "Could not create the tag": the run token cannot create tags | Create the tag by hand, see [Change the schema](#change-the-schema). |
 | Read the Docs | A warning or error in the docs build on Read the Docs. On a pull request it shows as a failed check; for `latest`, see Builds in the Read the Docs project. | `latest` stays on the previous version. Fix the docs and push. |
 
 A green Deploy job means that Render accepted the deploy and that the app

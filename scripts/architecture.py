@@ -30,14 +30,16 @@ COMMAND = "uv run python scripts/architecture.py"
 INTRO = f"""\
 # Architecture
 
-1. Each source module in `src/tracker/` downloads one open dataset and maps it
-   to the unified schema.
-2. `python -m tracker.ingest` validates the result and stores it as
-   `data/events/<source>.csv`, committed to the repository.
+1. Each source module in `src/tracker/` has two steps: `extract()` downloads
+   the files of one open dataset, and `normalize()` maps the stored files to
+   the unified schema.
+2. `tracker ingest` saves the downloaded files in the raw store, validates the
+   mapped events and stores them as `data/events/<source>.csv`, committed to
+   the repository, and as a clean Parquet table in the raw store.
 3. The Streamlit page `src/streamlit_app.py` reads these files and nothing else.
 4. The pipeline refreshes the live sources every day, publishes the app and
-   mirrors `data/events/` to a public Hugging Face dataset. The app does not
-   read the mirror.
+   publishes the published tables to two public Hugging Face datasets. The app
+   does not read them.
 
 This page is generated from the code by `scripts/architecture.py`: do not edit
 it by hand. After a change, run this command and commit the result:
@@ -70,7 +72,7 @@ MODULES = "Python files and their imports: an arrow points to the imported modul
 SERVICES = {
     r"docker (buildx )?push|^push: true$|imagetools create|docker login|^push-to-registry: true$": "Docker Hub",
     r"RENDER_DEPLOY_HOOK_URL": "Render",
-    r"\bhf (upload|repos tag)\b": "Hugging Face",
+    r"\btracker publish\b": "Hugging Face",
     r"HEARTBEAT_URL": "Heartbeat monitor",
 }
 
@@ -203,7 +205,7 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
             jobs[file, job].get("name", job) + " job"
             for file, job, step in steps
             if {key, source.kind}
-            & set(re.findall(rf"{re.escape(ingest)} (\w+)", step.get("run", "")))
+            & set(re.findall(r"tracker ingest (\w+)", step.get("run", "")))
         ]
         text = label(", ".join(dict.fromkeys(runners)) or "by hand")
         edges.append(f"  {node_id('source', key)} -->|{text}| ingest")
@@ -217,7 +219,8 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
             reached.setdefault((file, job), []).append((step, node))
             lines.append(f"  {node}({label(found)})")
     # A step reaches a service with the image of the app, with the stored
-    # events, or with the outputs of a job that reaches another service.
+    # events (`tracker publish` sends tables built from them), or with the
+    # outputs of a job that reaches another service.
     for (file, job), targets in reached.items():
         spec = jobs[file, job]
         text = label(spec.get("name", job) + " job")
@@ -228,7 +231,7 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
                 APP.is_relative_to(ROOT / path) for path in copied
             ):
                 inputs.append("app")
-            if rel(DATA_DIR) in run:
+            if rel(DATA_DIR) in run or re.search(r"\btracker publish\b", run):
                 inputs.append("events")
             for other in needed(spec):
                 if job_outputs(step, other):

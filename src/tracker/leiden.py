@@ -1,11 +1,11 @@
 """Russian Operations Against Europe Dataset (Leiden University) - static source.
 
-Pinned to dataset version 4.0 (events 2022-2025). `fetch` lists the files of
+Pinned to dataset version 4.0 (events 2022-2025). `extract` lists the files of
 the latest published version on Harvard Dataverse and stops when the licence
 is not CC BY 4.0 or when the version is not `PINNED_VERSION`, so a new
 version never enters the data without a review. When a new version is
 published: check its licence, read its sheet for new labels, set
-`PINNED_VERSION`, run `python -m tracker.ingest leiden`, read the diff of the
+`PINNED_VERSION`, run `tracker ingest leiden`, read the diff of the
 CSV and update the citation (see docs/maintainer.md). Licence: CC BY 4.0.
 https://doi.org/10.7910/DVN/TQ0FMQ
 """
@@ -15,13 +15,16 @@ import json
 import urllib.parse
 import urllib.request
 import warnings
+from collections.abc import Mapping
 from typing import Any
 
 import openpyxl
 import pandas as pd
 import pycountry
 
+from tracker.errors import UserError
 from tracker.schema import COLUMNS, make_event_id
+from tracker.store import Payload
 
 DATASET_URL = "https://doi.org/10.7910/DVN/TQ0FMQ"
 API = "https://dataverse.harvard.edu/api"
@@ -32,6 +35,7 @@ FILES_URL = (
 )
 FILE_URL = f"{API}/access/datafile/{{id}}"
 HEADERS = {"User-Agent": "hybrid-tracker (open-data dashboard)"}
+WORKBOOK_NAME = "eventdata.xlsx"
 PINNED_VERSION = "4.0"
 LICENCE = "CC BY 4.0"
 ATTRIBUTED_BY = "Leiden University dataset (B. Schuurman)"
@@ -87,10 +91,10 @@ def check_version(answer: dict[str, Any]) -> None:
     data = answer["data"]
     licence = data["license"]["name"]
     if licence != LICENCE:
-        raise ValueError(f"The licence is {licence!r}, not {LICENCE!r}")
+        raise UserError(f"The licence is {licence!r}, not {LICENCE!r}")
     version = f"{data['versionNumber']}.{data['versionMinorNumber']}"
     if version != PINNED_VERSION:
-        raise ValueError(
+        raise UserError(
             f"Version {version} is published, the adapter is pinned to "
             f"{PINNED_VERSION}: review it, then change PINNED_VERSION and the "
             "citation"
@@ -112,28 +116,48 @@ def spreadsheet_id(answer: dict[str, Any]) -> int:
         if item["dataFile"]["filename"].lower().endswith(".xlsx")
     ]
     if len(ids) != 1:
-        raise ValueError(f"Expected one .xlsx file, found {len(ids)}")
+        raise UserError(f"Expected one .xlsx file, found {len(ids)}")
     return int(ids[0])
 
 
-def fetch() -> pd.DataFrame:
-    """Download the latest spreadsheet and return it in the unified schema.
+def extract() -> list[Payload]:
+    """Download the latest spreadsheet, as it is served.
+
+    The version and the licence are checked first, so the payload of a new
+    version is never stored without a review.
+
+    Returns:
+        One payload, named `WORKBOOK_NAME`.
 
     Raises:
         OSError: A request failed.
-        KeyError: A field of an API answer or a column is missing (see
-            `check_version` and `normalize`).
-        ValueError: The licence or the version is not the expected one, the
-            version has not exactly one .xlsx file, a year, a month name or an
-            end date cannot be read, or the sheet `EventData` is missing.
-        LookupError: A country name is unknown (see `to_iso2`).
+        KeyError: A field of an API answer is missing (see `check_version`).
+        ValueError: The licence or the version is not the expected one, or the
+            version has not exactly one .xlsx file.
     """
     check_version(get_json(VERSION_URL))
     file_id = spreadsheet_id(get_json(FILES_URL))
-    request = urllib.request.Request(FILE_URL.format(id=file_id), headers=HEADERS)
+    url = FILE_URL.format(id=file_id)
+    request = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(request, timeout=60) as response:
-        content = response.read()
-    return normalize(read_workbook(io.BytesIO(content)))
+        return [Payload("leiden", WORKBOOK_NAME, response.read(), url, response.status)]
+
+
+def normalize(files: Mapping[str, bytes]) -> pd.DataFrame:
+    """Map the stored spreadsheet to the unified schema.
+
+    Reads nothing but `files`: no network.
+
+    Args:
+        files: The bytes of the payloads, by name: `WORKBOOK_NAME`.
+
+    Raises:
+        KeyError: The payload or the sheet `EventData` is missing, or a column
+            is missing (see `map_frame`).
+        ValueError: A year, a month name or an end date cannot be read.
+        LookupError: A country name is unknown (see `to_iso2`).
+    """
+    return map_frame(read_workbook(io.BytesIO(files[WORKBOOK_NAME])))
 
 
 def read_workbook(book: io.BytesIO | str) -> pd.DataFrame:
@@ -167,7 +191,7 @@ def read_workbook(book: io.BytesIO | str) -> pd.DataFrame:
     return frame
 
 
-def normalize(raw: pd.DataFrame) -> pd.DataFrame:
+def map_frame(raw: pd.DataFrame) -> pd.DataFrame:
     """Map the EventData sheet to the unified schema.
 
     Args:
@@ -270,7 +294,7 @@ def end_dates(values: pd.Series) -> pd.Series:
             return ""
         if isinstance(value, str):
             if value.strip() not in NO_END_DATE:
-                raise ValueError(f"Unknown IncidentDateEnd text: {value!r}")
+                raise UserError(f"Unknown IncidentDateEnd text: {value!r}")
             return ""
         return pd.Timestamp(value).strftime("%Y-%m-%d")
 

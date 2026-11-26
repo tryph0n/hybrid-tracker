@@ -1,38 +1,16 @@
----
-license: cc-by-4.0
-pretty_name: Europe Hybrid Incidents
-language:
-  - en
----
-
-# Europe Hybrid Incidents
-
-Drone incidents, sabotage and other hybrid operations in Europe since 2022,
-compiled from open datasets into one event table. One CSV file per source, all
-with the same columns.
-
-This dataset is a mirror, updated by the pipeline of the project after each
-refresh of the stored data.
-
-- Code and pipeline: [github.com/tryph0n/hybrid-tracker](https://github.com/tryph0n/hybrid-tracker)
-- Live dashboard: [hybrid-tracker.onrender.com](https://hybrid-tracker.onrender.com)
-- Columns and values: [data dictionary](https://hybrid-tracker.readthedocs.io/en/latest/data-dictionary.html)
-
-## Sources and licence
-
-Modified: unified schema. The events of each source are mapped to one common
-set of columns. The data is distributed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Reuse must credit the
-original sources:
-
-- Lucas Alaniz Pintos, European Observatory of Drone Incidents (EODI): drone incidents in Europe. CC BY 4.0. <https://droneobservatory.eu>
-- Bart Schuurman, Russian Operations Against Europe Dataset, 2022-2025, Harvard Dataverse, V4. CC BY 4.0. <https://doi.org/10.7910/DVN/TQ0FMQ>
-
 ## Versions
 
 The dataset follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 A removed or renamed column is a major version. Each version has a tag on the
 Hugging Face dataset, `v<version>`, on the commit of its first upload. A tag is
 never moved.
+
+The files changed with the first upload of the published tables. Until then, the
+dataset held one CSV file per source (`eodi.csv`, `leiden.csv`). The tags
+`v1.0.0`, `v2.0.0` and `v2.1.0` hold these files and have no `events.parquet`.
+The branch `main` holds `events.parquet`, `events.csv`, `sources.parquet` and
+the quality table, and no longer holds `eodi.csv` or `leiden.csv`. To read a
+tag, use the file names of that tag.
 
 ### 2.1.0
 

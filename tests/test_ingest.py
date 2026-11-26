@@ -1,13 +1,14 @@
-"""The ingest command on sample frames, and the registry against stored files."""
-
 import dataclasses
+import hashlib
+import io
 
 import pandas as pd
 import pytest
-from conftest import FIXTURES
+from conftest import FIXTURES, recorded_payloads
 
-from tracker import ingest, sources
+from tracker import cli, eodi, ingest, sources
 from tracker.sources import read_events
+from tracker.store import LocalBackend, Payload, Store, open_store
 
 HEADER = (
     "event_id,source,date,end_date,date_precision,countries,place,lat,lon,"
@@ -15,10 +16,34 @@ HEADER = (
     "actor_name,attribution,attributed_by,url\n"
 )
 
+pytestmark = pytest.mark.disable_socket
+
+
+@pytest.fixture
+def store(tmp_path) -> Store:
+    return Store(LocalBackend(tmp_path / "store"))
+
 
 def serve(monkeypatch, name: str, events: pd.DataFrame) -> None:
-    """Make source `name` fetch `events` instead of downloading."""
-    source = dataclasses.replace(sources.SOURCES[name], fetch=lambda: events)
+    """Make source `name` download one payload and map it to `events`."""
+    source = dataclasses.replace(
+        sources.SOURCES[name],
+        extract=lambda: [Payload(name, "all.bin", b"payload", "https://e/all", 200)],
+        normalize=lambda files: events,
+    )
+    monkeypatch.setitem(sources.SOURCES, name, source)
+
+
+def serve_recorded(monkeypatch, name: str) -> None:
+    """Make source `name` download its recorded files instead of the network."""
+    files = recorded_payloads(name)
+    source = dataclasses.replace(
+        sources.SOURCES[name],
+        extract=lambda: [
+            Payload(name, file, content, f"https://e/{file}", 200)
+            for file, content in files.items()
+        ],
+    )
     monkeypatch.setitem(sources.SOURCES, name, source)
 
 
@@ -29,9 +54,11 @@ def eodi_events() -> pd.DataFrame:
     )
 
 
-def test_ingest_stores_a_sorted_deterministic_file(data_dir, monkeypatch, eodi_events):
+def test_ingest_stores_a_sorted_deterministic_file(
+    data_dir, store, monkeypatch, eodi_events
+):
     serve(monkeypatch, "eodi", eodi_events.sample(frac=1, random_state=1))
-    ingest.ingest("eodi")
+    ingest.ingest("eodi", store)
     first = (data_dir / "eodi.csv").read_bytes()
 
     stored = read_events("eodi")
@@ -40,44 +67,47 @@ def test_ingest_stores_a_sorted_deterministic_file(data_dir, monkeypatch, eodi_e
     pd.testing.assert_frame_equal(stored, expected)
 
     serve(monkeypatch, "eodi", eodi_events.sample(frac=1, random_state=2))
-    ingest.ingest("eodi")
+    ingest.ingest("eodi", store)
     assert (data_dir / "eodi.csv").read_bytes() == first
 
 
-def test_ingest_rejects_a_shrunken_source(data_dir, monkeypatch, eodi_events):
+def test_ingest_rejects_a_shrunken_source(data_dir, store, monkeypatch, eodi_events):
     serve(monkeypatch, "eodi", eodi_events)
-    ingest.ingest("eodi")
+    ingest.ingest("eodi", store)
     before = (data_dir / "eodi.csv").read_bytes()
 
     serve(monkeypatch, "eodi", eodi_events.head(9))
     with pytest.raises(ValueError, match="9 events, 10 before"):
-        ingest.ingest("eodi")
+        ingest.ingest("eodi", store)
     assert (data_dir / "eodi.csv").read_bytes() == before
 
 
-def test_ingest_rejects_invalid_events(data_dir, monkeypatch, eodi_events):
+def test_ingest_rejects_invalid_events(data_dir, store, monkeypatch, eodi_events):
     broken = eodi_events.assign(category="balloon")
     serve(monkeypatch, "eodi", broken)
     with pytest.raises(ValueError, match="Unknown category"):
-        ingest.ingest("eodi")
+        ingest.ingest("eodi", store)
     assert not (data_dir / "eodi.csv").exists()
 
 
-def test_ingest_rejects_a_blank_required_cell(data_dir, monkeypatch, eodi_events):
+def test_ingest_rejects_a_blank_required_cell(
+    data_dir, store, monkeypatch, eodi_events
+):
     serve(monkeypatch, "eodi", eodi_events)
-    ingest.ingest("eodi")
+    ingest.ingest("eodi", store)
     before = (data_dir / "eodi.csv").read_bytes()
 
     serve(monkeypatch, "eodi", eodi_events.assign(title=" "))
     with pytest.raises(ValueError, match="without title"):
-        ingest.ingest("eodi")
+        ingest.ingest("eodi", store)
     assert (data_dir / "eodi.csv").read_bytes() == before
 
 
-def test_check_rejects_an_id_shared_by_two_sources(sample_data_dir, capsys):
+def test_check_rejects_an_id_shared_by_two_sources(sample_data_dir, caplog):
+    caplog.set_level("INFO")
     ingest.check()
     expected = f"{len(sources.SOURCES)} sources: valid"
-    assert capsys.readouterr().out.strip().endswith(expected)
+    assert caplog.text.strip().endswith(expected)
 
     eodi_text = (sample_data_dir / "eodi.csv").read_text(encoding="utf-8")
     (sample_data_dir / "leiden.csv").write_text(eodi_text, encoding="utf-8")
@@ -97,10 +127,105 @@ def test_read_events_keeps_the_namibia_code(data_dir):
 
 
 @pytest.mark.parametrize("target", ["", "bogus"])
-def test_main_rejects_an_unknown_target(target):
+def test_the_command_rejects_an_unknown_target(target, capsys):
     with pytest.raises(SystemExit) as stop:
-        ingest.main(target)
-    assert stop.value.code == ingest.__doc__
+        cli.main(["ingest", target])
+    assert stop.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def test_run_rejects_an_unknown_target():
+    with pytest.raises(ValueError, match="Unknown target 'bogus'"):
+        ingest.run("bogus")
+
+
+def test_the_command_shows_its_help(capsys):
+    with pytest.raises(SystemExit) as stop:
+        cli.main(["ingest", "--help"])
+    assert stop.value.code == 0
+    assert "live" in capsys.readouterr().out
+
+
+def test_the_command_checks_the_stored_files(sample_data_dir, caplog):
+    caplog.set_level("INFO")
+    cli.main(["ingest", "check"])
+    assert "valid" in caplog.text
+
+
+@pytest.mark.parametrize("name", sources.SOURCES)
+def test_normalize_works_offline_on_the_recorded_payloads(name):
+    events = sources.SOURCES[name].normalize(recorded_payloads(name))
+    ingest.validate(events)
+    assert len(events) > 0
+    assert set(events["source"]) == {name}
+
+
+def test_ingest_keeps_the_payloads_and_the_clean_table(data_dir, store, monkeypatch):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+
+    manifest = store.manifest("eodi")
+    assert [line["name"] for line in manifest] == [
+        "incidentes.csv",
+        "incidentes_sin_ubicacion.json",
+    ]
+    assert all(line["stored"] and line["status"] == 200 for line in manifest)
+    for line in manifest:
+        assert (
+            store.backend.read(line["path"]) == recorded_payloads("eodi")[line["name"]]
+        )
+
+    table = store.backend.read("clean/eodi.parquet")
+    assert table is not None
+    clean = pd.read_parquet(io.BytesIO(table))
+    assert clean.to_csv(index=False, lineterminator="\n") == (
+        data_dir / "eodi.csv"
+    ).read_text(encoding="utf-8")
+
+
+def test_ingest_keeps_the_payloads_when_the_mapping_fails(
+    data_dir, store, monkeypatch, eodi_events
+):
+    serve(monkeypatch, "eodi", eodi_events.assign(category="balloon"))
+    with pytest.raises(ValueError, match="Unknown category"):
+        ingest.ingest("eodi", store)
+    assert len(store.payloads("eodi")) == 1
+    assert store.backend.read("clean/eodi.parquet") is None
+
+
+def test_the_shrink_guard_reads_the_clean_table_first(
+    data_dir, store, monkeypatch, eodi_events
+):
+    serve(monkeypatch, "eodi", eodi_events)
+    ingest.ingest("eodi", store)
+    (data_dir / "eodi.csv").unlink()
+
+    serve(monkeypatch, "eodi", eodi_events.head(9))
+    with pytest.raises(ValueError, match="9 events, 10 before"):
+        ingest.ingest("eodi", store)
+
+
+def test_the_shrink_guard_falls_back_to_the_csv_file(
+    data_dir, store, monkeypatch, eodi_events
+):
+    serve(monkeypatch, "eodi", eodi_events)
+    ingest.ingest("eodi", store)
+    store.backend.root.joinpath("clean/eodi.parquet").unlink()
+
+    serve(monkeypatch, "eodi", eodi_events.head(9))
+    with pytest.raises(ValueError, match="9 events, 10 before"):
+        ingest.ingest("eodi", store)
+
+
+def test_run_ingests_every_source_of_a_kind(
+    data_dir, tmp_path, monkeypatch, eodi_events
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve(monkeypatch, "eodi", eodi_events)
+    ingest.run("live")
+    assert (data_dir / "eodi.csv").exists()
+    assert not (data_dir / "leiden.csv").exists()
 
 
 def test_registry_matches_the_stored_files():
@@ -112,3 +237,265 @@ def test_registry_matches_the_stored_files():
         assert set(events["source"]) == {name}, name
         ids = events["event_id"].astype(str)
         assert list(ids[~ids.str.startswith(f"{name}:")]) == [], name
+
+
+def forbid_download(monkeypatch) -> None:
+    """Make every source and reference dataset fail if its `extract` is called."""
+
+    def fail() -> list[Payload]:
+        raise AssertionError("rebuild must not download")
+
+    for name, source in sources.SOURCES.items():
+        monkeypatch.setitem(
+            sources.SOURCES, name, dataclasses.replace(source, extract=fail)
+        )
+    for name, reference in sources.REFERENCES.items():
+        monkeypatch.setitem(
+            sources.REFERENCES, name, dataclasses.replace(reference, extract=fail)
+        )
+
+
+def serve_geonames(monkeypatch, content: bytes = b"zip") -> list[int]:
+    """Make GeoNames download `content`, and count the downloads."""
+    calls: list[int] = []
+
+    def extract() -> list[Payload]:
+        calls.append(1)
+        return [Payload("geonames", "cities500.zip", content, "https://e/g", 200)]
+
+    reference = dataclasses.replace(sources.REFERENCES["geonames"], extract=extract)
+    monkeypatch.setitem(sources.REFERENCES, "geonames", reference)
+    return calls
+
+
+def clean_table(store: Store, name: str) -> pd.DataFrame:
+    table = store.backend.read(ingest.clean_path(name))
+    assert table is not None
+    return pd.read_parquet(io.BytesIO(table))
+
+
+def test_rebuild_applies_a_changed_mapping_without_a_download(
+    data_dir, store, monkeypatch
+):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    before = clean_table(store, "eodi")
+    assert "drone_overflight" in set(before["category"])
+
+    forbid_download(monkeypatch)
+    monkeypatch.setitem(eodi.CATEGORY, "sobrevuelo", "airspace_incursion")
+    ingest.rebuild("eodi", store)
+
+    after = clean_table(store, "eodi")
+    assert "drone_overflight" not in set(after["category"])
+    assert len(after) == len(before)
+    assert read_events("eodi")["category"].tolist() == after["category"].tolist()
+    assert len(store.payloads("eodi")) == 2
+
+
+def test_the_rebuild_command_runs_without_sockets(data_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "eodi")
+    serve_recorded(monkeypatch, "leiden")
+    serve_geonames(monkeypatch)
+    cli.main(["ingest", "live"])
+    cli.main(["ingest", "static"])
+    for name in sources.SOURCES:
+        (data_dir / f"{name}.csv").unlink()
+
+    forbid_download(monkeypatch)
+    cli.main(["rebuild", "eodi"])
+    assert (data_dir / "eodi.csv").exists()
+    assert not (data_dir / "leiden.csv").exists()
+    (data_dir / "eodi.csv").unlink()
+
+    cli.main(["rebuild"])
+    store = open_store()
+    for name in sources.SOURCES:
+        assert (data_dir / f"{name}.csv").exists()
+        assert len(clean_table(store, name)) > 0
+
+
+def test_rebuild_reads_the_latest_payload_only(data_dir, store, monkeypatch):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    files = recorded_payloads("eodi")
+    first = pd.read_csv(io.BytesIO(files["incidentes.csv"]))
+    title = "Newer title"
+    newer = first.assign(titulo_en=title).to_csv(index=False).encode()
+    store.save(Payload("eodi", "incidentes.csv", newer, "https://e/all", 200))
+    assert title not in set(clean_table(store, "eodi")["title"])
+
+    forbid_download(monkeypatch)
+    ingest.rebuild("eodi", store)
+    assert len(store.payloads("eodi")) == 3
+    clean = clean_table(store, "eodi")
+    assert title in set(clean["title"])
+
+
+def test_rebuild_without_a_stored_payload(data_dir, store, monkeypatch, caplog):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    caplog.set_level("INFO")
+
+    ingest.rebuild(None, store)
+    assert "leiden: no stored payload, skipped" in caplog.text
+    assert not (data_dir / "leiden.csv").exists()
+
+    with pytest.raises(ValueError, match="leiden: no stored payload"):
+        ingest.rebuild("leiden", store)
+    with pytest.raises(KeyError):
+        ingest.rebuild("bogus", store)
+
+
+def test_rebuild_writes_nothing_when_validate_fails(data_dir, store, monkeypatch):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    before = (data_dir / "eodi.csv").read_bytes()
+    table = store.backend.read(ingest.clean_path("eodi"))
+
+    monkeypatch.setitem(eodi.CATEGORY, "sobrevuelo", "balloon")
+    with pytest.raises(ValueError, match="Unknown category"):
+        ingest.rebuild("eodi", store)
+    assert (data_dir / "eodi.csv").read_bytes() == before
+    assert store.backend.read(ingest.clean_path("eodi")) == table
+
+
+def test_rebuild_needs_the_override_to_lose_more_than_five_percent(
+    data_dir, store, monkeypatch, caplog
+):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    before = (data_dir / "eodi.csv").read_bytes()
+    count = len(clean_table(store, "eodi"))
+
+    def shrunk(files):
+        return full(files).head(count - 2)
+
+    full = sources.SOURCES["eodi"].normalize
+    monkeypatch.setitem(
+        sources.SOURCES,
+        "eodi",
+        dataclasses.replace(sources.SOURCES["eodi"], normalize=shrunk),
+    )
+    with pytest.raises(ValueError, match=f"{count - 2} events, {count} before"):
+        ingest.rebuild("eodi", store)
+    assert (data_dir / "eodi.csv").read_bytes() == before
+    assert len(clean_table(store, "eodi")) == count
+
+    caplog.set_level("INFO")
+    ingest.rebuild("eodi", store, allow_shrink=True)
+    assert len(clean_table(store, "eodi")) == count - 2
+    assert len(read_events("eodi")) == count - 2
+    assert "Shrink guard skipped by override" in caplog.text
+
+
+def test_the_rebuild_command_takes_the_override_flag():
+    args = cli.build_parser().parse_args(["rebuild", "eodi", "--allow-shrink"])
+    assert (args.source, args.allow_shrink) == ("eodi", True)
+    args = cli.build_parser().parse_args(["rebuild"])
+    assert (args.source, args.allow_shrink) == (None, False)
+
+
+def test_if_missing_writes_the_missing_clean_table_and_skips_a_stored_one(
+    data_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    serve_geonames(monkeypatch)
+    store = open_store()
+    assert store.backend.read(ingest.clean_path("leiden")) is None
+
+    cli.main(["ingest", "static", "--if-missing"])
+    assert len(clean_table(store, "leiden")) > 0
+
+    forbid_download(monkeypatch)
+    cli.main(["ingest", "static", "--if-missing"])
+
+
+def test_if_missing_downloads_again_when_the_clean_table_is_gone(
+    data_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    serve_geonames(monkeypatch)
+    cli.main(["ingest", "static"])
+    store = open_store()
+    (tmp_path / "store" / ingest.clean_path("leiden")).unlink()
+
+    cli.main(["ingest", "leiden", "--if-missing"])
+    assert len(clean_table(store, "leiden")) > 0
+
+
+def test_geonames_is_kept_in_the_store_with_its_digest_and_has_no_clean_table(
+    data_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_geonames(monkeypatch, b"zip bytes")
+
+    cli.main(["ingest", "geonames"])
+
+    store = open_store()
+    (line,) = store.payloads("geonames")
+    assert line["sha256"] == hashlib.sha256(b"zip bytes").hexdigest()
+    assert line["fetched_at"]
+    assert store.latest("geonames", "cities500.zip") == b"zip bytes"
+    assert store.backend.read(ingest.clean_path("geonames")) is None
+    assert not (data_dir / "geonames.csv").exists()
+
+
+def test_geonames_is_a_reference_and_not_an_event_source():
+    assert "geonames" in sources.REFERENCES
+    assert "geonames" not in sources.SOURCES
+    reference = sources.REFERENCES["geonames"]
+    assert reference.licence == "CC BY 4.0"
+    assert reference.family == "open"
+    assert reference.licence_url == "https://creativecommons.org/licenses/by/4.0/"
+    assert reference.citation
+
+
+def test_the_static_target_downloads_geonames_again_by_hand(
+    data_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    calls = serve_geonames(monkeypatch)
+
+    cli.main(["ingest", "static"])
+    cli.main(["ingest", "static"])
+
+    assert len(calls) == 2
+
+
+def test_if_missing_downloads_geonames_once(data_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    calls = serve_geonames(monkeypatch)
+
+    cli.main(["ingest", "static", "--if-missing"])
+    cli.main(["ingest", "static", "--if-missing"])
+
+    assert len(calls) == 1
+    assert len(open_store().payloads("geonames")) == 1
+
+
+def test_the_live_target_does_not_download_geonames(data_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "eodi")
+    calls = serve_geonames(monkeypatch)
+
+    cli.main(["ingest", "live"])
+
+    assert calls == []
+
+
+def test_if_missing_does_not_apply_to_check():
+    with pytest.raises(ValueError, match="does not apply"):
+        ingest.run("check", if_missing=True)

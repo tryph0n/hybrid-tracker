@@ -14,19 +14,14 @@ LOCATED = FIXTURES / "eodi_incidentes.csv"
 UNLOCATED = FIXTURES / "eodi_sin_ubicacion.json"
 
 
-def serve_unlocated(monkeypatch, payload: bytes) -> None:
-    """Make the unlocated-incidents download return `payload`."""
-    monkeypatch.setattr(
-        eodi.urllib.request, "urlopen", lambda request, timeout: io.BytesIO(payload)
-    )
-
-
 @pytest.fixture
-def events(monkeypatch) -> pd.DataFrame:
-    serve_unlocated(monkeypatch, UNLOCATED.read_bytes())
+def events() -> pd.DataFrame:
     located = pd.read_csv(LOCATED)
-    return eodi.normalize(
-        pd.concat([located, eodi.fetch_unlocated()], ignore_index=True)
+    return eodi.map_frame(
+        pd.concat(
+            [located, eodi.reshape_unlocated(UNLOCATED.read_bytes())],
+            ignore_index=True,
+        )
     )
 
 
@@ -148,7 +143,7 @@ def test_unknown_actor_stops_the_ingestion():
     located = pd.read_csv(LOCATED)
     located.loc[0, "atribucion_actor"] = "Narnia"
     with pytest.raises(ValueError, match="ACTOR_CODES"):
-        eodi.normalize(located)
+        eodi.map_frame(located)
 
 
 @pytest.mark.parametrize(
@@ -159,7 +154,7 @@ def test_actor_name_maps_to_an_iso_code(name, code):
     located = pd.read_csv(LOCATED)
     located.loc[0, "atribucion_actor"] = name
     located.loc[0, "atribucion_autoridad"] = "Some office"
-    row = eodi.normalize(located).loc[0]
+    row = eodi.map_frame(located).loc[0]
     assert (row["actors"], row["attribution"], row["attributed_by"]) == (
         code,
         "official",
@@ -172,22 +167,21 @@ def test_unknown_nivel_stops_the_ingestion():
     located.loc[0, ["latitud", "longitud"]] = pd.NA
     located["nivel"] = "barrio"
     with pytest.raises(ValueError, match="GEO_PRECISION"):
-        eodi.normalize(located)
+        eodi.map_frame(located)
 
 
 def test_unknown_date_precision_stops_the_ingestion():
     located = pd.read_csv(LOCATED)
     located.loc[0, "inicio_precision"] = "semana"
     with pytest.raises(ValueError, match="DATE_PRECISION"):
-        eodi.normalize(located)
+        eodi.map_frame(located)
 
 
-def test_attributed_unlocated_incident_stops_the_ingestion(monkeypatch):
+def test_attributed_unlocated_incident_stops_the_ingestion():
     payload = json.loads(UNLOCATED.read_text(encoding="utf-8"))
     payload["incidentes"][1]["estado"]["actual"] = "atribuido"
-    serve_unlocated(monkeypatch, json.dumps(payload).encode())
     with pytest.raises(ValueError, match="Attributed unlocated incident"):
-        eodi.fetch_unlocated()
+        eodi.reshape_unlocated(json.dumps(payload).encode())
 
 
 @pytest.mark.parametrize(
@@ -201,42 +195,73 @@ def test_unknown_upstream_label_fails_validation(column, value, message):
     located = pd.read_csv(LOCATED)
     located.loc[0, column] = value
     with pytest.raises(ValueError, match=message):
-        validate(eodi.normalize(located))
+        validate(eodi.map_frame(located))
 
 
-def serve_located(monkeypatch, tmp_path, edit) -> None:
-    """Make the located-incidents download return the fixture after `edit`."""
+def edited_payloads(edit) -> dict[str, bytes]:
+    """The two fixture files, with the located CSV lines changed by `edit`."""
     lines = LOCATED.read_text(encoding="utf-8").splitlines()
     header = lines[0].split(",")
-    path = tmp_path / "located.csv"
-    path.write_text("\n".join(edit(header, lines)) + "\n", encoding="utf-8")
-    monkeypatch.setattr(eodi, "LOCATED_URL", str(path))
-    monkeypatch.setattr(eodi, "HEADERS", {})
-    serve_unlocated(monkeypatch, UNLOCATED.read_bytes())
+    return {
+        eodi.LOCATED_NAME: ("\n".join(edit(header, lines)) + "\n").encode(),
+        eodi.UNLOCATED_NAME: UNLOCATED.read_bytes(),
+    }
 
 
-def test_download_keeps_the_country_code_na(monkeypatch, tmp_path):
+def test_payloads_keep_the_country_code_na():
     def edit(header, lines):
         row = lines[1].split(",")
         row[header.index("pais")] = "NA"
         return [lines[0], ",".join(row), *lines[2:]]
 
-    serve_located(monkeypatch, tmp_path, edit)
-    events = eodi.fetch()
+    events = eodi.normalize(edited_payloads(edit))
     assert (
         events.loc[events["event_id"] == "eodi:EODI-2024-00003", "countries"].item()
         == "NA"
     )
 
 
-def test_download_reads_an_empty_cell_as_missing(monkeypatch, tmp_path):
+def test_payloads_read_an_empty_cell_as_missing():
     def edit(header, lines):
         row = lines[1].split(",")
         row[header.index("pais")] = ""
         return [lines[0], ",".join(row), *lines[2:]]
 
-    serve_located(monkeypatch, tmp_path, edit)
-    events = eodi.fetch()
+    events = eodi.normalize(edited_payloads(edit))
     assert pd.isna(
         events.loc[events["event_id"] == "eodi:EODI-2024-00003", "countries"].item()
     )
+
+
+def test_normalize_of_the_payloads_equals_the_mapped_frames(events):
+    files = {
+        eodi.LOCATED_NAME: LOCATED.read_bytes(),
+        eodi.UNLOCATED_NAME: UNLOCATED.read_bytes(),
+    }
+    pd.testing.assert_frame_equal(
+        eodi.normalize(files).sort_values("event_id", ignore_index=True),
+        events.sort_values("event_id", ignore_index=True),
+        check_dtype=False,
+    )
+
+
+class Answer(io.BytesIO):
+    status = 200
+
+
+def test_extract_keeps_both_downloads_as_served(monkeypatch):
+    served = {
+        eodi.LOCATED_URL: LOCATED.read_bytes(),
+        eodi.UNLOCATED_URL: UNLOCATED.read_bytes(),
+    }
+    monkeypatch.setattr(
+        eodi.urllib.request,
+        "urlopen",
+        lambda request, timeout: Answer(served[request.full_url]),
+    )
+    payloads = eodi.extract()
+    assert [(p.source, p.name, p.url, p.status) for p in payloads] == [
+        ("eodi", eodi.LOCATED_NAME, eodi.LOCATED_URL, 200),
+        ("eodi", eodi.UNLOCATED_NAME, eodi.UNLOCATED_URL, 200),
+    ]
+    assert [p.content for p in payloads] == list(served.values())

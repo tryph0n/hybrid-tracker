@@ -1,19 +1,25 @@
 """European Observatory of Drone Incidents (EODI) - live source.
 
-The observatory republishes its full register every hour, so each fetch
+The observatory republishes its full register every hour, so each download
 replaces our copy entirely. Licence: CC BY 4.0.
 https://droneobservatory.eu
 """
 
+import io
 import json
 import urllib.request
+from collections.abc import Mapping
 
 import pandas as pd
 
+from tracker.errors import UserError
 from tracker.schema import COLUMNS, make_event_id, read_csv
+from tracker.store import Payload
 
 LOCATED_URL = "https://droneobservatory.eu/datos/incidentes.csv"
 UNLOCATED_URL = "https://droneobservatory.eu/datos/incidentes_sin_ubicacion.json"
+LOCATED_NAME = "incidentes.csv"
+UNLOCATED_NAME = "incidentes_sin_ubicacion.json"
 INCIDENT_PAGE = "https://droneobservatory.eu/{id}"
 HEADERS = {"User-Agent": "hybrid-tracker (open-data dashboard, daily refresh)"}
 
@@ -86,49 +92,79 @@ GEO_PRECISION = {
 }
 
 
-def fetch() -> pd.DataFrame:
-    """Download the register and return it in the unified schema.
+def extract() -> list[Payload]:
+    """Download the two files of the register, as they are served.
 
     Returns:
-        Located incidents (CSV) and unlocated ones (JSON), mapped by `normalize`.
+        One payload for the located incidents (CSV) and one for the unlocated
+        ones (JSON), named `LOCATED_NAME` and `UNLOCATED_NAME`.
 
     Raises:
         OSError: A download failed.
-        KeyError: A column is missing (see `normalize`) or a JSON field is
-            missing (see `fetch_unlocated`).
-        ValueError: An unknown date precision, actor or `nivel`, or an
-            attributed unlocated incident (see `normalize` and
-            `fetch_unlocated`).
     """
-    located = read_csv(LOCATED_URL, storage_options=HEADERS)
-    return normalize(pd.concat([located, fetch_unlocated()], ignore_index=True))
+    return [
+        download(LOCATED_NAME, LOCATED_URL),
+        download(UNLOCATED_NAME, UNLOCATED_URL),
+    ]
 
 
-def fetch_unlocated() -> pd.DataFrame:
+def download(name: str, url: str) -> Payload:
+    """Download one file (60 s timeout) and keep its bytes unchanged."""
+    request = urllib.request.Request(url, headers=HEADERS)
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return Payload("eodi", name, response.read(), url, response.status)
+
+
+def normalize(files: Mapping[str, bytes]) -> pd.DataFrame:
+    """Map the stored payloads of the register to the unified schema.
+
+    Reads nothing but `files`: no network.
+
+    Args:
+        files: The bytes of the payloads, by name: `LOCATED_NAME` and
+            `UNLOCATED_NAME`.
+
+    Returns:
+        Located incidents (CSV) and unlocated ones (JSON), mapped by
+        `map_frame`.
+
+    Raises:
+        KeyError: A payload is missing, a column is missing (see `map_frame`)
+            or a JSON field is missing (see `reshape_unlocated`).
+        ValueError: An unknown date precision, actor or `nivel`, or an
+            attributed unlocated incident (see `map_frame` and
+            `reshape_unlocated`).
+    """
+    located = read_csv(io.BytesIO(files[LOCATED_NAME]))
+    unlocated = reshape_unlocated(files[UNLOCATED_NAME])
+    return map_frame(pd.concat([located, unlocated], ignore_index=True))
+
+
+def reshape_unlocated(payload: bytes) -> pd.DataFrame:
     """Incidents without exact coordinates, reshaped like the CSV rows.
 
-    Downloads the JSON file (60 s timeout). The frame has no `latitud`,
-    `longitud`, `atribucion_actor` or `atribucion_autoridad` column: after the
-    concat in `fetch` those cells are empty. `fin` and `nivel` come from
-    `tiempo.fin.valor` and `lugar.nivel`; an absent `fin` stays empty.
+    The frame has no `latitud`, `longitud`, `atribucion_actor` or
+    `atribucion_autoridad` column: after the concat in `normalize` those cells
+    are empty. `fin` and `nivel` come from `tiempo.fin.valor` and
+    `lugar.nivel`; an absent `fin` stays empty.
+
+    Args:
+        payload: The bytes of the JSON file.
 
     Returns:
         One row per incident, with the CSV column names the other rows use.
 
     Raises:
-        OSError: The download failed.
         KeyError: A JSON field other than `tiempo.fin` is missing.
         ValueError: An incident has the state "atribuido": its actor is not
             parsed yet, so the ingestion stops.
     """
-    request = urllib.request.Request(UNLOCATED_URL, headers=HEADERS)
-    with urllib.request.urlopen(request, timeout=60) as response:
-        incidents = json.load(response)["incidentes"]
+    incidents = json.loads(payload)["incidentes"]
 
     rows = []
     for incident in incidents:
         if incident["estado"]["actual"] == "atribuido":
-            raise ValueError(f"Attributed unlocated incident: {incident['id']}")
+            raise UserError(f"Attributed unlocated incident: {incident['id']}")
         rows.append(
             {
                 "id": incident["id"],
@@ -147,7 +183,7 @@ def fetch_unlocated() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def normalize(raw: pd.DataFrame) -> pd.DataFrame:
+def map_frame(raw: pd.DataFrame) -> pd.DataFrame:
     """Map EODI columns to the unified schema.
 
     Args:
@@ -209,7 +245,7 @@ def date_precision(value: str) -> str:
         ValueError: `value` is not a key of `DATE_PRECISION`.
     """
     if value not in DATE_PRECISION:
-        raise ValueError(f"Unknown date precision {value!r}: add it to DATE_PRECISION")
+        raise UserError(f"Unknown date precision {value!r}: add it to DATE_PRECISION")
     return DATE_PRECISION[value]
 
 
@@ -230,7 +266,7 @@ def geo_precision(located: bool, level: str | float) -> str:
     if located:
         return "exact"
     if level not in GEO_PRECISION:
-        raise ValueError(f"Unknown nivel {level!r}: add it to GEO_PRECISION")
+        raise UserError(f"Unknown nivel {level!r}: add it to GEO_PRECISION")
     return GEO_PRECISION[level]
 
 
@@ -249,5 +285,5 @@ def actor_code(actor: str | float) -> str | float:
     if pd.isna(actor):
         return pd.NA
     if actor not in ACTOR_CODES:
-        raise ValueError(f"Unknown actor {actor!r}: add it to ACTOR_CODES")
+        raise UserError(f"Unknown actor {actor!r}: add it to ACTOR_CODES")
     return ACTOR_CODES[actor]
