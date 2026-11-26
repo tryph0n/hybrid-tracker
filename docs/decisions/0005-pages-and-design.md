@@ -34,7 +34,7 @@ exploration needs, and coding them by hand would rebuild what exists.
 | Limit | Fact | Cover |
 | --- | --- | --- |
 | A server that sleeps on free hosting | A free Render service stops after 15 minutes without traffic and needs about one minute to restart. | The wake request: the front page wakes the dashboard, is monitored and links to it (#77). |
-| No link previews | Streamlit serves a fixed `index.html` with the title "Streamlit". `st.set_page_config` cannot set a description or Open Graph tags. | The static front page, built by the data run (#73), carries the title, the description and the tags. |
+| No link previews | Streamlit serves a fixed `index.html` with the title "Streamlit". `st.set_page_config` cannot set a description or Open Graph tags. | The static front page, built by the data run (#73), is the page that carries the link. |
 
 ### Code arrangement
 
@@ -104,6 +104,5 @@ project.
   arrangement.
 - The first visit after a sleep takes about one minute. The front page covers
   it with the wake request.
-- Shared links show no preview of the dashboard. They show the preview of the
-  static front page.
+- The dashboard itself has no link preview. The static front page covers it.
 - Review the decision if Streamlit must go: the fallback above applies.
