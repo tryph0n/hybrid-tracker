@@ -13,6 +13,7 @@ from conftest import ROOT
 from tracker.build import family_sources
 from tracker.errors import UserError
 from tracker.publish import LICENCES, render_card, versions_path
+from tracker.schema import SCHEMA_VERSION
 from tracker.sources import FAMILIES, REFERENCES, SOURCES
 
 FILES = {
@@ -225,3 +226,40 @@ def test_a_card_without_the_threat_actors_file_has_no_curated_countries():
 
     assert "Curated countries" not in text
     assert "Curated countries" not in nc_text
+
+
+def newest_version(family):
+    text = versions_path(family).read_text(encoding="utf-8")
+    headings = [
+        line[4:].strip() for line in text.splitlines() if line.startswith("### ")
+    ]
+    return headings[0]
+
+
+def version_section(family, version):
+    text = versions_path(family).read_text(encoding="utf-8")
+    _, _, rest = text.partition(f"### {version}\n")
+    return rest.split("\n### ")[0]
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_the_newest_versions_section_of_each_card_is_the_schema_version(family):
+    assert newest_version(family) == SCHEMA_VERSION
+
+
+def test_the_open_version_section_names_the_threat_actors_table():
+    assert "`threat_actors`" in version_section("open", SCHEMA_VERSION)
+
+
+def test_the_nc_card_has_a_section_for_the_schema_version_and_no_new_table():
+    section = version_section("nc", SCHEMA_VERSION)
+
+    assert section.strip()
+    assert "The same data as 2.2.0" in section
+
+
+def test_the_nc_card_gets_no_threat_actors_config_or_section_from_a_stray_file():
+    front_matter, text = split(render_card("nc", FILES))
+
+    assert "threat_actors" not in [c["config_name"] for c in front_matter["configs"]]
+    assert "Curated countries" not in text

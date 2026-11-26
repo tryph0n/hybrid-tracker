@@ -183,7 +183,9 @@ def render_card(
         versions = versions_path(family).read_text(encoding="utf-8")
     if not versions.lstrip().startswith(VERSIONS_HEADING):
         raise UserError(f"The Versions section of {family} must start with a heading")
-    if curation is None and family == "open" and "threat_actors.parquet" in files:
+    if family != "open":
+        files = files - {"threat_actors.parquet"}
+    if curation is None and "threat_actors.parquet" in files:
         curation = actors.read_curation(CURATION_DIR / "actors.csv")
     curated = (
         curated_countries(curation or []) if "threat_actors.parquet" in files else []
