@@ -41,7 +41,7 @@ COLUMNS = [
 CLUSTER_COLUMNS = [
     "cluster_id",  # the incident: event_id of the canonical row of the cluster
     "n_sources",  # number of sources that have a row in the cluster
-    "is_canonical",  # true on the one row of each cluster that gives the incident its date and place
+    "is_canonical",  # true on the one row of each cluster from the first source in the order; it gives the id, not the other fields
 ]
 
 PUBLISHED_COLUMNS = [*COLUMNS, *CLUSTER_COLUMNS]
