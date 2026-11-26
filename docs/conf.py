@@ -49,8 +49,8 @@ def schema_nodes(source: str) -> dict[str, ast.expr]:
     }
 
 
-def columns_table() -> str:
-    """Markdown table of the event columns, read from schema.py without importing it."""
+def columns_table(list_name: str = "COLUMNS") -> str:
+    """Markdown table of the columns of a list of schema.py, read without importing it."""
     source = SCHEMA.read_text(encoding="utf-8")
     nodes = schema_nodes(source)
     required = [element.value for element in nodes["REQUIRED"].elts]
@@ -68,7 +68,7 @@ def columns_table() -> str:
     }
 
     rows = ["| Column | Required | Allowed values | Description |", "|---|---|---|---|"]
-    for element in nodes["COLUMNS"].elts:
+    for element in nodes[list_name].elts:
         name = element.value
         values = ", ".join(f"`{value}`" for value in allowed.get(name, []))
         # Comments are plain text: escape what Markdown would interpret.
@@ -84,6 +84,7 @@ def columns_table() -> str:
 # Used by data-dictionary.md.
 myst_substitutions = {
     "columns_table": columns_table(),
+    "cluster_columns_table": columns_table("CLUSTER_COLUMNS"),
     "schema_version": schema_nodes(SCHEMA.read_text(encoding="utf-8"))[
         "SCHEMA_VERSION"
     ].value,

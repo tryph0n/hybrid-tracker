@@ -9,7 +9,7 @@ import pytest
 from conftest import FIXTURES, GEONAMES_PLACES, geonames_archive
 
 from tracker import build, cli, geonames, ingest, sources
-from tracker.schema import COLUMNS, read_csv
+from tracker.schema import PUBLISHED_COLUMNS, read_csv
 from tracker.store import LocalBackend, Payload, Store
 
 pytestmark = pytest.mark.disable_socket
@@ -48,6 +48,20 @@ def sql_dir(tmp_path):
     return folder
 
 
+CURATION_HEADER = "event_id_a,event_id_b,reason\n"
+
+
+@pytest.fixture(autouse=True)
+def curation_dir(tmp_path, monkeypatch):
+    """Empty curation files: the real ones name rows that the samples do not have."""
+    folder = tmp_path / "curation"
+    folder.mkdir()
+    for name in ("merges.csv", "splits.csv"):
+        (folder / name).write_text(CURATION_HEADER, encoding="utf-8")
+    monkeypatch.setattr(build, "CURATION_DIR", folder)
+    return folder
+
+
 def digests(folder):
     return {
         str(file.relative_to(folder)): hashlib.sha256(file.read_bytes()).hexdigest()
@@ -76,7 +90,7 @@ def test_build_writes_the_three_files_of_each_family(store, tmp_path):
     for family in sources.FAMILIES:
         assert sorted(p.name for p in (out / family).iterdir()) == sorted(FILES)
         events = pd.read_parquet(out / family / "events.parquet")
-        assert list(events.columns) == COLUMNS
+        assert list(events.columns) == PUBLISHED_COLUMNS
         assert len(read_csv(out / family / "events.csv")) == len(events)
         assert events["event_id"].is_unique
         listed = pd.read_parquet(out / family / "sources.parquet")
@@ -426,3 +440,78 @@ def test_a_new_coordinate_without_the_place_precision_fails_the_build(
 
     with pytest.raises(ValueError, match="without `place` precision"):
         build.build(store, tmp_path / "out", sql_dir)
+
+
+def write_curation(folder, name: str, *pairs: tuple[str, str]) -> None:
+    lines = "".join(f"{a},{b},test\n" for a, b in pairs)
+    (folder / name).write_text(CURATION_HEADER + lines, encoding="utf-8")
+
+
+def test_each_cluster_has_one_canonical_row_in_each_family(store, tmp_path):
+    out = tmp_path / "out"
+    build.build(store, out)
+
+    for family in sources.FAMILIES:
+        events = pd.read_parquet(out / family / "events.parquet")
+        clusters = events.groupby("cluster_id")
+        assert (clusters["is_canonical"].sum() == 1).all()
+        assert (
+            events["n_sources"]
+            == events["cluster_id"].map(clusters["source"].nunique())
+        ).all()
+
+
+def test_a_merge_line_joins_two_rows_and_a_split_line_keeps_them_apart(
+    store, tmp_path, curation_dir
+):
+    eodi = fixture_events("eodi")["event_id"].iloc[0]
+    leiden = fixture_events("leiden")["event_id"].iloc[0]
+    write_curation(curation_dir, "merges.csv", (eodi, leiden))
+    build.build(store, tmp_path / "merged")
+    write_curation(curation_dir, "merges.csv")
+    write_curation(curation_dir, "splits.csv", (eodi, leiden))
+    build.build(store, tmp_path / "split")
+
+    merged = pd.read_parquet(tmp_path / "merged" / "open" / "events.parquet")
+    row = merged.set_index("event_id")
+    assert row.loc[eodi, "cluster_id"] == row.loc[leiden, "cluster_id"] == leiden
+    assert row.loc[eodi, "n_sources"] == 2
+    assert row.loc[eodi, "is_canonical"] and not row.loc[leiden, "is_canonical"]
+    split = pd.read_parquet(tmp_path / "split" / "open" / "events.parquet")
+    assert (split["n_sources"] == 1).all()
+    assert split["is_canonical"].all()
+
+
+@pytest.mark.parametrize("name", ["merges.csv", "splits.csv"])
+def test_a_stale_curation_line_fails_the_build(store, tmp_path, curation_dir, name):
+    eodi = fixture_events("eodi")["event_id"].iloc[0]
+    write_curation(curation_dir, name, (eodi, "leiden:gone"))
+
+    with pytest.raises(ValueError, match="unknown event ids.*leiden:gone"):
+        build.build(store, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_open_clusters_use_no_row_of_a_nc_source(
+    store, tmp_path, monkeypatch, curation_dir
+):
+    fake = add_nc_source(monkeypatch, store)
+    first, second = fake["event_id"]
+    eodi = fixture_events("eodi")["event_id"].iloc[:2]
+    write_curation(
+        curation_dir, "merges.csv", (eodi.iloc[0], first), (eodi.iloc[1], second)
+    )
+    build.build(store, tmp_path / "out")
+
+    nc = pd.read_parquet(tmp_path / "out" / "nc" / "events.parquet").set_index(
+        "event_id"
+    )
+    open_ = pd.read_parquet(tmp_path / "out" / "open" / "events.parquet").set_index(
+        "event_id"
+    )
+    assert nc.loc[eodi.iloc[0], "cluster_id"] == first
+    assert nc.loc[eodi.iloc[0], "n_sources"] == 2
+    assert open_.loc[eodi.iloc[0], "cluster_id"] == eodi.iloc[0]
+    assert open_.loc[eodi.iloc[0], "n_sources"] == 1
+    assert open_.loc[eodi.iloc[0], "is_canonical"]
+    assert set(open_["cluster_id"]) <= set(open_.index)

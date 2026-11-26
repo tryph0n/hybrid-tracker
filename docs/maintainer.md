@@ -225,8 +225,15 @@ A new or renamed column changes every stored file. Update every adapter, run
 stored payloads, so the diff shows only the schema change; add `--allow-shrink`
 if the change drops rows on purpose), and update `tests/fixtures/events/` and the `HEADER` in
 `tests/test_ingest.py`. `docs/conf.py` reads
-`schema.py` without importing it: keep `COLUMNS`, `REQUIRED` and the lists of
-`ALLOWED_VALUES` as literal lists, and one comment on each column line.
+`schema.py` without importing it: keep `COLUMNS`, `CLUSTER_COLUMNS`, `REQUIRED`
+and the lists of `ALLOWED_VALUES` as literal lists, and one comment on each
+column line. `CLUSTER_COLUMNS` are for the published tables only: the build adds
+them (`tracker.dedup`), and `validate` on a clean table does not ask for them.
+
+The curation files `curation/merges.csv` and `curation/splits.csv` join or
+separate rows that the match rule of record 0004 gets wrong. Each line has two
+event ids and a reason. The build fails when a line names an event id that the
+data no longer has: fix or remove that line.
 A renamed column also changes `src/streamlit_app.py`, and for `event_status`
 or `attribution`, the "Reading the data" section of `README.md`.
 

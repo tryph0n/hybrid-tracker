@@ -56,7 +56,7 @@ def test_the_app_starts_on_the_snapshot_and_shows_the_notice(snapshot, monkeypat
     assert "snapshot" in footer
     assert f"revision {SNAPSHOT_REVISION[:7]} of 2026-11-20" in footer
     shown = snapshot[snapshot["event_status"] != "dismissed"]
-    assert {metric.label: metric.value for metric in at.metric}["Events"] == (
+    assert {metric.label: metric.value for metric in at.metric}["Incidents"] == (
         f"{len(shown):,}"
     )
 

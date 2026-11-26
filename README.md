@@ -56,8 +56,9 @@ The dashboard hides `dismissed` events by default: add "Dismissed by the
 source" to the Event status filter to show them. The Sources table counts all
 stored events, whatever the filters.
 
-Known limits: sources are not de-duplicated against each other, and counts
-over time follow each source's coverage period (see the Sources table of the
+Known limits: counts are de-duplicated across sources only, not inside one
+source ([#147](https://github.com/tryph0n/hybrid-tracker/issues/147)), and
+counts over time follow each source's coverage period (see the Sources table of the
 dashboard). Some sources give a date to the month or year only (`date_precision` is
 `month` or, since version 2.1.0, `year`) and the event is dated the 1st of the
 month the source gives, or 1 January when the source gives the year only. The period filter places an

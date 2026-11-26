@@ -12,6 +12,15 @@ The branch `main` holds `events.parquet`, `events.csv`, `sources.parquet` and
 the quality table, and no longer holds `eodi.csv` or `leiden.csv`. To read a
 tag, use the file names of that tag.
 
+### 2.2.0
+
+Three new columns: `cluster_id`, `n_sources` and `is_canonical`. A
+cluster is the rows of different sources that record one incident (record 0004
+of the project). Count incidents with `is_canonical`: it is true on one row of
+each cluster. `cluster_id` can differ from the one of the other dataset for one
+incident. The older versions have no cluster columns, and each row is one
+incident. The tag `v2.2.0` is on the commit of the first upload.
+
 ### 2.1.0
 
 New value `year` for `date_precision`: a date known to the year only, stored on

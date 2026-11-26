@@ -30,10 +30,16 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from duckdb.sqltypes import VARCHAR
 
-from tracker import geonames
+from tracker import dedup, geonames
 from tracker.errors import UserError
 from tracker.ingest import clean_path
-from tracker.schema import COLUMNS, read_csv, validate
+from tracker.schema import (
+    CLUSTER_COLUMNS,
+    COLUMNS,
+    PUBLISHED_COLUMNS,
+    read_csv,
+    validate_published,
+)
 from tracker.sources import FAMILIES, SOURCES
 from tracker.store import Store
 
@@ -41,7 +47,11 @@ logger = logging.getLogger(__name__)
 
 SQL_DIR = Path(__file__).resolve().parents[2] / "sql"
 
+CURATION_DIR = Path(__file__).resolve().parents[2] / "curation"
+
 NUMERIC_COLUMNS = ("lat", "lon")
+
+CLUSTER_TYPES = {"cluster_id": "string", "n_sources": "int64", "is_canonical": "bool"}
 
 SOURCE_COLUMNS = ["source", "title", "kind", "homepage", "licence", "citation"]
 
@@ -64,10 +74,11 @@ def expected_types() -> dict[str, str]:
     pandas writes a text column as `large_string` and DuckDB as `string`: the
     names are compared after the first is mapped to the second.
     """
-    return {
+    types = {
         column: "double" if column in NUMERIC_COLUMNS else "string"
         for column in COLUMNS
     }
+    return types | CLUSTER_TYPES
 
 
 def type_name(arrow_type: pa.DataType) -> str:
@@ -187,6 +198,42 @@ def check_coordinates(con: duckdb.DuckDBPyConnection) -> None:
         raise UserError(f"{added} rows gained coordinates without `place` precision")
 
 
+def add_clusters(con: duckdb.DuckDBPyConnection, curation_dir: Path) -> None:
+    """Add the cluster columns to `events_<family>` of each family.
+
+    The clusters of a family come from its own rows: the `open` family has no
+    row of a NonCommercial source, so its clusters never use one. A line of a
+    curation file whose rows are not both in the family is left out of it.
+
+    Raises:
+        UserError: A curation line names an event id that is not in `events`,
+            or a clustering rule fails (see `tracker.dedup.assign_clusters`).
+    """
+    merges = dedup.read_curation(curation_dir / "merges.csv")
+    splits = dedup.read_curation(curation_dir / "splits.csv")
+    known = {row[0] for row in con.execute("SELECT event_id FROM events").fetchall()}
+    dedup.check_ids(merges, known, "merges")
+    dedup.check_ids(splits, known, "splits")
+    for family in FAMILIES:
+        table = f"events_{family}"
+        frame = con.execute(f"SELECT * FROM {table}").df()
+        present = set(frame["event_id"])
+        clustered = dedup.assign_clusters(
+            frame,
+            list(SOURCES),
+            dedup.pairs_within(merges, present),
+            dedup.pairs_within(splits, present),
+        )
+        con.register("clusters_frame", clustered[["event_id", *CLUSTER_COLUMNS]])
+        con.execute(
+            f"CREATE OR REPLACE TABLE {table} AS "
+            f"SELECT {table}.*, clusters_frame.* EXCLUDE (event_id) "
+            f"FROM {table} JOIN clusters_frame USING (event_id) "
+            "ORDER BY source, event_id"
+        )
+        con.unregister("clusters_frame")
+
+
 def quote(path: Path) -> str:
     """A path as a SQL string literal."""
     return "'" + str(path).replace("'", "''") + "'"
@@ -226,13 +273,13 @@ def check(family: str, folder: Path, counts: dict[str, int]) -> None:
     events_file = folder / "events.parquet"
     schema = pq.read_schema(events_file)
     found = {field.name: type_name(field.type) for field in schema}
-    if found != expected_types() or list(found) != COLUMNS:
+    if found != expected_types() or list(found) != PUBLISHED_COLUMNS:
         raise UserError(f"{family}: events.parquet breaks the schema: {found}")
 
     events = pd.read_parquet(events_file)
-    validate(events)
+    validate_published(events)
     csv_events = read_csv(folder / "events.csv")
-    validate(csv_events)
+    validate_published(csv_events)
     if len(csv_events) != len(events):
         raise UserError(
             f"{family}: events.csv has {len(csv_events)} rows, "
@@ -260,14 +307,21 @@ def check(family: str, folder: Path, counts: dict[str, int]) -> None:
         )
 
 
-def build(store: Store, out: Path, sql_dir: Path = SQL_DIR) -> None:
-    """Run the SQL files and write the published tables of each family.
+def build(
+    store: Store,
+    out: Path,
+    sql_dir: Path = SQL_DIR,
+    curation_dir: Path | None = None,
+) -> None:
+    """Run the SQL files, make the clusters and write the tables of each family.
 
     Args:
         store: The raw store, read for the clean tables.
         out: Folder that gets one subfolder per family. Existing files of the
             same names are replaced, and only after every check passed.
         sql_dir: Folder of the SQL files, run in name order.
+        curation_dir: Folder of `merges.csv` and `splits.csv` (see
+            `tracker.dedup`). The default is `CURATION_DIR`.
 
     Raises:
         ValueError: A source has no clean table, or a check of `check` fails.
@@ -287,6 +341,7 @@ def build(store: Store, out: Path, sql_dir: Path = SQL_DIR) -> None:
                 logger.info("Running %s", file.name)
                 con.execute(file.read_text())
             check_coordinates(con)
+            add_clusters(con, curation_dir or CURATION_DIR)
             staged = work / "out"
             for family in FAMILIES:
                 export(con, family, staged / family)

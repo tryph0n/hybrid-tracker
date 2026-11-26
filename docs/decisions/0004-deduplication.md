@@ -230,6 +230,29 @@ Reason: the rows of one cluster can differ. For example,
 `leiden:be7d76769768` names five airports, and its canonical record
 `eodi:EODI-2025-00459` names three of them.
 
+### Cluster id
+
+The `cluster_id` of a cluster is the `event_id` of its row from the last
+source in the source order that the cluster holds. With the order `eodi`,
+`leiden`, a cluster with a Leiden row takes the id of that row, and a cluster
+with an EODI row only takes the id of that row.
+
+Reason: a source higher in the order can join a cluster later, for example
+when EODI adds a row for an incident that only Leiden had. The id then stays
+the same. A reader who saved a `cluster_id` can still find the incident. The
+id changes in two cases only: a merge or a split of the curation changes the
+rows of the cluster, or the last-source row leaves it. Each source has its own
+event ids, which come from the source, so `cluster_id` is stable as long as
+the event ids are.
+
+The two datasets can give a different `cluster_id` to one incident. Each
+dataset clusters its own rows. The `nc` dataset holds the rows of every
+source, and the open dataset holds the rows of the open sources only. When
+the last source of a cluster is a NonCommercial one, the `nc` cluster takes the
+id of that row, and the open cluster takes the id of another row. Do not join
+the two datasets on `cluster_id`. Today every source is open, so the two
+datasets give the same ids.
+
 ### Source order
 
 The canonical record of a cluster is its row from the first source in this
