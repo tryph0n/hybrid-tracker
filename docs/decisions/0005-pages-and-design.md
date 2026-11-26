@@ -1,6 +1,6 @@
 # 0005. Front end, pages and design rules
 
-Status: Proposed.
+Status: Accepted.
 Date: 2026-11-26.
 
 ## Context
@@ -101,9 +101,12 @@ its ticket states them.
 - One fixed colour per domain, in light and dark. The colours are checked for
   colour-blind separation (the check of #36).
 - At most eight series per chart.
-- Every chart has a title that states the finding and a caption that states
-  its limit. A count follows source coverage, and a reader must not take a
-  chart for more than it shows.
+- Every chart has a title that says what the chart counts, for example
+  "Events per month, by domain", not a conclusion such as "Drone incidents
+  are rising". Reason: the interface shows what the data records, not an
+  interpretation.
+- Every chart has a caption that states its limit. A count follows source
+  coverage, and a reader must not take a chart for more than it shows.
 
 ### Wording rules for attribution
 
