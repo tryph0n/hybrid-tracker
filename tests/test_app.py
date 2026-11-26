@@ -720,8 +720,8 @@ def by_domain(at: AppTest) -> dict[str, int]:
     return {trace.name: int(sum(numbers(trace.y))) for trace in chart(at, 0).data}
 
 
-def app_state(at: AppTest) -> dict:
-    """Figures, charts, table values and captions that a filter can change."""
+def app_state(at: AppTest, downloads: list[str] | None = None) -> dict:
+    """Figures, charts, table values, captions and CSV that a filter can change."""
     return {
         "figures": metrics(at),
         "charts": [item.proto.spec for item in at.get("plotly_chart")],
@@ -733,6 +733,7 @@ def app_state(at: AppTest) -> dict:
             else None
         ),
         "texts": captions(at) + " ".join(info.value for info in at.info),
+        "csv": downloads[-1] if downloads else None,
     }
 
 
@@ -960,20 +961,20 @@ def test_the_official_count_takes_the_states_from_the_official_rows(sample_data_
     ],
 )
 def test_a_change_of_a_filter_and_its_undo_restore_the_whole_state(
-    sample_data_dir, key, changed
+    sample_data_dir, downloads, key, changed
 ):
     link_incidents()
     at = run_app()
-    before = app_state(at)
+    before = app_state(at, downloads)
     widget = at.selectbox(key=key) if key == "period" else at.multiselect(key=key)
     original = widget.value
     widget.set_value(changed).run()
     assert not at.exception
-    assert app_state(at) != before, key
+    assert app_state(at, downloads) != before, key
     widget = at.selectbox(key=key) if key == "period" else at.multiselect(key=key)
     widget.set_value(original).run()
     assert not at.exception
-    assert app_state(at) == before
+    assert app_state(at, downloads) == before
 
 
 def link_columns(at: AppTest) -> dict[str, str]:
@@ -989,9 +990,7 @@ def link_columns(at: AppTest) -> dict[str, str]:
 def links_of(at: AppTest, title: str) -> dict[str, object]:
     table = at.dataframe[0].value
     row = table[table["title"] == title].iloc[0]
-    return {
-        name: None if pd.isna(row[name]) else row[name] for name in link_columns(at)
-    }
+    return {name: row[name] for name in link_columns(at)}
 
 
 def test_the_table_has_a_link_column_for_each_selected_source(sample_data_dir):
@@ -1001,6 +1000,8 @@ def test_the_table_has_a_link_column_for_each_selected_source(sample_data_dir):
     rows = read_all_events().set_index("event_id")
     assert "url" not in at.dataframe[0].value.columns
     assert link_columns(at) == {"link_eodi": "EODI", "link_leiden": "Leiden"}
+    assert list(link_columns(at)) == ["link_eodi", "link_leiden"]
+    assert list(at.dataframe[0].value.columns)[-2:] == ["link_eodi", "link_leiden"]
     assert links_of(at, BROGEL_TITLE) == {
         "link_eodi": rows.loc[BROGEL_EODI, "url"],
         "link_leiden": rows.loc["leiden:K", "url"],
@@ -1008,7 +1009,7 @@ def test_the_table_has_a_link_column_for_each_selected_source(sample_data_dir):
     hanover = "Drones over Hanover airport force flight diversions"
     assert links_of(at, hanover) == {
         "link_eodi": rows.loc["eodi:EODI-2025-00001", "url"],
-        "link_leiden": None,
+        "link_leiden": "",
     }
     at.multiselect(key="sources").set_value(["leiden"]).run()
     assert not at.exception

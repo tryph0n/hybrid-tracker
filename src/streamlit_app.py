@@ -491,8 +491,8 @@ listed = scope[scope["cluster_id"].isin(lines["cluster_id"])]
 link_sources = [name for name in SOURCES if name in source_names]
 for name in link_sources:
     own = listed[listed["source"] == name].drop_duplicates("cluster_id")
-    links = own.set_index("cluster_id")["url"]
-    lines[f"link_{name}"] = lines["cluster_id"].map(links)
+    links = own.set_index("cluster_id")["url"].to_dict()
+    lines[f"link_{name}"] = [links.get(cluster, "") for cluster in lines["cluster_id"]]
 in_domain = memberships(rows, "domain_label")
 by_country = count_by_country(memberships(rows, "country_codes"))
 if countries:
@@ -668,6 +668,7 @@ st.download_button(
     file_name="hybrid_incidents.csv",
     mime="text/csv",
 )
+
 st.subheader("Sources")
 st.dataframe(
     sources_table(all_events),
