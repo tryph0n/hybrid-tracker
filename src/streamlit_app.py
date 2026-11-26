@@ -10,6 +10,7 @@ import pycountry
 import streamlit as st
 
 from tracker.clock import utc_today
+from tracker.hub import REPO_ID, configured_revision, load_published, snapshot_dir
 from tracker.schema import (
     ATTRIBUTIONS,
     CATEGORIES,
@@ -18,7 +19,7 @@ from tracker.schema import (
     DOMAINS,
     EVENT_STATUSES,
 )
-from tracker.sources import SOURCES, read_all_events
+from tracker.sources import SOURCES
 from tracker.views import (
     coordinate_coverage,
     filter_events,
@@ -111,9 +112,16 @@ BLUE_RAMP = [
 EUROPE_CENTER = {"lat": 53, "lon": 14}
 
 
-@st.cache_data
-def load_events() -> pd.DataFrame:
-    events = read_all_events()
+@st.cache_data(ttl="1h", max_entries=2)
+def load_events(revision: str) -> tuple[pd.DataFrame, str, str, bool]:
+    """Load and prepare the published events: the Hub is read once an hour.
+
+    Returns:
+        The events, the revision read, its date and whether the bundled
+        snapshot was used because the Hub could not be read.
+    """
+    published = load_published(revision, snapshot_dir())
+    events = published.events
     events["date"] = pd.to_datetime(events["date"])
     events["end_date"] = pd.to_datetime(events["end_date"])
     events["domain_label"] = events["domain"].map(DOMAIN_LABELS)
@@ -129,7 +137,12 @@ def load_events() -> pd.DataFrame:
             )
         )
     )
-    return with_code_lists(events)
+    return (
+        with_code_lists(events),
+        published.revision,
+        published.date,
+        published.from_snapshot,
+    )
 
 
 def country_name(code: str) -> str:
@@ -306,7 +319,7 @@ dark = st.context.theme.type == "dark"
 surface = "#0e1117" if dark else "#ffffff"
 colors = dict(zip(DOMAIN_LABELS.values(), DARK_COLORS if dark else LIGHT_COLORS))
 
-all_events = load_events()
+all_events, data_revision, data_date, from_snapshot = load_events(configured_revision())
 
 st.title("Europe Hybrid Incidents Tracker")
 st.caption(
@@ -599,3 +612,13 @@ st.caption(
     "overlap (see the Sources table). "
     + " ".join(f"{source.citation} {source.licence}." for source in SOURCES.values())
 )
+revision_note = f"revision {data_revision[:7]}" + (
+    f" of {data_date}" if data_date else ""
+)
+if from_snapshot:
+    st.caption(
+        "The Hub could not be reached: showing the snapshot bundled with the app "
+        f"({revision_note}). The data may be older than the published tables."
+    )
+else:
+    st.caption(f"Data: {REPO_ID} on Hugging Face, {revision_note}.")

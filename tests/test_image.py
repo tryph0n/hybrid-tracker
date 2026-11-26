@@ -39,3 +39,15 @@ def hashed_by_workflow() -> set[str]:
 
 def test_image_tag_hashes_the_files_the_build_reads():
     assert hashed_by_workflow() == read_by_dockerfile()
+
+
+def test_image_tag_and_build_carry_the_snapshot_revision():
+    text = (ROOT / ".github" / "workflows" / "pipeline.yml").read_text(encoding="utf-8")
+    assert '"$files $snapshot_revision" | sha256sum' in text
+    args = re.findall(
+        r"SNAPSHOT_REVISION=\$\{\{ steps.image.outputs.snapshot_revision", text
+    )
+    assert len(args) == 2, "the scan build and the push build must both pass it"
+    dockerfile = "\n".join(build_lines())
+    assert "ARG SNAPSHOT_REVISION" in dockerfile
+    assert "resolve/${SNAPSHOT_REVISION}/events.parquet" in dockerfile

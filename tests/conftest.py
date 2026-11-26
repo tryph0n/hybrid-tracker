@@ -11,13 +11,15 @@ import openpyxl
 import pandas as pd
 import pytest
 
-from tracker import sources
+from tracker import hub, sources
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 APP = ROOT / "src" / "streamlit_app.py"
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 LEIDEN_LINK = "https://example.org/report"
+REVISION = "4a22c978a3094102a3487dab5cdbdb4c52d6600d"
+REVISION_DATE = "2026-11-26"
 
 
 def workbook_bytes(raw: pd.DataFrame, links: dict[int, str] | None = None) -> bytes:
@@ -111,3 +113,23 @@ def geonames_archive(places: list[dict[str, str | int]] | None = None) -> bytes:
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("cities500.txt", "\n".join(lines) + "\n")
     return buffer.getvalue()
+
+
+@pytest.fixture
+def hub_fetches(tmp_path, monkeypatch):
+    """Serve the Hub read from the CSV files of the data directory.
+
+    Each call writes the current rows as a Parquet file, so a test that edits the
+    CSV files before the run still sees its edit. The value is the list of the
+    revisions asked for.
+    """
+    fetches = []
+
+    def fake_fetch(revision):
+        fetches.append(revision)
+        path = tmp_path.parent / f"{tmp_path.name}-published.parquet"
+        sources.read_all_events().to_parquet(path)
+        return path, REVISION, REVISION_DATE
+
+    monkeypatch.setattr(hub, "fetch", fake_fetch)
+    return fetches

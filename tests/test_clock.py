@@ -12,7 +12,7 @@ from tracker.sources import read_all_events
 
 
 @pytest.fixture
-def far_from_utc(monkeypatch, sample_data_dir):
+def far_from_utc(monkeypatch, sample_data_dir, hub_fetches):
     """Process in UTC+14. Clock set 30 minutes before midnight UTC, 29 days after the latest event.
 
     The local day is already the next one, so a local "today" would put the latest event

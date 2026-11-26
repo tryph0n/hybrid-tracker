@@ -587,6 +587,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "huggingface-hub" },
     { name = "openpyxl" },
     { name = "pandas", extra = ["parquet"] },
     { name = "plotly" },
@@ -596,7 +597,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "huggingface-hub" },
     { name = "mypy" },
     { name = "pandas-stubs" },
     { name = "pre-commit" },
@@ -617,6 +617,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = "==2.0.1" },
+    { name = "huggingface-hub", specifier = "==2.4.0" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "pandas", extras = ["parquet"], specifier = "==3.1.1" },
     { name = "plotly", specifier = "==7.1.0" },
@@ -626,7 +627,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "huggingface-hub", specifier = "==2.4.0" },
     { name = "mypy", specifier = "==2.4.1" },
     { name = "pandas-stubs", specifier = "==3.1.0.*" },
     { name = "pre-commit", specifier = "==4.7.0" },
