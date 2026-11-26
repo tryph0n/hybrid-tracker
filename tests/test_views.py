@@ -203,7 +203,7 @@ def test_a_cluster_stays_when_one_source_dismisses_it_and_another_does_not(clust
     confirmed = filter_events(clustered, **(CLUSTER_ALL | {"statuses": ["confirmed"]}))
     dismissed = filter_events(clustered, **(CLUSTER_ALL | {"statuses": ["dismissed"]}))
 
-    assert list(confirmed["event_id"]) == ["l1", "e2", "l3"]
+    assert list(confirmed["event_id"]) == ["e1", "e2", "l3"]
     assert list(dismissed["event_id"]) == ["e1"]
 
 
@@ -211,18 +211,16 @@ def test_a_cluster_counts_once_in_each_source_of_its_rows(clustered):
     leiden = filter_events(clustered, **(CLUSTER_ALL | {"sources": ["leiden"]}))
     eodi = filter_events(clustered, **(CLUSTER_ALL | {"sources": ["eodi"]}))
 
-    assert list(leiden["event_id"]) == ["l1", "l3"]
+    assert list(leiden["event_id"]) == ["e1", "l3"]
     assert list(eodi["event_id"]) == ["e1", "e2"]
 
 
-def test_a_cluster_counts_once_in_the_domain_of_the_row_it_shows(clustered):
+def test_a_cluster_counts_once_in_the_domain_of_its_canonical_record(clustered):
     air = filter_events(clustered, **(CLUSTER_ALL | {"domains": ["air"]}))
     espionage = filter_events(clustered, **(CLUSTER_ALL | {"domains": ["espionage"]}))
-    both = filter_events(clustered, **(CLUSTER_ALL | {"domains": ["air", "espionage"]}))
 
     assert list(air["event_id"]) == ["e1", "e2"]
-    assert list(espionage["event_id"]) == ["l1"]
-    assert list(both["event_id"]) == ["e1", "e2"]
+    assert espionage.empty
 
 
 def test_the_row_filters_apply_to_one_row_of_the_cluster(clustered):
