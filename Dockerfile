@@ -39,6 +39,15 @@ COPY --chown=app:app .streamlit/ ./.streamlit/
 COPY --chown=app:app src/ ./src/
 COPY --chown=app:app data/ ./data/
 
+# Snapshot of the published events, read when the Hub cannot be reached. It is not
+# a file of the repository: the pipeline gives its revision and date, and hashes
+# the revision into the image tag. The default builds the head of `main`.
+ARG SNAPSHOT_REVISION=main
+ARG SNAPSHOT_DATE=
+ADD --chown=app:app https://huggingface.co/datasets/sam-bot/europe-hybrid-incidents-nc/resolve/${SNAPSHOT_REVISION}/events.parquet ./data/snapshot/events.parquet
+RUN printf '{"revision": "%s", "date": "%s"}\n' "$SNAPSHOT_REVISION" "$SNAPSHOT_DATE" > data/snapshot/snapshot.json \
+    && chown -R app:app data/snapshot
+
 # After the COPY lines: the tag is not a file of the repository, so it stays out of
 # the tag hash. Streamlit serves it at /app/static/version.txt.
 ARG IMAGE_TAG=dev

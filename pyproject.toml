@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "duckdb==2.0.1",
+    "huggingface_hub==2.4.0",
     "openpyxl==3.1.5",
     "pandas[parquet]==3.1.1",
     "plotly==7.1.0",
@@ -15,7 +16,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "huggingface_hub==2.4.0",
     "mypy==2.4.1",
     "pandas-stubs==3.1.0.*",
     "pre-commit==4.7.0",

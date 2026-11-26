@@ -159,6 +159,7 @@ flowchart TB
   module_tracker_eodi["tracker.eodi"]
   module_tracker_errors["tracker.errors"]
   module_tracker_geonames["tracker.geonames"]
+  module_tracker_hub["tracker.hub"]
   module_tracker_ingest["tracker.ingest"]
   module_tracker_leiden["tracker.leiden"]
   module_tracker_publish["tracker.publish"]
@@ -169,6 +170,7 @@ flowchart TB
   module_tracker_views["tracker.views"]
   module_architecture_py["architecture.py"]
   module_streamlit_app_py --> module_tracker_clock
+  module_streamlit_app_py --> module_tracker_hub
   module_streamlit_app_py --> module_tracker_schema
   module_streamlit_app_py --> module_tracker_sources
   module_streamlit_app_py --> module_tracker_views
@@ -190,6 +192,7 @@ flowchart TB
   module_tracker_eodi --> module_tracker_store
   module_tracker_geonames --> module_tracker_errors
   module_tracker_geonames --> module_tracker_store
+  module_tracker_hub --> module_tracker_publish
   module_tracker_ingest --> module_tracker_errors
   module_tracker_ingest --> module_tracker_schema
   module_tracker_ingest --> module_tracker_sources
@@ -228,6 +231,7 @@ flowchart TB
 | `tracker.eodi` | `src/tracker/eodi.py` | European Observatory of Drone Incidents (EODI) - live source. | pandas |
 | `tracker.errors` | `src/tracker/errors.py` | Errors that the code raises on purpose with a message for the user. |  |
 | `tracker.geonames` | `src/tracker/geonames.py` | GeoNames populated places - reference data, not an event source. | pandas |
+| `tracker.hub` | `src/tracker/hub.py` | Read the published tables from the public Hugging Face dataset. | huggingface_hub, pandas |
 | `tracker.ingest` | `src/tracker/ingest.py` | Download sources, keep their payloads in the raw store and write clean tables. | pandas |
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | openpyxl, pandas, pycountry |
 | `tracker.publish` | `src/tracker/publish.py` | Publish the tables of \`tracker build\` to the two public Hugging Face datasets. | huggingface_hub |

@@ -10,6 +10,10 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Changed
 
+- The dashboard reads the published `events.parquet` of the NonCommercial
+  dataset from the Hugging Face Hub, cached for one hour, at the revision set by
+  `HYBRID_TRACKER_REVISION` (`main` by default). It falls back to a snapshot
+  bundled in the image and shows the revision and its date in the footer.
 - The adapters and the dashboard use schema v2 (dataset 2.0.0): `domain`,
   `actors`, `attribution` and `attributed_by` replace `russia_link`. See the
   [`Versions` section](data/events/README.md#versions) of the dataset card for

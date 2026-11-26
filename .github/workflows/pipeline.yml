@@ -187,10 +187,20 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Same image inputs (the files the Dockerfile copies), same tag.
-          tag=$(git ls-tree HEAD Dockerfile README.md pyproject.toml uv.lock .streamlit src data | sha256sum | cut -c1-12)
+          # The snapshot of the published events is an image input too, but not a
+          # file of the repository: pin the head of the NonCommercial dataset now,
+          # so the build and the tag use the same revision.
+          head=$(curl -fsS "https://huggingface.co/api/datasets/sam-bot/europe-hybrid-incidents-nc/commits/main" | jq -r '.[0] | "\(.id) \(.date[:10])"')
+          snapshot_revision=${head% *}
+          snapshot_date=${head#* }
+          echo "snapshot revision $snapshot_revision of $snapshot_date"
+          # Same image inputs (the files the Dockerfile copies and the snapshot), same tag.
+          files=$(git ls-tree HEAD Dockerfile README.md pyproject.toml uv.lock .streamlit src data | sha256sum | cut -c1-64)
+          tag=$(echo "$files $snapshot_revision" | sha256sum | cut -c1-12)
           echo "image=$DOCKER_IMAGE:$tag" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "snapshot_revision=$snapshot_revision" >> "$GITHUB_OUTPUT"
+          echo "snapshot_date=$snapshot_date" >> "$GITHUB_OUTPUT"
           echo "$DOCKERHUB_TOKEN" | docker login -u "${DOCKER_IMAGE%%/*}" --password-stdin
           # A tag counts as published only when it also has an attestation of
           # this repository. Otherwise it is built again, from this run, so
@@ -214,7 +224,10 @@ jobs:
           context: .
           push: false
           load: true
-          build-args: IMAGE_TAG=${{ steps.image.outputs.tag }}
+          build-args: |
+            IMAGE_TAG=${{ steps.image.outputs.tag }}
+            SNAPSHOT_REVISION=${{ steps.image.outputs.snapshot_revision }}
+            SNAPSHOT_DATE=${{ steps.image.outputs.snapshot_date }}
           tags: ${{ steps.image.outputs.image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -259,7 +272,10 @@ jobs:
           context: .
           push: true
           provenance: mode=max
-          build-args: IMAGE_TAG=${{ steps.image.outputs.tag }}
+          build-args: |
+            IMAGE_TAG=${{ steps.image.outputs.tag }}
+            SNAPSHOT_REVISION=${{ steps.image.outputs.snapshot_revision }}
+            SNAPSHOT_DATE=${{ steps.image.outputs.snapshot_date }}
           tags: ${{ steps.image.outputs.image }}
           cache-from: type=gha
       - name: Attest the build provenance

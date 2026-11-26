@@ -10,10 +10,12 @@ import pandas as pd
 import plotly.io as pio
 import pytest
 import streamlit as st
-from conftest import APP
+from conftest import APP, REVISION, REVISION_DATE
 from streamlit.elements.lib import policies
+from streamlit.runtime.caching import cache_utils
 from streamlit.testing.v1 import AppTest
 
+from tracker import hub
 from tracker.schema import ATTRIBUTIONS, CATEGORY_DOMAINS, DOMAINS
 from tracker.sources import SOURCES, events_path, read_all_events, read_events
 from tracker.views import coordinate_coverage
@@ -23,6 +25,11 @@ from tracker.views import coordinate_coverage
 def clear_streamlit_cache():
     """The app caches the loaded events: every run must read the files again."""
     st.cache_data.clear()
+
+
+@pytest.fixture(autouse=True)
+def fake_hub(hub_fetches):
+    """The app reads the Hub through `hub_fetches`, never the network."""
 
 
 def run_app() -> AppTest:
@@ -222,7 +229,7 @@ def test_map_hover_of_an_unattributed_event_shows_the_data(sample_data_dir):
 def test_credits_every_source(sample_data_dir):
     at = run_app()
     for source in SOURCES.values():
-        assert source.citation in at.caption[-1].value
+        assert source.citation in captions(at)
     table = at.dataframe[-1].value
     assert list(table["Source"]) == [source.title for source in SOURCES.values()]
     assert list(table["Licence"]) == [source.licence for source in SOURCES.values()]
@@ -565,6 +572,37 @@ def test_category_widget_gets_no_default_and_session_state_value_together(
     at.multiselect(key="domains").set_value(DOMAINS).run()
     assert not at.exception
     assert "also had its value set via the Session State API" not in caplog.text
+
+
+def test_footer_gives_the_revision_and_its_date(sample_data_dir):
+    at = run_app()
+    footer = at.caption[-1].value
+    assert hub.REPO_ID in footer
+    assert f"revision {REVISION[:7]} of {REVISION_DATE}" in footer
+    assert "snapshot" not in footer
+
+
+def test_the_revision_variable_gives_the_revision_read(
+    sample_data_dir, hub_fetches, monkeypatch
+):
+    run_app()
+    assert hub_fetches == ["main"]
+    monkeypatch.setenv(hub.REVISION_VARIABLE, "v2.1.0")
+    run_app()
+    assert hub_fetches == ["main", "v2.1.0"]
+
+
+def test_the_loader_is_cached_for_one_hour(sample_data_dir, hub_fetches, monkeypatch):
+    now = [1_000_000.0]
+    monkeypatch.setattr(cache_utils, "TTLCACHE_TIMER", lambda: now[0])
+    st.cache_data.clear()
+    run_app()
+    now[0] += 3599
+    run_app()
+    assert hub_fetches == ["main"]
+    now[0] += 2
+    run_app()
+    assert hub_fetches == ["main", "main"]
 
 
 def test_where_text_gives_the_events_on_no_map_like_the_helper(sample_data_dir):

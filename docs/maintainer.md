@@ -323,6 +323,8 @@ does.
   reads: `README.md`, `pyproject.toml`, `uv.lock`, `.streamlit`, `src` and
   `data`. The packages come from `uv.lock`, so a lockfile change gives a new
   tag. A change to any of them gives a new tag.
+  The tag also hashes the revision of the snapshot of the published events (see
+  "Dashboard data" below), so a new publish gives a new tag.
   A new `COPY` line or a new bind mount in the `Dockerfile` must also go in
   the `git ls-tree` line of the Docker image job (`tests/test_image.py` checks it) and in the tag command of
   [Roll back](#roll-back). The same inputs give
@@ -376,6 +378,29 @@ the refresh commits the data to that branch.
 In a public repository, GitHub disables a scheduled workflow after 60 days
 without activity. Enable it again with `gh workflow enable pipeline.yml`, or in
 Actions, pipeline, Enable workflow.
+
+## Dashboard data
+
+The dashboard reads `events.parquet` of `sam-bot/europe-hybrid-incidents-nc`
+(`tracker.hub`), which holds the rows of both licence families. It resolves the
+revision to a commit, downloads the file at that commit (Hugging Face disk
+cache), and keeps the result for one hour (`st.cache_data(ttl="1h")` in
+`src/streamlit_app.py`). The footer gives the revision and the date of that
+commit.
+
+- `HYBRID_TRACKER_REVISION` sets the revision: a branch, a tag or a commit. The
+  default is `main`. Set it as an environment variable of the Render service.
+  The open dataset has no Parquet at its tags `v1.0.0` to `v2.1.0`, so use the
+  NonCommercial dataset tags (for example `v2.1.0`).
+- When the Hub cannot be read, the app reads the snapshot that the image build
+  bundles in `data/snapshot/` (`events.parquet` and `snapshot.json`) and says so
+  in the footer. `HYBRID_TRACKER_SNAPSHOT_DIR` changes the folder.
+- The Docker image job pins the head of `main` of the dataset, passes it to the
+  build (`SNAPSHOT_REVISION`, `SNAPSHOT_DATE`) and hashes it in the image tag.
+  A local `docker build` with no argument bundles the head of `main`, and the
+  footer then names the revision `main`.
+  On a scheduled run, the `image` job and the `publish` job run in parallel, so
+  the snapshot can be one publish behind: the app still reads the Hub at run time.
 
 ## Settings
 
@@ -467,8 +492,9 @@ on `main` and wait for the next scheduled run.
 - App: deploy an earlier image. Copy the hook URL from Render (Settings,
   Deploy Hook), take an earlier tag from Docker Hub, and run:
   `curl -fsS --get --data-urlencode "imgURL=docker.io/<user>/<repository>:<tag>" "<deploy hook URL>"`.
-  The tag of a commit is the output of
-  `git ls-tree <commit> Dockerfile README.md pyproject.toml uv.lock .streamlit src data | sha256sum | cut -c1-12`.
+  Take the tag from Docker Hub: it also depends on the snapshot revision, which
+  the git history does not hold. The "Name the image" step of the Docker image
+  job prints it ("snapshot revision ...").
   This lasts until the next `main` run that reaches the Deploy job, usually
   the daily run at 04:17 UTC. To keep the earlier version, `git revert` the bad change on `main`.
 - Data: `git revert` the commit on `main`. For a live source, the next refresh
