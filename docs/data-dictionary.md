@@ -24,4 +24,3 @@ cluster. It can differ between the open dataset and the nc dataset for one
 incident, because each dataset clusters its own rows: do not join the two
 datasets on `cluster_id`. Counts are de-duplicated across sources only (see
 [#147](https://github.com/tryph0n/hybrid-tracker/issues/147)).
-
