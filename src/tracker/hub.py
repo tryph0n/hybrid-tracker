@@ -11,7 +11,7 @@ This module has no Streamlit code: the app adds the cache.
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pandas as pd
@@ -29,6 +29,23 @@ DEFAULT_REVISION = "main"
 REVISION_VARIABLE = "HYBRID_TRACKER_REVISION"
 SNAPSHOT_VARIABLE = "HYBRID_TRACKER_SNAPSHOT_DIR"
 SNAPSHOT_DIR = Path(__file__).resolve().parents[2] / "data" / "snapshot"
+
+UNREACHABLE = "unreachable"
+UNREADABLE = "unreadable"
+
+CONNECTION_ERROR_NAMES = frozenset(
+    {
+        "ConnectError",
+        "ConnectionError",
+        "NetworkError",
+        "OfflineModeIsEnabled",
+        "Timeout",
+        "TimeoutException",
+        "TransportError",
+    }
+)
+"""Names of the exception classes of the Hub client (and of its HTTP library)
+that mean the Hub gave no answer, as opposed to an answer that says no."""
 
 
 @dataclass(frozen=True)
@@ -48,6 +65,11 @@ class Published:
     from_snapshot: bool
     """True when the Hub could not be read and the bundled snapshot was used."""
 
+    failure: str = ""
+    """Why the Hub was not used: `UNREACHABLE` when it gave no answer,
+    `UNREADABLE` when it answered but the data could not be read at the revision
+    (unknown revision, unreadable file). Empty when `from_snapshot` is False."""
+
 
 def configured_revision() -> str:
     """Revision to read: the `HYBRID_TRACKER_REVISION` variable, else `main`."""
@@ -61,6 +83,13 @@ def snapshot_dir() -> Path:
     """
     configured = os.environ.get(SNAPSHOT_VARIABLE)
     return Path(configured) if configured else SNAPSHOT_DIR
+
+
+def is_connection_failure(error: BaseException) -> bool:
+    """Tell if an error means that the Hub gave no answer."""
+    if isinstance(error, ConnectionError | TimeoutError):
+        return True
+    return any(cls.__name__ in CONNECTION_ERROR_NAMES for cls in type(error).__mro__)
 
 
 def fetch(revision: str) -> tuple[Path, str, str]:
@@ -117,7 +146,8 @@ def load_published(revision: str, fallback: Path) -> Published:
 
     Returns:
         The events and the revision used. `from_snapshot` is True when the
-        read from the Hub failed.
+        read from the Hub failed, and `failure` says if the Hub gave no answer
+        or the data could not be read at that revision.
 
     Raises:
         FileNotFoundError: The Hub failed and the snapshot folder has no file.
@@ -125,7 +155,8 @@ def load_published(revision: str, fallback: Path) -> Published:
     try:
         path, commit, committed = fetch(revision)
         events = pd.read_parquet(path)
-    except Exception:
+    except Exception as error:
+        failure = UNREACHABLE if is_connection_failure(error) else UNREADABLE
         logger.warning(
             "Could not read %s at %s from the Hub, reading the snapshot in %s",
             REPO_ID,
@@ -133,5 +164,5 @@ def load_published(revision: str, fallback: Path) -> Published:
             fallback,
             exc_info=True,
         )
-        return read_snapshot(fallback)
+        return replace(read_snapshot(fallback), failure=failure)
     return Published(events, commit, committed, from_snapshot=False)

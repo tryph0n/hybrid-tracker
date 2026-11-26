@@ -10,7 +10,13 @@ import pycountry
 import streamlit as st
 
 from tracker.clock import utc_today
-from tracker.hub import REPO_ID, configured_revision, load_published, snapshot_dir
+from tracker.hub import (
+    REPO_ID,
+    UNREACHABLE,
+    configured_revision,
+    load_published,
+    snapshot_dir,
+)
 from tracker.schema import (
     ATTRIBUTIONS,
     CATEGORIES,
@@ -113,7 +119,7 @@ EUROPE_CENTER = {"lat": 53, "lon": 14}
 
 
 @st.cache_data(ttl="1h", max_entries=2)
-def load_events(revision: str) -> tuple[pd.DataFrame, str, str, bool]:
+def load_events(revision: str) -> tuple[pd.DataFrame, str, str, str]:
     """Load and prepare the published events: the Hub is read once an hour.
 
     Returns:
@@ -141,7 +147,7 @@ def load_events(revision: str) -> tuple[pd.DataFrame, str, str, bool]:
         with_code_lists(events),
         published.revision,
         published.date,
-        published.from_snapshot,
+        published.failure,
     )
 
 
@@ -319,7 +325,7 @@ dark = st.context.theme.type == "dark"
 surface = "#0e1117" if dark else "#ffffff"
 colors = dict(zip(DOMAIN_LABELS.values(), DARK_COLORS if dark else LIGHT_COLORS))
 
-all_events, data_revision, data_date, from_snapshot = load_events(configured_revision())
+all_events, data_revision, data_date, hub_failure = load_events(configured_revision())
 
 st.title("Europe Hybrid Incidents Tracker")
 st.caption(
@@ -615,9 +621,14 @@ st.caption(
 revision_note = f"revision {data_revision[:7]}" + (
     f" of {data_date}" if data_date else ""
 )
-if from_snapshot:
+if hub_failure:
+    cause = (
+        "The Hub could not be reached"
+        if hub_failure == UNREACHABLE
+        else f"The data could not be read at revision {configured_revision()}"
+    )
     st.caption(
-        "The Hub could not be reached: showing the snapshot bundled with the app "
+        f"{cause}: showing the snapshot bundled with the app "
         f"({revision_note}). The data may be older than the published tables."
     )
 else:

@@ -399,6 +399,8 @@ commit.
   build (`SNAPSHOT_REVISION`, `SNAPSHOT_DATE`) and hashes it in the image tag.
   A local `docker build` with no argument bundles the head of `main`, and the
   footer then names the revision `main`.
+  On a scheduled run, the `image` job and the `publish` job run in parallel, so
+  the snapshot can be one publish behind: the app still reads the Hub at run time.
 
 ## Settings
 

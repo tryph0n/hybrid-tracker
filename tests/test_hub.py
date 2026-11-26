@@ -45,7 +45,47 @@ def test_a_failed_read_gives_the_snapshot(monkeypatch, snapshot, caplog):
     assert published.events["event_id"].tolist() == ["old:1"]
     assert (published.revision, published.date) == ("a" * 40, "2026-11-20")
     assert published.from_snapshot
+    assert published.failure == hub.UNREACHABLE
     assert "Could not read" in caplog.text
+
+
+class RevisionNotFound(Exception):
+    """Stands for the Hub answer "Invalid rev id"."""
+
+
+def test_an_unknown_revision_is_not_a_connection_failure(monkeypatch, snapshot):
+    def unknown(revision):
+        raise RevisionNotFound("Invalid rev id: nosuchtag")
+
+    monkeypatch.setattr(hub, "fetch", unknown)
+    published = hub.load_published("nosuchtag", snapshot)
+    assert published.from_snapshot
+    assert published.failure == hub.UNREADABLE
+
+
+def test_an_unreadable_file_is_not_a_connection_failure(
+    tmp_path, monkeypatch, snapshot
+):
+    path = tmp_path / "events.parquet"
+    path.write_text("not a parquet file", encoding="utf-8")
+    monkeypatch.setattr(hub, "fetch", lambda revision: (path, SHA, "2026-11-26"))
+    published = hub.load_published("main", snapshot)
+    assert published.from_snapshot
+    assert published.failure == hub.UNREADABLE
+
+
+@pytest.mark.parametrize("name", sorted(hub.CONNECTION_ERROR_NAMES))
+def test_the_client_connection_errors_are_recognised(name):
+    error = type(name, (Exception,), {})("no answer")
+    assert hub.is_connection_failure(error)
+    assert hub.is_connection_failure(TimeoutError())
+
+
+def test_a_good_read_has_no_failure(tmp_path, monkeypatch, snapshot):
+    path = tmp_path / "events.parquet"
+    pd.DataFrame({"event_id": ["new:1"]}).to_parquet(path)
+    monkeypatch.setattr(hub, "fetch", lambda revision: (path, SHA, "2026-11-26"))
+    assert hub.load_published("main", snapshot).failure == ""
 
 
 def test_a_snapshot_with_no_info_file_has_an_unknown_revision(snapshot):
