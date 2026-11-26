@@ -41,6 +41,7 @@ flowchart TB
   events --> app
   app -->|"Docker image job"| service_Docker_Hub
   service_Docker_Hub -->|"Deploy to Render job"| service_Render
+  events -->|"Hugging Face publish job"| service_Hugging_Face
 ```
 
 | Source | Name | Kind | Licence | Stored as |

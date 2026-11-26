@@ -219,7 +219,7 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
             reached.setdefault((file, job), []).append((step, node))
             lines.append(f"  {node}({label(found)})")
     # A step reaches a service with the image of the app, with the stored
-    # events, or with the outputs of a job that reaches another service.
+    # events (`tracker publish` sends tables built from them), or with the outputs of a job that reaches another service.
     for (file, job), targets in reached.items():
         spec = jobs[file, job]
         text = label(spec.get("name", job) + " job")
@@ -230,7 +230,7 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
                 APP.is_relative_to(ROOT / path) for path in copied
             ):
                 inputs.append("app")
-            if rel(DATA_DIR) in run:
+            if rel(DATA_DIR) in run or re.search(r"\btracker publish\b", run):
                 inputs.append("events")
             for other in needed(spec):
                 if job_outputs(step, other):
