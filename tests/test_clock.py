@@ -5,10 +5,10 @@ import time
 import pandas as pd
 import pytest
 import streamlit as st
+from conftest import read_all_events
 from test_app import expected_events, metrics, run_app
 
 from tracker import clock
-from tracker.sources import read_all_events
 
 
 @pytest.fixture

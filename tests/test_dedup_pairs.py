@@ -1,6 +1,6 @@
 """Shape of the labelled de-duplication sample (docs/decisions/0004-deduplication.md).
 
-The tests do not look the identifiers up in data/events: the daily data run
+The tests do not look the identifiers up in the published data: the daily data run
 runs the tests, and an upstream change must not block it.
 """
 
