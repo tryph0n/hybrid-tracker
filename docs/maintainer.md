@@ -56,8 +56,8 @@ Each source goes through two steps. `extract()` downloads the files and saves
 them, as served, in the raw store with a manifest line each. `normalize()` maps
 the stored payloads to the unified schema and uses no network, so a mapping fix
 can be replayed on the stored payloads. The clean table is written to the raw
-store as `clean/<name>.parquet` (private) and, until the data leaves git, to
-`data/events/<name>.csv`.
+store as `clean/<name>.parquet` (private). No data file is committed to the
+repository: the raw store and the two public datasets hold the data.
 
 The commands need a raw store. Set `TRACKER_STORE=local` and
 `TRACKER_STORE_DIR=<folder>` to work on a local folder, or `TRACKER_STORE=hf`
@@ -71,27 +71,24 @@ uv run tracker ingest static    # every static source
 uv run tracker ingest static --if-missing # only the ones with no clean table
 uv run tracker ingest <name>    # one source, for example eodi
 uv run tracker ingest geonames  # the GeoNames file (reference data), by hand
-uv run tracker ingest check     # validate the stored files, no network, no store
 uv run tracker rebuild [<name>] # clean tables again from the stored payloads, no download
 uv run tracker build [--out build] # published tables of each licence family
 uv run tracker quality [--out build] # quality table and run summary
 ```
 
 `ingest` saves the payloads first, so a payload that fails to map stays in the
-raw store. It validates the events before it writes the clean table and the
-CSV file. It rejects a refresh that loses more than 5% of the stored events
+raw store. It validates the events before it writes the clean table. It rejects a refresh that loses more than 5% of the stored events
 (`MAX_SHRINK` in `src/tracker/ingest.py`): an upstream outage is more likely
 than a real correction. The guard compares with the clean table of the raw
-store, or with the CSV file while a source has no clean table. An unknown
+store. An unknown
 upstream label also stops the ingest, in the adapter or in `validate`.
-If the drop is a real correction, delete `data/events/<name>.csv` and
-`clean/<name>.parquet` in the raw store, run `uv run tracker ingest <name>`,
-read the diff and commit.
+If the drop is a real correction, delete `clean/<name>.parquet` in the raw
+store, then run `uv run tracker ingest <name>`.
 
 To apply a mapping fix, use `uv run tracker rebuild` (every source) or
 `uv run tracker rebuild <name>`. It reads the latest stored payload of each
-file, runs `normalize()`, validates, and writes the clean table and the CSV
-file. It downloads nothing, so the diff shows the fix and no upstream change.
+file, runs `normalize()`, validates, and writes the clean table. It downloads
+nothing, so the new table shows the fix and no upstream change.
 With the local store it makes no network call; with the Hugging Face store
 each read is a network call to the dataset. It applies the same checks as
 `ingest`: nothing is written for a source that fails `validate` or loses more
@@ -161,7 +158,7 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    unknown "IncidentDateEnd" text also stops the run: add it to the adapter on
    purpose.
 3. Set `PINNED_VERSION` in `src/tracker/leiden.py` and run the ingest again.
-4. Read the diff of the CSV, then update the version in the `citation` of
+4. Compare the new clean table with the old one, then update the version in the `citation` of
    `src/tracker/sources.py` and in the README credits. The dataset cards take
    the citation from the registry. If the years change, also update the `title`
    and the README source table, and the version in the docstring of the module.
@@ -190,9 +187,8 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
 3. Import the module in `src/tracker/sources.py` and add a `Source` entry:
    title, `kind`, homepage, licence, `licence_page`, `family` (`open` or `nc`), citation,
    `extract`, `normalize`. The key is lowercase.
-   It is the CSV name, the `source` value, the prefix of `event_id`
-   (`<name>:<id>`) and the ingest target. Do not use `check`, `live` or
-   `static`.
+   It is the clean table name, the `source` value, the prefix of `event_id`
+   (`<name>:<id>`) and the ingest target. Do not use `live` or `static`.
 4. Add any new package with `uv add <package>`, then pin it as `name==version` in
    `pyproject.toml` and run `uv lock`. Commit `pyproject.toml` and `uv.lock`.
 5. For a new domain, category, status or attribution value: add it to
@@ -201,8 +197,8 @@ its module (`src/tracker/leiden.py`). For the Leiden dataset:
    colour-blind check again). For a status or attribution value, also update
    the list in `README.md`, "Reading the data".
 6. If the source needs a secret, export it locally first. Run
-   `uv run tracker ingest <name>`, then `uv run tracker ingest check`.
-   Commit `data/events/<name>.csv`.
+   `uv run tracker ingest <name>`, then `uv run tracker build` to validate
+   the published tables. Commit no data file.
 7. Add `tests/fixtures/events/<name>.csv`: a few rows in the stored format. Add
    `tests/test_<name>.py` with a recorded upstream sample in
    `tests/fixtures/<name>_<file>`: the mapping, and the stop on an unknown
@@ -285,7 +281,6 @@ In the order of the pipeline:
 uv sync --locked --group docs
 uv run ruff check . && uv run ruff format --check .
 uv run --locked mypy
-uv run tracker ingest check
 uv run pytest
 uv run python scripts/architecture.py --check
 uv run sphinx-build -W --keep-going -b html docs docs/_build/html
@@ -293,8 +288,7 @@ uv run sphinx-build -W --keep-going -b html docs docs/_build/html
 
 `uv run --locked mypy` checks `src/tracker` in strict mode and the app in
 standard mode; an ignore needs its error code and a reason on the same line.
-`uv run pytest` includes the dashboard, run headless on the stored data and on
-samples. The check of `docs/architecture.md` prints the command that fixes it.
+`uv run pytest` includes the dashboard, run headless on samples. The check of `docs/architecture.md` prints the command that fixes it.
 
 To print the branch coverage of `src/tracker` with the missing lines, run
 `uv run pytest --cov`. The run fails when the total is under `fail_under` in
@@ -315,19 +309,18 @@ Docker build check, Docker image, Deploy to Render and Hugging Face publish. The
 [architecture page](architecture.md) shows how they connect and what each one
 does.
 
-- On a scheduled or manual run, Data refreshes the live sources, validates and
-  tests the data, and commits the changes to `data/events`. The commit does not
-  start a new run: the image and the publish job use that commit in the same run.
-- The daily commits come from a bot. Pull before you create a branch.
+- On a scheduled or manual run, Data refreshes the live sources, builds the
+  published tables and runs the tests. The bot writes nothing to `main`: the
+  data goes to the raw store and, with the publish job, to the two datasets.
 - The image tag is a hash of the `Dockerfile` and of every file the build
-  reads: `README.md`, `pyproject.toml`, `uv.lock`, `.streamlit`, `src` and
-  `data`. The packages come from `uv.lock`, so a lockfile change gives a new
+  reads: `README.md`, `pyproject.toml`, `uv.lock`, `.streamlit` and `src`.
+  The packages come from `uv.lock`, so a lockfile change gives a new
   tag. A change to any of them gives a new tag.
   The tag also hashes the revision of the snapshot of the published events (see
   "Dashboard data" below), so a new publish gives a new tag.
   A new `COPY` line or a new bind mount in the `Dockerfile` must also go in
-  the `git ls-tree` line of the Docker image job (`tests/test_image.py` checks it) and in the tag command of
-  [Roll back](#roll-back). The same inputs give
+  the `git ls-tree` line of the Docker image job (`tests/test_image.py` checks
+  it). The same inputs give
   the same tag, and nothing is pushed to Docker Hub. `latest` moves only when a
   new tag is built. After a revert to an earlier tag, `latest` stays on the
   newer image.
@@ -371,12 +364,14 @@ does.
 
 Run `gh workflow run pipeline.yml`, or use Actions, pipeline, Run workflow. On
 a branch other than `main`, run `gh workflow run pipeline.yml --ref <branch>`:
-the refresh commits the data to that branch.
+the refresh still writes to the raw store.
 
 ### Schedule stops after 60 days
 
 In a public repository, GitHub disables a scheduled workflow after 60 days
-without activity. Enable it again with `gh workflow enable pipeline.yml`, or in
+without activity. The bot no longer commits to `main`, and it is not verified
+whether a commit of the bot counted as activity. The heartbeat alert shows a
+stopped schedule. Enable it again with `gh workflow enable pipeline.yml`, or in
 Actions, pipeline, Enable workflow.
 
 ## Dashboard data
@@ -439,8 +434,7 @@ A failed run shows a red job in Actions. Read the log of that job first.
 |---|---|---|
 | Lint | Style error | Run `uv run ruff check --fix . && uv run ruff format .` and commit. |
 | Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `uv run tracker ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
-| Data, validate or tests | A hand edit of a CSV, or an adapter bug. The error usually names the column. | Find the cause, fix it, push. |
-| Data, commit | A push to main during the run changed the same data file, so the rebase stopped; or a branch rule on main blocks the bot | Run the pipeline again. Keep main open to pushes from github-actions[bot]. |
+| Data, build or tests | An adapter bug, or a published table that breaks the schema. The error usually names the column. | Find the cause, fix it, push. |
 | Docs, architecture | The page does not match the code | Run `uv run python scripts/architecture.py` and commit the page. |
 | Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `uv run sphinx-build` command above and read the warning. |
 | Docker build check | A broken `Dockerfile`, a missing file in a `COPY`, an app that does not start or does not answer on `/_stcore/health` | Read the log: it shows the build error or the container log. Run `docker build .` locally and fix it. |
@@ -497,9 +491,10 @@ on `main` and wait for the next scheduled run.
   job prints it ("snapshot revision ...").
   This lasts until the next `main` run that reaches the Deploy job, usually
   the daily run at 04:17 UTC. To keep the earlier version, `git revert` the bad change on `main`.
-- Data: `git revert` the commit on `main`. For a live source, the next refresh
-  fetches the upstream again, so the revert lasts only until the next
-  scheduled or manual run.
+- Data: set `HYBRID_TRACKER_REVISION` on the Render service to an earlier
+  dataset revision (see [Dashboard data](#dashboard-data)). The app then
+  reads that revision. For a live source, the next publish moves `main` of the
+  dataset again, so unset the variable to follow `main`.
 
 ## Release
 

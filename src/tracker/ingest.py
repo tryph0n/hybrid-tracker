@@ -10,7 +10,6 @@ Run through the `tracker` command, from the repository root after `uv sync`:
 - `uv run tracker ingest static --if-missing`: only what is not in the raw store:
   a source with no clean table, a reference dataset with no payload (scheduled
   pipeline)
-- `uv run tracker ingest check`: validate stored files, download nothing
 - `uv run tracker rebuild [source]`: write the clean tables again from the
   stored payloads, download nothing
 
@@ -25,13 +24,7 @@ import pandas as pd
 
 from tracker.errors import UserError
 from tracker.schema import validate
-from tracker.sources import (
-    REFERENCES,
-    SOURCES,
-    events_path,
-    read_all_events,
-    read_events,
-)
+from tracker.sources import REFERENCES, SOURCES
 from tracker.store import Store, open_store
 
 logger = logging.getLogger(__name__)
@@ -41,7 +34,7 @@ logger = logging.getLogger(__name__)
 # because one missing upstream file can be only ~15% of a source.
 MAX_SHRINK = 0.05
 
-TARGETS = ("live", "static", "check")
+TARGETS = ("live", "static")
 
 
 def clean_path(name: str) -> str:
@@ -52,14 +45,11 @@ def clean_path(name: str) -> str:
 def previous_count(name: str, stored: bytes | None) -> int | None:
     """Number of events stored before this run, or None for a first ingest.
 
-    The clean table of the raw store counts first. Until a source has one, the
-    CSV file of `data/events` counts.
+    The clean table of the raw store counts.
     """
-    if stored is not None:
-        return len(pd.read_parquet(io.BytesIO(stored)))
-    if events_path(name).exists():
-        return len(read_events(name))
-    return None
+    if stored is None:
+        return None
+    return len(pd.read_parquet(io.BytesIO(stored)))
 
 
 def write_clean(
@@ -71,9 +61,8 @@ def write_clean(
     """Map the payloads of one source, validate them and write its clean table.
 
     The events are sorted by `event_id` and written to `clean/<name>.parquet`
-    in the store and to `data/events/<name>.csv` (the folder is created if
-    needed). Nothing is written to either if `validate` or the shrink check
-    fails. `ingest` and `rebuild` both end here.
+    in the store. Nothing is written if `validate` or the shrink check fails.
+    `ingest` and `rebuild` both end here.
 
     Args:
         name: Key of `SOURCES`.
@@ -105,9 +94,6 @@ def write_clean(
             {clean_path(name): table.getvalue()}, f"clean: {name} table"
         )
 
-    path = events_path(name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    events.to_csv(path, index=False, lineterminator="\n")
     logger.info("%s: %d events", name, len(events))
 
 
@@ -190,15 +176,8 @@ def rebuild(name: str | None, store: Store, allow_shrink: bool = False) -> None:
         write_clean(key, files, store, allow_shrink)
 
 
-def check() -> None:
-    """Validate what is stored, all sources together."""
-    events = read_all_events()
-    validate(events)
-    logger.info("%d events, %d sources: valid", len(events), events["source"].nunique())
-
-
 def run(target: str, if_missing: bool = False) -> None:
-    """Run one target: a source or reference name, `live`, `static` or `check`.
+    """Run one target: a source or reference name, `live` or `static`.
 
     `static` runs the static sources and the reference datasets.
 
@@ -209,13 +188,8 @@ def run(target: str, if_missing: bool = False) -> None:
             it is not downloaded again.
 
     Raises:
-        ValueError: `target` is not a target, or `if_missing` is set with `check`.
+        ValueError: `target` is not a target.
     """
-    if target == "check":
-        if if_missing:
-            raise UserError("`--if-missing` does not apply to `check`")
-        check()
-        return
     if target in SOURCES or target in REFERENCES:
         names = [target]
     elif target in ("live", "static"):

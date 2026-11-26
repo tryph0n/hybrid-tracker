@@ -10,6 +10,9 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Changed
 
+- The data left git: `data/events/` is removed, `tracker ingest` writes only to
+  the raw store, `tracker ingest check` is removed, and the pipeline no longer
+  commits to `main`. The two public datasets hold the data.
 - The dashboard reads the published `events.parquet` of the NonCommercial
   dataset from the Hugging Face Hub, cached for one hour, at the revision set by
   `HYBRID_TRACKER_REVISION` (`main` by default). It falls back to a snapshot

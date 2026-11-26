@@ -3,6 +3,7 @@
 import io
 import re
 import shutil
+import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +12,9 @@ import openpyxl
 import pandas as pd
 import pytest
 
-from tracker import hub, sources
+from tracker import hub
+from tracker.schema import read_csv
+from tracker.sources import SOURCES
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -20,6 +23,7 @@ DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 LEIDEN_LINK = "https://example.org/report"
 REVISION = "4a22c978a3094102a3487dab5cdbdb4c52d6600d"
 REVISION_DATE = "2026-11-26"
+DATA_DIR = FIXTURES / "events"
 
 
 def workbook_bytes(raw: pd.DataFrame, links: dict[int, str] | None = None) -> bytes:
@@ -67,10 +71,25 @@ def recorded_payloads(name: str) -> dict[str, bytes]:
     raise KeyError(name)
 
 
+def events_path(name: str) -> Path:
+    """Path of the sample CSV file of one source, in the current data directory."""
+    return DATA_DIR / f"{name}.csv"
+
+
+def read_events(name: str) -> pd.DataFrame:
+    """The sample events of one source, in the stored format."""
+    return read_csv(events_path(name))
+
+
+def read_all_events() -> pd.DataFrame:
+    """The sample events of every source as one frame."""
+    return pd.concat([read_events(name) for name in SOURCES], ignore_index=True)
+
+
 @pytest.fixture
 def data_dir(tmp_path, monkeypatch):
-    """Point tracker.sources at an empty temporary data directory."""
-    monkeypatch.setattr(sources, "DATA_DIR", tmp_path)
+    """Point the sample helpers at an empty temporary data directory."""
+    monkeypatch.setattr(sys.modules[__name__], "DATA_DIR", tmp_path)
     return tmp_path
 
 
@@ -117,7 +136,7 @@ def geonames_archive(places: list[dict[str, str | int]] | None = None) -> bytes:
 
 @pytest.fixture
 def hub_fetches(tmp_path, monkeypatch):
-    """Serve the Hub read from the CSV files of the data directory.
+    """Serve the Hub read from the sample CSV files of the data directory.
 
     Each call writes the current rows as a Parquet file, so a test that edits the
     CSV files before the run still sees its edit. The value is the list of the
@@ -128,7 +147,7 @@ def hub_fetches(tmp_path, monkeypatch):
     def fake_fetch(revision):
         fetches.append(revision)
         path = tmp_path.parent / f"{tmp_path.name}-published.parquet"
-        sources.read_all_events().to_parquet(path)
+        read_all_events().to_parquet(path)
         return path, REVISION, REVISION_DATE
 
     monkeypatch.setattr(hub, "fetch", fake_fetch)

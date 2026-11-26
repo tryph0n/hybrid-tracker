@@ -43,12 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15 # a stalled download must not hold the group for hours
     permissions:
-      contents: write # the refresh commits data/events
+      contents: read
       id-token: write # the raw store signs in with the run OIDC token
-    outputs:
-      # The commit that the image and the publish job use: the data commit when the
-      # refresh pushed one, else the commit this run checked out.
-      sha: ${{ steps.commit.outputs.sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
@@ -86,20 +82,8 @@ jobs:
           path: build
           if-no-files-found: error
           retention-days: 3
-      - name: Validate stored data
-        run: uv run tracker ingest check
       - name: Run the tests
         run: uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"
-      - name: Commit refreshed data
-        id: commit
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/events
-          git diff --cached --quiet || (git commit -m "data: refresh live sources" && git pull --rebase && git push)
-          # After the push: the rebase can move HEAD.
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   # Beside the data job, so a stale page or broken docs never block a refresh.
   docs:
@@ -178,8 +162,6 @@ jobs:
       image: ${{ steps.image.outputs.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.data.outputs.sha }}
       - name: Name the image and check the registry
         id: image
         env:
@@ -195,7 +177,7 @@ jobs:
           snapshot_date=${head#* }
           echo "snapshot revision $snapshot_revision of $snapshot_date"
           # Same image inputs (the files the Dockerfile copies and the snapshot), same tag.
-          files=$(git ls-tree HEAD Dockerfile README.md pyproject.toml uv.lock .streamlit src data | sha256sum | cut -c1-64)
+          files=$(git ls-tree HEAD Dockerfile README.md pyproject.toml uv.lock .streamlit src | sha256sum | cut -c1-64)
           tag=$(echo "$files $snapshot_revision" | sha256sum | cut -c1-12)
           echo "image=$DOCKER_IMAGE:$tag" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -347,8 +329,6 @@ jobs:
       id-token: write # the publisher signs in with the run OIDC token
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.data.outputs.sha }}
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       - name: Install
         run: uv sync --locked

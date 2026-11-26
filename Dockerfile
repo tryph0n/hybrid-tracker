@@ -37,7 +37,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --chown=app:app .streamlit/ ./.streamlit/
 COPY --chown=app:app src/ ./src/
-COPY --chown=app:app data/ ./data/
 
 # Snapshot of the published events, read when the Hub cannot be reached. It is not
 # a file of the repository: the pipeline gives its revision and date, and hashes

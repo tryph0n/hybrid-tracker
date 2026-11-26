@@ -12,7 +12,7 @@ from tracker.errors import UserError
 
 SCHEMA_VERSION = "2.1.0"
 
-# Column order of every file in data/events/.
+# Column order of the clean and published tables.
 COLUMNS = [
     "event_id",  # "<source>:<native id>", unique across the whole dataset
     "source",  # key of tracker.sources.SOURCES

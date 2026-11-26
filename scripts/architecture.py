@@ -19,7 +19,8 @@ from pathlib import Path
 
 import yaml
 
-from tracker.sources import DATA_DIR, SOURCES, events_path
+from tracker.ingest import clean_path
+from tracker.sources import SOURCES
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "docs" / "architecture.md"
@@ -34,12 +35,14 @@ INTRO = f"""\
    the files of one open dataset, and `normalize()` maps the stored files to
    the unified schema.
 2. `tracker ingest` saves the downloaded files in the raw store, validates the
-   mapped events and stores them as `data/events/<source>.csv`, committed to
-   the repository, and as a clean Parquet table in the raw store.
-3. The Streamlit page `src/streamlit_app.py` reads these files and nothing else.
-4. The pipeline refreshes the live sources every day, publishes the app and
-   publishes the published tables to two public Hugging Face datasets. The app
-   does not read them.
+   mapped events and stores them as a clean Parquet table in the raw store.
+   No data file is committed to the repository.
+3. `tracker build` writes the published tables from the clean tables, and
+   `tracker publish` sends them to two public Hugging Face datasets.
+4. The Streamlit page `src/streamlit_app.py` reads the published events from
+   the public dataset, and falls back to a snapshot bundled in the image.
+5. The pipeline refreshes the live sources every day and publishes the
+   datasets and the app.
 
 This page is generated from the code by `scripts/architecture.py`: do not edit
 it by hand. After a change, run this command and commit the result:
@@ -185,7 +188,6 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
     ]
     lines += [
         f"  ingest[{label(ingest)}]",
-        f"  events[({label(rel(DATA_DIR) + '/')})]",
         f"  app[{label(module_name(APP))}]",
     ]
     jobs = {
@@ -209,7 +211,6 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
         ]
         text = label(", ".join(dict.fromkeys(runners)) or "by hand")
         edges.append(f"  {node_id('source', key)} -->|{text}| ingest")
-    edges += ["  ingest --> events", "  events --> app"]
 
     reached = {}
     for file, job, step in steps:
@@ -218,9 +219,9 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
             node = node_id("service", found)
             reached.setdefault((file, job), []).append((step, node))
             lines.append(f"  {node}({label(found)})")
-    # A step reaches a service with the image of the app, with the stored
-    # events (`tracker publish` sends tables built from them), or with the
-    # outputs of a job that reaches another service.
+    # A step reaches a service with the image of the app, with the tables
+    # that `tracker publish` sends (built from the output of the ingest), or
+    # with the outputs of a job that reaches another service.
     for (file, job), targets in reached.items():
         spec = jobs[file, job]
         text = label(spec.get("name", job) + " job")
@@ -231,12 +232,15 @@ def overview(workflows: dict, copied: list[str]) -> list[str]:
                 APP.is_relative_to(ROOT / path) for path in copied
             ):
                 inputs.append("app")
-            if rel(DATA_DIR) in run or re.search(r"\btracker publish\b", run):
-                inputs.append("events")
+            if re.search(r"\btracker publish\b", run):
+                inputs.append("ingest")
             for other in needed(spec):
                 if job_outputs(step, other):
                     inputs += [node for _, node in reached.get((file, other), [])]
             edges += [f"  {node} -->|{text}| {target}" for node in inputs]
+    hub = node_id("service", "Hugging Face")
+    if hub in "".join(lines):
+        edges.append(f"  {hub} -->|read by the app| app")
     return list(dict.fromkeys(lines)) + list(dict.fromkeys(edges))
 
 
@@ -247,11 +251,13 @@ def sources_table() -> str:
             f"[{plain(source.title)}]({source.homepage})",
             plain(source.kind),
             plain(source.licence),
-            code(rel(events_path(key))),
+            code(clean_path(key)),
         )
         for key, source in SOURCES.items()
     ]
-    return table(("Source", "Name", "Kind", "Licence", "Stored as"), rows)
+    return table(
+        ("Source", "Name", "Kind", "Licence", "Clean table in the raw store"), rows
+    )
 
 
 def triggers(file: str, workflow: dict) -> str:

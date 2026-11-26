@@ -1,16 +1,12 @@
-"""Registry of data sources and access to their stored events."""
+"""Registry of data sources."""
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 
 import pandas as pd
 
 from tracker import eodi, geonames, leiden
-from tracker.schema import read_csv
 from tracker.store import Payload
-
-DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "events"
 
 
 @dataclass(frozen=True)
@@ -141,29 +137,3 @@ REFERENCES = {
 }
 """Reference datasets by key. Each one is a raw store source with payloads and
 no clean table."""
-
-
-def events_path(name: str) -> Path:
-    """Path of the stored CSV file of one source."""
-    return DATA_DIR / f"{name}.csv"
-
-
-def read_events(name: str) -> pd.DataFrame:
-    """Load the stored events of one source.
-
-    Args:
-        name: Key of `SOURCES`.
-
-    Returns:
-        The stored rows. Only empty cells are missing values, so a code such
-        as "NA" (Namibia) is kept. Dates stay strings.
-
-    Raises:
-        FileNotFoundError: The source has no stored file.
-    """
-    return read_csv(events_path(name))
-
-
-def read_all_events() -> pd.DataFrame:
-    """Load the stored events of every source as one frame."""
-    return pd.concat([read_events(name) for name in SOURCES], ignore_index=True)

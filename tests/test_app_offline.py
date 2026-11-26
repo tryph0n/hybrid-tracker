@@ -4,11 +4,10 @@ import json
 
 import pytest
 import streamlit as st
-from conftest import APP
+from conftest import APP, read_all_events
 from streamlit.testing.v1 import AppTest
 
 from tracker import hub
-from tracker.sources import read_all_events
 
 pytestmark = [
     pytest.mark.allow_hosts(["127.0.0.1"]),

@@ -4,6 +4,7 @@ import re
 
 import pandas as pd
 import pytest
+from conftest import read_all_events
 
 from tracker.schema import (
     CATEGORIES,
@@ -12,7 +13,6 @@ from tracker.schema import (
     make_event_id,
     validate,
 )
-from tracker.sources import read_all_events
 
 
 @pytest.fixture

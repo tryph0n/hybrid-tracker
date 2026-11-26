@@ -4,12 +4,14 @@
    the files of one open dataset, and `normalize()` maps the stored files to
    the unified schema.
 2. `tracker ingest` saves the downloaded files in the raw store, validates the
-   mapped events and stores them as `data/events/<source>.csv`, committed to
-   the repository, and as a clean Parquet table in the raw store.
-3. The Streamlit page `src/streamlit_app.py` reads these files and nothing else.
-4. The pipeline refreshes the live sources every day, publishes the app and
-   publishes the published tables to two public Hugging Face datasets. The app
-   does not read them.
+   mapped events and stores them as a clean Parquet table in the raw store.
+   No data file is committed to the repository.
+3. `tracker build` writes the published tables from the clean tables, and
+   `tracker publish` sends them to two public Hugging Face datasets.
+4. The Streamlit page `src/streamlit_app.py` reads the published events from
+   the public dataset, and falls back to a snapshot bundled in the image.
+5. The pipeline refreshes the live sources every day and publishes the
+   datasets and the app.
 
 This page is generated from the code by `scripts/architecture.py`: do not edit
 it by hand. After a change, run this command and commit the result:
@@ -22,14 +24,13 @@ The pipeline fails while the page is out of date.
 
 ## Overview
 
-Where the events come from, where they are stored, and where they go. Rounded boxes are outside the repository. Edge labels name the pipeline job or the manual step that moves the data. The Docker image holds `src/`, `.streamlit/`, `data/`, and the packages of `uv.lock`.
+Where the events come from, where they are stored, and where they go. Rounded boxes are outside the repository. Edge labels name the pipeline job or the manual step that moves the data. The Docker image holds `src/`, `.streamlit/`, and the packages of `uv.lock`.
 
 ```mermaid
 flowchart TB
   source_eodi("eodi<br/>live")
   source_leiden("leiden<br/>static")
   ingest["tracker.ingest"]
-  events[("data/events/")]
   app["streamlit_app.py"]
   service_Docker_Hub("Docker Hub")
   service_Render("Render")
@@ -37,17 +38,16 @@ flowchart TB
   service_Heartbeat_monitor("Heartbeat monitor")
   source_eodi -->|"Data job"| ingest
   source_leiden -->|"Data job"| ingest
-  ingest --> events
-  events --> app
   app -->|"Docker image job"| service_Docker_Hub
   service_Docker_Hub -->|"Deploy to Render job"| service_Render
-  events -->|"Hugging Face publish job"| service_Hugging_Face
+  ingest -->|"Hugging Face publish job"| service_Hugging_Face
+  service_Hugging_Face -->|read by the app| app
 ```
 
-| Source | Name | Kind | Licence | Stored as |
+| Source | Name | Kind | Licence | Clean table in the raw store |
 | --- | --- | --- | --- | --- |
-| `eodi` | [European Observatory of Drone Incidents](https://droneobservatory.eu) | live | CC BY 4.0 | `data/events/eodi.csv` |
-| `leiden` | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | static | CC BY 4.0 | `data/events/leiden.csv` |
+| `eodi` | [European Observatory of Drone Incidents](https://droneobservatory.eu) | live | CC BY 4.0 | `clean/eodi.parquet` |
+| `leiden` | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | static | CC BY 4.0 | `clean/leiden.parquet` |
 
 ## Pipeline
 
@@ -70,10 +70,10 @@ flowchart LR
   job_heartbeat["Heartbeat"]:::conditional
   job_lint --> job_data
   job_lint --> job_docs
-  job_data -->|sha| job_image
+  job_data --> job_image
   job_docs --> job_image
   job_image -->|image| job_deploy
-  job_data -->|sha| job_publish
+  job_data --> job_publish
   job_lint --> job_report_failure
   job_data --> job_report_failure
   job_docs --> job_report_failure
@@ -118,9 +118,7 @@ flowchart LR
 | Data | Build the published tables | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker build` |
 | Data | Write the quality table and the run summary | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker quality` |
 | Data | Keep the published tables for the publish job | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
-| Data | Validate stored data |  | `uv run tracker ingest check` |
 | Data | Run the tests |  | `uv run pytest --cov --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY"` |
-| Data | Commit refreshed data | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | a script |
 | Docs | Install |  | `uv sync --locked --group docs` |
 | Docs | Check the architecture page |  | `uv run python scripts/architecture.py --check` |
 | Docs | Build docs |  | `uv run sphinx-build -W --keep-going -b html docs docs/_build/html` |
@@ -216,9 +214,9 @@ flowchart TB
   module_tracker_sources --> module_tracker_eodi
   module_tracker_sources --> module_tracker_geonames
   module_tracker_sources --> module_tracker_leiden
-  module_tracker_sources --> module_tracker_schema
   module_tracker_sources --> module_tracker_store
   module_tracker_store --> module_tracker_clock
+  module_architecture_py --> module_tracker_ingest
   module_architecture_py --> module_tracker_sources
 ```
 
@@ -237,7 +235,7 @@ flowchart TB
 | `tracker.publish` | `src/tracker/publish.py` | Publish the tables of \`tracker build\` to the two public Hugging Face datasets. | huggingface_hub |
 | `tracker.quality` | `src/tracker/quality.py` | Quality table and run summary: one row per source and per run. | pandas |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
-| `tracker.sources` | `src/tracker/sources.py` | Registry of data sources and access to their stored events. | pandas |
+| `tracker.sources` | `src/tracker/sources.py` | Registry of data sources. | pandas |
 | `tracker.store` | `src/tracker/store.py` | Raw store client: keeps each source payload as fetched, with a manifest. | huggingface_hub |
 | `tracker.views` | `src/tracker/views.py` | Filters and headline counts of the dashboard, as plain functions on a frame. | pandas |
 | `architecture.py` | `scripts/architecture.py` | Generate docs/architecture.md, the architecture diagrams, from the code. | yaml |

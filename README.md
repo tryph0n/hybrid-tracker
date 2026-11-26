@@ -8,8 +8,9 @@ Europe since 2022, from open datasets.
 - Dashboard: [hybrid-tracker.onrender.com](https://hybrid-tracker.onrender.com).
   It sleeps when nobody visits: the first load can take about a minute.
 - Data: [sam-bot/europe-hybrid-incidents](https://huggingface.co/datasets/sam-bot/europe-hybrid-incidents)
-  on Hugging Face, or the [CSV files](https://github.com/tryph0n/hybrid-tracker/tree/main/data/events).
-  CC BY 4.0.
+  on Hugging Face (CC BY 4.0), and
+  [sam-bot/europe-hybrid-incidents-nc](https://huggingface.co/datasets/sam-bot/europe-hybrid-incidents-nc)
+  (NonCommercial, CC BY-NC 4.0).
 - Documentation: [hybrid-tracker.readthedocs.io](https://hybrid-tracker.readthedocs.io/):
   data dictionary, architecture, maintainer guide, API.
 - Code: [github.com/tryph0n/hybrid-tracker](https://github.com/tryph0n/hybrid-tracker),
@@ -17,7 +18,7 @@ Europe since 2022, from open datasets.
 
 ## Data
 
-One CSV file per source, all with the same columns.
+The datasets hold the events of the sources, all with the same columns.
 
 | Source | Content | Updates | Licence |
 |---|---|---|---|
@@ -25,7 +26,7 @@ One CSV file per source, all with the same columns.
 | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | Operations that the author judges Russian | Frozen snapshot | CC BY 4.0 |
 
 Each day at 04:17 UTC, the pipeline downloads each daily source again, checks every row,
-commits the files, then updates the dashboard and the dataset. See the
+publishes the two datasets, then updates the dashboard. See the
 [architecture page](https://hybrid-tracker.readthedocs.io/en/latest/architecture.html).
 
 ## Reading the data
@@ -104,8 +105,8 @@ To report a vulnerability, read the [security policy](https://github.com/tryph0n
 Code: Copyright 2026 Samy Antoine SAAD, licensed under the Apache License,
 Version 2.0 (see [LICENSE](https://github.com/tryph0n/hybrid-tracker/blob/main/LICENSE)).
 
-Data in `data/events/`: derived from the sources below and distributed under
-CC BY 4.0. Changes: the events of each source are mapped to one schema. Reuse
+Data in the two public datasets: derived from the sources below and distributed
+under their licences (CC BY 4.0, or CC BY-NC 4.0 for the NonCommercial dataset). Changes: the events of each source are mapped to one schema. Reuse
 must credit the original sources:
 
 - Lucas Alaniz Pintos, European Observatory of Drone Incidents (EODI): drone

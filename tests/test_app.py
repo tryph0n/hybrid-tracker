@@ -1,4 +1,4 @@
-"""The dashboard run headless with AppTest, on the stored data and on samples."""
+"""The dashboard run headless with AppTest, on samples."""
 
 import base64
 import importlib
@@ -10,14 +10,21 @@ import pandas as pd
 import plotly.io as pio
 import pytest
 import streamlit as st
-from conftest import APP, REVISION, REVISION_DATE
+from conftest import (
+    APP,
+    REVISION,
+    REVISION_DATE,
+    events_path,
+    read_all_events,
+    read_events,
+)
 from streamlit.elements.lib import policies
 from streamlit.runtime.caching import cache_utils
 from streamlit.testing.v1 import AppTest
 
 from tracker import hub
 from tracker.schema import ATTRIBUTIONS, CATEGORY_DOMAINS, DOMAINS
-from tracker.sources import SOURCES, events_path, read_all_events, read_events
+from tracker.sources import SOURCES
 from tracker.views import coordinate_coverage
 
 
@@ -80,12 +87,6 @@ def share_places(count: int):
     place = shown.iloc[0][["lat", "lon"]].tolist()
     eodi.loc[shown.index[:count].append(dismissed.index), ["lat", "lon"]] = place
     eodi.to_csv(events_path("eodi"), index=False)
-
-
-def test_runs_on_the_stored_data():
-    at = run_app()
-    shown = expected_events(read_all_events())
-    assert metrics(at)["Events"] == f"{len(shown):,}"
 
 
 def test_counts_on_the_samples(sample_data_dir):
