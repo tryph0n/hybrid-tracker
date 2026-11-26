@@ -18,6 +18,11 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Changed
 
+- The dashboard shows one line for each incident, with the value of each source
+  for its domain, category, status, attribution, actors, countries and link.
+  The source filter sets the scope, a filter on one source's fields keeps an
+  incident when one row passes all of them together, and an incident counts in
+  each domain that one of its sources gives it (record 0004, Counts).
 - The data left git: `data/events/` is removed, `tracker ingest` writes only to
   the raw store, `tracker ingest check` is removed, and the pipeline no longer
   commits to `main`. The two public datasets hold the data.

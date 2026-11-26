@@ -91,8 +91,8 @@ The domain is not a condition. Reasons:
   rows in `air`. Leiden records some drone flights with the `EventCategory`
   "Reconnaissance" or "Unknown", which the adapter maps to `espionage` or
   `other`. With a domain condition, 8 of the 22 matches of the sample are not
-  candidates, and each of these incidents counts twice: once in `air` and once
-  in `espionage` or `other`.
+  candidates, and each of these incidents makes two lines in the app: one for
+  the EODI row and one for the Leiden row.
 - One country in one month has incidents of different kinds, for example a
   disinformation campaign and a drone flight. The match rule keeps them apart.
   On the data at commit `cbad1cd`, the candidates go from 113 to 318 with no
@@ -275,24 +275,53 @@ gives a month (one row: a year) and a country or a sea, and no coordinates.
 
 ### Counts
 
-- A cluster counts once, in the domain of its canonical record. The other rows
-  of the cluster keep their own domain, and the cluster view shows it. With
-  this rule, the counts by domain add up to the number of incidents. On the
-  data at commit `cbad1cd`, with the curation, `espionage` goes from 17 rows
-  to 14 incidents and `other` from 9 rows to 8 incidents, because 3
-  "Reconnaissance" rows and 1 "Unknown" row of Leiden join EODI rows in `air`.
+The app shows one line for each incident (ticket #165). The line shows the
+value of each source for the fields of one source, and the counts use the rows
+that pass the filters. The rules:
+
+- The source filter sets the scope. A row of a source that is not selected is in
+  no line and in no count.
+- The line takes its title, dates, place and coordinates from the first row in
+  scope, in the source order. When that source is out of scope, the next one
+  gives them.
+- The line shows the domain, category, status, attribution level, actors,
+  attributed by, countries and link of every row in scope. One value shows
+  when the rows agree. Otherwise each value shows with the name of its source:
+  "Air (EODI); Espionage (Leiden)". An empty value stays empty for its source.
+  A filter does not change a line. Only the source filter does.
+- A filter on a field of one source keeps an incident when one row in scope
+  passes all these filters together. The period filter tests the date of the
+  line. A row of the incident that passes decides: an incident whose EODI row
+  is `air` and `dismissed`, and whose Leiden row is `espionage` and
+  `confirmed`, does not pass "domain `air`, status `confirmed`".
+- An incident counts once in each value that a passing row gives it, so the
+  counts by domain can add up to more than the number of incidents. The
+  Incidents and Officially attributed figures count an incident once. The
+  official count by state takes its states from the passing rows that are
+  `official`, on the same row.
+- The "Last 30 days" figure and its change use the date of the line, and
+  ignore the period filter. The timeline counts an incident in the week or
+  month of the date of the line.
+- The map shows an incident with coordinates on its line, with one marker for
+  each domain of the passing rows, at the same place.
+- The CSV holds the rows in scope of the listed incidents, with the published
+  columns.
+
+Reasons:
+
+- Each source states its own domain, and the sources disagree on the domain of
+  one incident: a drone flight is `air` for EODI and `espionage` for Leiden.
+  Picking the domain of the canonical row hides the Leiden view. The app shows
+  what each source records and picks no value.
 - A cluster stays in the default view when one of its rows is not
-  `dismissed`. Reason: the default status filter hides `dismissed` rows. EODI
-  marks `eodi:EODI-2025-00112` (Vilnius) `dismissed`, and Leiden records the
-  same incident (`leiden:55e3134992fd`). If the status of the canonical record
-  decided, the default view would hide an incident that one source records.
-- A cluster counts once in each source of its rows. On the data at commit
-  `cbad1cd`, with the curation, Leiden has 146 and EODI 431. The counts by
-  source add up to more than the number of incidents, because a cluster with
-  two sources counts in both.
-- On the data at commit `cbad1cd`, with the curation, the 577 rows make 566
-  clusters. The default view shows 570 rows and 560 clusters (559 if the
-  status of the canonical record decided).
+  `dismissed`. EODI marks `eodi:EODI-2025-00112` (Vilnius) `dismissed`, and
+  Leiden records the same incident (`leiden:55e3134992fd`). The line shows both
+  statuses, and a status filter does not change the line.
+
+Numbers on the data at commit `cbad1cd`, with the curation: the 577 rows make
+566 clusters. The default view shows 560 incidents. The timeline counts 17
+incidents in `espionage` and 9 in `other` (14 and 8 when only the canonical row
+gave the domain). The counts by domain add up to more than 560.
 
 ### Labelled sample
 
@@ -383,6 +412,12 @@ The rule alone does not reach the targets:
 
 ## Alternatives rejected
 
+- Count a cluster only in the domain of its canonical record. The counts by
+  domain add up to the number of incidents, but the app hides the domain that
+  the other source gives. On the data at commit `cbad1cd`, `espionage` shows 14
+  incidents where the sources record 17, and `other` shows 8 where they record
+  9. The app counts an incident in each domain of its rows instead (see
+  "Counts").
 - No date rule. Two incidents at one site on different dates would make one
   cluster, and the count would go down.
 - A fixed window of days around the stored date. The stored date of a Leiden
@@ -406,7 +441,7 @@ The rule alone does not reach the targets:
   title rule keeps 19 matches, with 11 false matches.
 - A domain condition on the candidates. 8 of the 22 matches are not
   candidates, the recall by pairs goes down to 0.55, and an incident that the
-  two sources record in different domains counts twice.
+  two sources record in different domains makes two lines in the app.
 
 ## Consequences
 

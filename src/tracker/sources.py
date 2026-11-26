@@ -16,6 +16,10 @@ class Source:
     title: str
     """Name shown in the app."""
 
+    short_name: str
+    """Short name that a line of the app puts next to a value of this source, for
+    example "EODI" in "Air (EODI); Espionage (Leiden)"."""
+
     kind: str
     """Either "live", for a source refreshed by the scheduled pipeline, or "static",
     for a frozen historical snapshot, re-ingested by hand."""
@@ -92,6 +96,7 @@ FAMILIES = ("open", "nc")
 SOURCES = {
     "eodi": Source(
         title="European Observatory of Drone Incidents",
+        short_name="EODI",
         kind="live",
         homepage="https://droneobservatory.eu",
         licence="CC BY 4.0",
@@ -106,6 +111,7 @@ SOURCES = {
     ),
     "leiden": Source(
         title="Russian Operations Against Europe Dataset, 2022-2025",
+        short_name="Leiden",
         kind="static",
         homepage=leiden.DATASET_URL,
         licence="CC BY 4.0",

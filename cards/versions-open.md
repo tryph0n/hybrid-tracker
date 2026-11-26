@@ -17,7 +17,10 @@ tag, use the file names of that tag.
 Three new columns: `cluster_id`, `n_sources` and `is_canonical`. A
 cluster is the rows of different sources that record one incident (record 0004
 of the project). Count incidents with `is_canonical`: it is true on one row of
-each cluster. `cluster_id` can differ from the one of the other dataset for one
+each cluster. The other fields can differ between the rows of a cluster: count
+by domain with the distinct `cluster_id` of each `domain`, not only the
+canonical rows, because one incident can have a different domain in each
+source. `cluster_id` can differ from the one of the other dataset for one
 incident. The older versions have no cluster columns, and each row is one
 incident. The tag `v2.2.0` is on the commit of the first upload.
 

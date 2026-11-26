@@ -28,8 +28,11 @@ from tracker.schema import (
 from tracker.sources import SOURCES
 from tracker.views import (
     coordinate_coverage,
-    filter_events,
+    incident_lines,
+    memberships,
     official_by_actor,
+    passing_rows,
+    scope_rows,
     with_clusters,
     with_code_lists,
 )
@@ -118,6 +121,19 @@ BLUE_RAMP = [
 
 EUROPE_CENTER = {"lat": 53, "lon": 14}
 
+SOURCE_NAMES = {name: source.short_name for name, source in SOURCES.items()}
+# The fields of one source: a line shows each of them for each source.
+LINE_FIELDS = [
+    "domain_label",
+    "category_label",
+    "status_label",
+    "attribution_label",
+    "actor_names",
+    "attributed_by_label",
+    "country_names",
+    "url",
+]
+
 
 @st.cache_data(ttl="1h", max_entries=2)
 def load_events(revision: str) -> tuple[pd.DataFrame, str, str, str]:
@@ -134,6 +150,7 @@ def load_events(revision: str) -> tuple[pd.DataFrame, str, str, str]:
     events["domain_label"] = events["domain"].map(DOMAIN_LABELS)
     events["category_label"] = events["category"].map(CATEGORY_LABELS)
     events["attribution_label"] = events["attribution"].map(ATTRIBUTION_LABELS)
+    events["status_label"] = events["event_status"].map(EVENT_STATUS_LABELS)
     events["attributed_by_label"] = events["attributed_by"].fillna("")
     events["actor_names"] = (
         events["actors"]
@@ -144,8 +161,12 @@ def load_events(revision: str) -> tuple[pd.DataFrame, str, str, str]:
             )
         )
     )
+    events = with_code_lists(with_clusters(events))
+    events["country_names"] = events["country_codes"].map(
+        lambda codes: ", ".join(country_name(code) for code in codes)
+    )
     return (
-        with_code_lists(with_clusters(events)),
+        events,
         published.revision,
         published.date,
         published.failure,
@@ -164,11 +185,17 @@ def country_iso3(code: str) -> str | None:
     return country.alpha_3 if country else None
 
 
-def count_by_country(events: pd.DataFrame) -> pd.DataFrame:
-    """Events per country. An event spanning two countries counts in both."""
-    codes = events["country_codes"].explode()
+def count_by_country(in_country: pd.DataFrame) -> pd.DataFrame:
+    """Incidents per country, from the memberships of `country_codes`.
+
+    An incident that one source puts in two countries, or that two sources put
+    in two countries, counts in both.
+    """
     counts = (
-        codes[codes != ""].value_counts().rename_axis("code").reset_index(name="events")
+        in_country["value"]
+        .value_counts()
+        .rename_axis("code")
+        .reset_index(name="events")
     )
     counts["country"] = counts["code"].map(country_name)
     counts["iso3"] = counts["code"].map(country_iso3)
@@ -176,11 +203,12 @@ def count_by_country(events: pd.DataFrame) -> pd.DataFrame:
 
 
 def timeline_chart(
-    events: pd.DataFrame, colors: dict[str, str], weekly: bool, surface: str
+    in_domain: pd.DataFrame, colors: dict[str, str], weekly: bool, surface: str
 ) -> go.Figure:
-    period = events["date"].dt.to_period("W" if weekly else "M").dt.start_time
+    """Incidents per week or month of their date, once in each of their domains."""
+    period = in_domain["line_date"].dt.to_period("W" if weekly else "M").dt.start_time
     counts = (
-        events.groupby([period.rename("period"), "domain_label"])
+        in_domain.groupby([period.rename("period"), "value"])
         .size()
         .reset_index(name="events")
     )
@@ -188,10 +216,10 @@ def timeline_chart(
         counts,
         x="period",
         y="events",
-        color="domain_label",
-        category_orders={"domain_label": list(colors)},
+        color="value",
+        category_orders={"value": list(colors)},
         color_discrete_map=colors,
-        labels={"period": "", "events": "Events", "domain_label": ""},
+        labels={"period": "", "events": "Events", "value": ""},
     )
     fig.update_traces(marker_line_color=surface, marker_line_width=1)
     fig.update_layout(
@@ -203,16 +231,22 @@ def timeline_chart(
     return fig
 
 
-def points_map(located: pd.DataFrame, colors: dict[str, str], dark: bool) -> go.Figure:
+def points_map(
+    located: pd.DataFrame, in_domain: pd.DataFrame, colors: dict[str, str], dark: bool
+) -> go.Figure:
+    """One marker for each incident and domain of its passing rows, at its place."""
     located = located.assign(
         day=located["date"].dt.strftime("%Y-%m-%d"),
         here=located.groupby(["lat", "lon"])["lat"].transform("size"),
+    ).merge(
+        in_domain[["cluster_id", "value"]].rename(columns={"value": "marker_domain"}),
+        on="cluster_id",
     )
     fig = px.scatter_map(
         located,
         lat="lat",
         lon="lon",
-        color="domain_label",
+        color="marker_domain",
         hover_name="title",
         hover_data={
             "day": True,
@@ -224,12 +258,12 @@ def points_map(located: pd.DataFrame, colors: dict[str, str], dark: bool) -> go.
             "here": True,
             "lat": False,
             "lon": False,
-            "domain_label": False,
+            "marker_domain": False,
         },
-        category_orders={"domain_label": list(colors)},
+        category_orders={"marker_domain": list(colors)},
         color_discrete_map=colors,
         labels={
-            "domain_label": "",
+            "marker_domain": "",
             "day": "Date",
             "place": "Place",
             "category_label": "Category",
@@ -413,10 +447,10 @@ with st.sidebar:
         key="countries",
     )
 
+scope = scope_rows(all_events, sources=source_names, order=list(SOURCES))
 # Every filter except the period: used for the "last 30 days" figure.
-scoped = filter_events(
-    all_events,
-    sources=source_names,
+passing = passing_rows(
+    scope,
     domains=domains,
     categories=categories,
     statuses=statuses,
@@ -427,8 +461,10 @@ scoped = filter_events(
 
 today = utc_today()
 days = PERIODS[period_label]
-month_sources = scoped.loc[
-    scoped["date_precision"].isin(["month", "year"]), "source"
+line_dates = passing.drop_duplicates("cluster_id")["line_date"]
+month_lines = incident_lines(scope, passing, fields=[], names=SOURCE_NAMES)
+month_sources = month_lines.loc[
+    month_lines["date_precision"].isin(["month", "year"]), "line_source"
 ].unique()
 if days is not None and len(month_sources):
     titles = ", ".join(SOURCES[name].title for name in SOURCES if name in month_sources)
@@ -439,27 +475,34 @@ if days is not None and len(month_sources):
         "date falls inside it, so an event of the month that contains the "
         "period start can be left out."
     )
-events = (
-    scoped if days is None else scoped[scoped["date"] > today - pd.Timedelta(days=days)]
+rows = (
+    passing
+    if days is None
+    else passing[passing["line_date"] > today - pd.Timedelta(days=days)]
 )
 
-if events.empty:
+if rows.empty:
     st.info("No event matches these filters.")
     st.stop()
 
-by_country = count_by_country(events)
+lines = incident_lines(scope, rows, fields=LINE_FIELDS, names=SOURCE_NAMES).sort_values(
+    "date", ascending=False, kind="stable"
+)
+listed = scope[scope["cluster_id"].isin(lines["cluster_id"])]
+in_domain = memberships(rows, "domain_label")
+by_country = count_by_country(memberships(rows, "country_codes"))
 if countries:
     by_country = by_country[by_country["code"].isin(countries)]
-last_30 = (scoped["date"] > today - pd.Timedelta(days=30)).sum()
+last_30 = (line_dates > today - pd.Timedelta(days=30)).sum()
 previous_30 = (
-    (scoped["date"] > today - pd.Timedelta(days=60))
-    & (scoped["date"] <= today - pd.Timedelta(days=30))
+    (line_dates > today - pd.Timedelta(days=60))
+    & (line_dates <= today - pd.Timedelta(days=30))
 ).sum()
 
 kpi_events, kpi_countries, kpi_recent, kpi_official = st.columns(4)
 kpi_events.metric(
     "Incidents",
-    f"{len(events):,}",
+    f"{len(lines):,}",
     help="Events that more than one source reports count once.",
 )
 kpi_countries.metric("Countries", len(by_country))
@@ -470,7 +513,7 @@ kpi_recent.metric(
     delta_color="inverse",
     help="Compared with the 30 days before. Ignores the period filter.",
 )
-official = official_by_actor(events)
+official = official_by_actor(rows)
 if official:
     official_help = "Events a public authority attributed to a state, by state: " + (
         ", ".join(f"{country_name(code)} {n:,}" for code, n in official.items()) + "."
@@ -479,16 +522,18 @@ else:
     official_help = "No event of this selection has an official attribution."
 kpi_official.metric(
     "Officially attributed",
-    int((events["attribution"] == "official").sum()),
+    int(rows.loc[rows["attribution"] == "official", "cluster_id"].nunique()),
     help=official_help + " An attribution is a statement of its author, not a fact.",
 )
 
 weekly = days is not None and days <= 90
 st.subheader(f"Events per {'week' if weekly else 'month'}")
-st.plotly_chart(timeline_chart(events, colors, weekly, surface))
+st.plotly_chart(timeline_chart(in_domain, colors, weekly, surface))
 st.caption(
     "Counts follow source coverage, not only reality: each source covers its own "
-    "period (see the Sources table)."
+    "period (see the Sources table). An incident counts in each domain that one "
+    "of its sources gives it, so the counts by domain can add up to more than "
+    "the number of incidents."
 )
 
 st.subheader("Where")
@@ -498,8 +543,8 @@ map_view = st.segmented_control(
     default="Incidents",
     label_visibility="collapsed",
 )
-located = events.dropna(subset=["lat", "lon"])
-coverage = coordinate_coverage(events)
+located = lines.dropna(subset=["lat", "lon"])
+coverage = coordinate_coverage(lines, listed)
 on_no_map = coverage.on_no_map
 if on_no_map == 1:
     no_map_note = " 1 event has no country (open sea) and is on no map."
@@ -522,8 +567,8 @@ else:
 if map_view == "Countries":
     st.plotly_chart(countries_map(by_country, dark))
     st.caption(
-        "Events per country, Europe only. An event spanning several countries "
-        "counts once in each country shown." + no_map_note
+        "Incidents per country, Europe only. An incident counts once in each "
+        "country that one of its sources gives it." + no_map_note
     )
 elif located.empty:
     st.info(
@@ -544,47 +589,49 @@ else:
     else:
         stacked_note = ""
     if len(located) == 1:
-        located_note = f"1 of {len(events):,} selected events has coordinates."
+        located_note = f"1 of {len(lines):,} selected events has coordinates."
     else:
         located_note = (
-            f"{len(located):,} of {len(events):,} selected events have coordinates."
+            f"{len(located):,} of {len(lines):,} selected events have coordinates."
         )
     with_titles = ", ".join(SOURCES[name].title for name in coverage.sources_with)
     sources_note = f" Sources with coordinates: {with_titles}."
     if without_titles:
         sources_note += f" Sources with no coordinates: {without_titles}."
-    st.plotly_chart(points_map(located, colors, dark))
+    st.plotly_chart(points_map(located, in_domain, colors, dark))
     st.caption(
         located_note
         + stacked_note
         + sources_note
-        + " The legend lists only the domains of the events that have "
-        "coordinates: it is not the Domain filter." + countries_only_note + no_map_note
+        + " An event has one marker for each domain that one of its sources "
+        "gives it, at the same place. The legend lists only the domains of the "
+        "events that have coordinates: it is not the Domain filter."
+        + countries_only_note
+        + no_map_note
     )
 
 st.subheader("Most affected countries (top 15, ties kept)")
 st.plotly_chart(countries_bar(by_country))
 
 st.subheader("Events")
-table = events.sort_values("date", ascending=False).assign(
-    Country=lambda frame: frame["country_codes"].map(
-        lambda codes: ", ".join(country_name(code) for code in codes if code)
-    ),
-    Status=lambda frame: frame["event_status"].map(EVENT_STATUS_LABELS),
+st.caption(
+    "One line for each incident. A value that the sources do not share is "
+    "shown with the name of each source. The title, the dates and the place "
+    "are those of the first source in the list of sources."
 )
 st.dataframe(
-    table[
+    lines[
         [
             "date",
             "end_date",
-            "Country",
+            "country_names",
             "domain_label",
             "category_label",
             "title",
-            "Status",
+            "status_label",
             "attribution_label",
             "actor_names",
-            "attributed_by",
+            "attributed_by_label",
             "url",
         ]
     ],
@@ -592,25 +639,26 @@ st.dataframe(
     column_config={
         "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
         "end_date": st.column_config.DateColumn("End date", format="YYYY-MM-DD"),
+        "country_names": "Country",
         "domain_label": "Domain",
         "category_label": "Category",
         "title": st.column_config.TextColumn("What", width="large"),
+        "status_label": "Status",
         "attribution_label": "Attribution",
         "actor_names": "Actors",
-        "attributed_by": "Attributed by",
-        "url": st.column_config.LinkColumn("Details", display_text="Open"),
+        "attributed_by_label": "Attributed by",
+        "url": st.column_config.TextColumn("Details"),
     },
 )
 st.download_button(
     "Download selection (CSV)",
-    data=events.assign(
-        date=events["date"].dt.strftime("%Y-%m-%d"),
-        end_date=events["end_date"].dt.strftime("%Y-%m-%d"),
+    data=listed.assign(
+        date=listed["date"].dt.strftime("%Y-%m-%d"),
+        end_date=listed["end_date"].dt.strftime("%Y-%m-%d"),
     )[PUBLISHED_COLUMNS].to_csv(index=False),
     file_name="hybrid_incidents.csv",
     mime="text/csv",
 )
-
 st.subheader("Sources")
 st.dataframe(
     sources_table(all_events),

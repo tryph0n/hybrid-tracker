@@ -16,8 +16,19 @@ after it joins the rows of different sources that record one incident
 
 {{ cluster_columns_table }}
 A cluster holds at most one row of each source. To count incidents, count the
-rows where `is_canonical` is true. A cluster has one canonical record, the row
-of the first source in the source order.
+rows where `is_canonical` is true, or the distinct `cluster_id`: the two
+numbers are equal. A cluster has one canonical record, the row of the first
+source in the source order. It gives the incident its id, and the app takes
+the title, the dates and the place of a line from the first row of the cluster
+in the source order.
+
+The other fields can differ between the rows of one cluster: one source can
+give another domain, status or attribution. The canonical record does not
+decide them. The dashboard shows the value of each source on the line of the
+incident, and counts an incident once in each domain that one of its rows
+gives it, so the counts by domain can add up to more than the number of
+incidents. To count by domain as the dashboard does, count the distinct
+`cluster_id` for each `domain`, and not only the canonical rows.
 
 `cluster_id` is the `event_id` of the canonical row. It groups the rows of one
 version of the table: to keep a reference across versions, store an `event_id`

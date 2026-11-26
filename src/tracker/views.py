@@ -1,6 +1,16 @@
-"""Filters and headline counts of the dashboard, as plain functions on a frame."""
+"""Filters and headline counts of the dashboard, as plain functions on a frame.
 
-from collections.abc import Collection
+An incident is a cluster of rows (see `tracker.dedup`). The functions here keep
+the rows of every source and never pick one row to state a value: the app shows
+what each source records. The steps are:
+
+1. `scope_rows`: the rows of the selected sources.
+2. `passing_rows`: the rows that pass the filters on the fields of one source.
+3. `incident_lines`: one line per incident, from the rows in scope.
+4. `memberships`: the incidents that each value counts, from the passing rows.
+"""
+
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 import pandas as pd
@@ -36,10 +46,36 @@ def overlaps(codes: pd.Series, selected: Collection[str]) -> pd.Series:
     return codes.map(lambda found: bool(chosen.intersection(found)))
 
 
-def filter_events(
-    events: pd.DataFrame,
+def scope_rows(
+    events: pd.DataFrame, *, sources: Collection[str], order: Sequence[str]
+) -> pd.DataFrame:
+    """Keep the rows of the selected sources, in the source order.
+
+    The source filter sets the scope: a row of another source is in no line and
+    in no count. Each row gets `is_line`, true on the first row of its incident
+    in the source order, and `line_date`, the date of that row. This row gives
+    the line its title, date and place (record 0004, Source order). A source
+    that is not in `order` comes last.
+
+    Args:
+        events: A frame from `with_code_lists` and `with_clusters`.
+        sources: The selected sources.
+        order: Every source, first in the source order first.
+    """
+    rank = {name: place for place, name in enumerate(order)}
+    rows = events[events["source"].isin(sources)]
+    places = rows["source"].map(lambda name: rank.get(name, len(rank)))
+    rows = rows.iloc[places.to_numpy().argsort(kind="stable")]
+    is_line = ~rows["cluster_id"].duplicated()
+    line_date = (
+        rows["date"].where(is_line).groupby(rows["cluster_id"]).transform("first")
+    )
+    return rows.assign(is_line=is_line, line_date=line_date)
+
+
+def passing_rows(
+    scope: pd.DataFrame,
     *,
-    sources: Collection[str],
     domains: Collection[str],
     categories: Collection[str],
     statuses: Collection[str],
@@ -47,54 +83,142 @@ def filter_events(
     actors: Collection[str] = (),
     countries: Collection[str] = (),
 ) -> pd.DataFrame:
-    """Keep the incidents that every filter except the period keeps.
+    """Keep the rows of the scope that pass every filter except the period.
 
-    An incident is a cluster of rows (see `tracker.dedup`). It is returned as its
-    canonical record. The source, status, attribution, actor and country filters
-    apply to the rows: an incident stays when one row passes all of them, so an
-    incident that one source dismisses stays while another source keeps it. The
-    domain and category filters apply to the canonical record, so the counts by
-    domain add up to the number of incidents.
+    A row passes when it passes all the filters together: an incident whose
+    EODI row is `air` and `dismissed` and whose Leiden row is `espionage` and
+    `confirmed` does not pass "domain `air`, status not `dismissed`". An
+    incident is listed when one of its rows passes.
 
-    An empty `actors` or `countries` keeps every event, also the events that name
-    no state or no country: attribution is a filter, never an inclusion test.
-    A frame from `with_code_lists` and `with_clusters` is required.
+    An empty `actors` or `countries` keeps every row, also the rows that name no
+    state or no country: attribution is a filter, never an inclusion test.
     """
     keep = (
-        events["source"].isin(sources)
-        & events["event_status"].isin(statuses)
-        & events["attribution"].isin(attributions)
+        scope["domain"].isin(domains)
+        & scope["category"].isin(categories)
+        & scope["event_status"].isin(statuses)
+        & scope["attribution"].isin(attributions)
     )
     if actors:
-        keep &= overlaps(events["actor_codes"], actors)
+        keep &= overlaps(scope["actor_codes"], actors)
     if countries:
-        keep &= overlaps(events["country_codes"], countries)
-    canonical = events[events["is_canonical"]]
-    return canonical[
-        canonical["cluster_id"].isin(events.loc[keep, "cluster_id"])
-        & canonical["domain"].isin(domains)
-        & canonical["category"].isin(categories)
-    ]
+        keep &= overlaps(scope["country_codes"], countries)
+    return scope[keep]
 
 
-def official_by_actor(events: pd.DataFrame) -> dict[str, int]:
-    """Count the `official` events of each state, most events first.
+def per_source_values(
+    scope: pd.DataFrame, column: str, names: Mapping[str, str]
+) -> pd.Series:
+    """Give the text of a field for each incident, from the rows in scope.
 
-    An event that names several states counts once for each of them. An event
-    with no state named is in no count.
+    The text is the value when the rows agree. Otherwise it is each value with
+    the name of its source, in the source order: "Air (EODI); Espionage
+    (Leiden)". An empty value stays empty: it shows as the name of its source
+    alone, "(EODI)".
+
+    Args:
+        scope: A frame from `scope_rows`.
+        column: The column to read.
+        names: The name of each source.
+
+    Returns:
+        The texts, indexed by `cluster_id`.
     """
-    official = events[events["attribution"] == "official"]
-    counts = official["actor_codes"].explode().dropna().value_counts()
+    found: dict[str, list[tuple[str, str]]] = {}
+    texts = scope[column].fillna("").astype(str)
+    for cluster, source, text in zip(
+        scope["cluster_id"], scope["source"], texts, strict=True
+    ):
+        found.setdefault(cluster, []).append((source, text))
+    values = {}
+    for cluster, pairs in found.items():
+        if len({text for _, text in pairs}) == 1:
+            values[cluster] = pairs[0][1]
+        else:
+            values[cluster] = "; ".join(
+                f"{text} ({names[source]})" if text else f"({names[source]})"
+                for source, text in pairs
+            )
+    return pd.Series(values, dtype=object)
+
+
+def incident_lines(
+    scope: pd.DataFrame,
+    passing: pd.DataFrame,
+    *,
+    fields: Sequence[str],
+    names: Mapping[str, str],
+) -> pd.DataFrame:
+    """Build one line for each incident that has a passing row.
+
+    The line gets its `date`, `end_date`, `date_precision`, `place`, `lat`,
+    `lon` and `title` from the first row in scope (see `scope_rows`), and
+    `line_source`, the source of that row. Each column of `fields` holds the
+    text of `per_source_values`, from all the rows in scope, not only the
+    passing ones: the line does not change when a filter other than the source
+    filter changes. `has_country` is true when a passing row names a country.
+    The lines are in the order of the first row of each incident in `scope`.
+
+    Args:
+        scope: A frame from `scope_rows`.
+        passing: The rows of `scope` of the incidents to list.
+        fields: The columns to combine by source.
+        names: The name of each source.
+    """
+    listed = scope[scope["cluster_id"].isin(passing["cluster_id"])]
+    base = ["cluster_id", "date", "end_date", "date_precision", "place", "lat", "lon"]
+    lines = listed.loc[listed["is_line"], [*base, "title", "source"]].rename(
+        columns={"source": "line_source"}
+    )
+    for column in fields:
+        lines[column] = lines["cluster_id"].map(
+            per_source_values(listed, column, names)
+        )
+    named = set(passing.loc[passing["country_codes"].map(bool), "cluster_id"])
+    return lines.assign(has_country=lines["cluster_id"].isin(named))
+
+
+def memberships(rows: pd.DataFrame, column: str) -> pd.DataFrame:
+    """List the values of a field that each incident counts in.
+
+    An incident counts once in each value that one of the rows gives it, so the
+    counts by domain can add up to more than the number of incidents. A column of
+    lists, such as `country_codes`, gives one value for each item. An empty
+    value is no value.
+
+    Args:
+        rows: The passing rows, with `line_date`.
+        column: The column to read.
+
+    Returns:
+        One line for each incident and value, with `cluster_id`, `value` and the
+        `line_date` of the incident.
+    """
+    found = rows[["cluster_id", "line_date", column]].rename(columns={column: "value"})
+    found = found.explode("value").dropna(subset=["value"])
+    found = found[found["value"] != ""]
+    return found.drop_duplicates(["cluster_id", "value"])
+
+
+def official_by_actor(rows: pd.DataFrame) -> dict[str, int]:
+    """Count the incidents of each state that a passing `official` row names.
+
+    The states come from the rows that are `official`, on the same row. An
+    incident that names several states counts once for each of them. An
+    incident with no state named is in no count.
+    """
+    official = memberships(rows[rows["attribution"] == "official"], "actor_codes")
+    counts = official["value"].value_counts()
     return {str(code): int(n) for code, n in counts.items()}
 
 
 @dataclass(frozen=True)
 class CoordinateCoverage:
-    """Where the selected events can be seen, and which sources give coordinates.
+    """Where the listed incidents can be seen, and which sources give coordinates.
 
     `located`, `countries_only` and `on_no_map` are disjoint and add up to the
-    number of events. A source gives coordinates when at least one of its events
-    has them.
+    number of incidents. A source gives coordinates when at least one of its
+    rows in scope has them.
     """
 
     sources_with: list[str]
@@ -104,12 +228,18 @@ class CoordinateCoverage:
     on_no_map: int
 
 
-def coordinate_coverage(events: pd.DataFrame) -> CoordinateCoverage:
-    """Count the events by the view that shows them, and split sources by coordinates."""
-    has_coordinates = events["lat"].notna() & events["lon"].notna()
-    has_country = events["countries"].notna()
-    with_coordinates = set(events.loc[has_coordinates, "source"])
-    sources = list(dict.fromkeys(events["source"]))
+def coordinate_coverage(lines: pd.DataFrame, scope: pd.DataFrame) -> CoordinateCoverage:
+    """Count the lines by the view that shows them, and split sources by coordinates.
+
+    Args:
+        lines: The lines from `incident_lines`.
+        scope: The rows in scope of the listed incidents.
+    """
+    has_coordinates = lines["lat"].notna() & lines["lon"].notna()
+    has_country = lines["has_country"]
+    row_coordinates = scope["lat"].notna() & scope["lon"].notna()
+    with_coordinates = set(scope.loc[row_coordinates, "source"])
+    sources = list(dict.fromkeys(scope["source"]))
     return CoordinateCoverage(
         sources_with=[name for name in sources if name in with_coordinates],
         sources_without=[name for name in sources if name not in with_coordinates],

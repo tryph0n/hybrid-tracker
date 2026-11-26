@@ -2,6 +2,7 @@
 
 import base64
 import importlib
+import io
 import logging
 import re
 
@@ -23,9 +24,15 @@ from streamlit.runtime.caching import cache_utils
 from streamlit.testing.v1 import AppTest
 
 from tracker import hub
-from tracker.schema import ATTRIBUTIONS, CATEGORY_DOMAINS, DOMAINS
+from tracker.clock import utc_today
+from tracker.schema import (
+    ATTRIBUTIONS,
+    CATEGORY_DOMAINS,
+    DOMAINS,
+    PUBLISHED_COLUMNS,
+    read_csv,
+)
 from tracker.sources import SOURCES
-from tracker.views import coordinate_coverage
 
 
 @pytest.fixture(autouse=True)
@@ -187,9 +194,9 @@ def test_every_chart_is_coloured_by_domain(sample_data_dir):
 def test_table_and_map_state_who_attributed(sample_data_dir):
     at = run_app()
     table = at.dataframe[0].value
-    for column in ["attribution_label", "attributed_by", "end_date"]:
+    for column in ["attribution_label", "attributed_by_label", "end_date"]:
         assert column in table.columns
-    assert "Polish government" in set(table["attributed_by"])
+    assert "Polish government" in set(table["attributed_by_label"])
     hover = chart(at, 1).data[0].hovertemplate
     assert "Attribution=" in hover
     assert "Attributed by=" in hover
@@ -606,11 +613,357 @@ def test_the_loader_is_cached_for_one_hour(sample_data_dir, hub_fetches, monkeyp
     assert hub_fetches == ["main", "main"]
 
 
-def test_where_text_gives_the_events_on_no_map_like_the_helper(sample_data_dir):
-    open_sea_rows(2)
+BROGEL_TITLE = (
+    "Possible drones fly over Beauvechain military base and other locations in Belgium"
+)
+VILNIUS_TITLE = "Vilnius airport closure due to suspected balloons"
+VILNIUS_EODI = "eodi:EODI-2025-00112"
+BROGEL_EODI = "eodi:EODI-2025-00017"
+LINKS = {"leiden:V": VILNIUS_EODI, "leiden:K": BROGEL_EODI}
+LEIDEN_ONLY = {
+    "leiden:V": "Leiden title of the Vilnius incident",
+    "leiden:K": "Leiden title of the Brogel incident",
+}
+
+
+def link_incidents(**changes):
+    """Write the samples with two incidents that both sources record.
+
+    Vilnius: EODI dismisses it and gives an end date, Leiden confirms it.
+    Brogel: EODI says `air` and Belgium, Leiden says `espionage`, Belgium and
+    Sweden. `changes` maps an `event_id` to the fields to set on that row.
+    """
+    eodi, leiden = (read_events(name) for name in SOURCES)
+    for table in (eodi, leiden):
+        for column in ("date", "end_date"):
+            stamps = pd.to_datetime(table[column])
+            table[column] = stamps.dt.strftime("%Y-%m-%d").astype(object)
+    template = leiden.iloc[0].to_dict() | {
+        "countries": "BE",
+        "geo_precision": "country",
+        "domain": "espionage",
+        "category": "reconnaissance",
+        "event_status": "confirmed",
+        "actors": "RU",
+        "attribution": "assessed",
+    }
+    added = [
+        template
+        | {
+            "event_id": "leiden:V",
+            "date": "2025-10-01",
+            "end_date": "2025-12-31",
+            "countries": "LT",
+            "title": LEIDEN_ONLY["leiden:V"],
+        },
+        template
+        | {
+            "event_id": "leiden:K",
+            "date": "2025-11-01",
+            "countries": "BE;SE",
+            "title": LEIDEN_ONLY["leiden:K"],
+        },
+    ]
+    leiden = pd.concat([leiden, pd.DataFrame(added)], ignore_index=True)
+    eodi.loc[eodi["event_id"] == VILNIUS_EODI, "end_date"] = "2025-10-05"
+    both = pd.concat([eodi, leiden], ignore_index=True)
+    both["cluster_id"] = both["event_id"].map(LINKS).fillna(both["event_id"])
+    both["n_sources"] = both.groupby("cluster_id")["source"].transform("nunique")
+    both["is_canonical"] = both["source"] == "eodi"
+    for event_id, fields in changes.items():
+        for column, value in fields.items():
+            both.loc[both["event_id"] == event_id, column] = value
+    for name in SOURCES:
+        both[both["source"] == name].to_csv(events_path(name), index=False)
+
+
+@pytest.fixture
+def downloads(monkeypatch):
+    """The CSV texts that the app gave to `st.download_button`, latest last."""
+    given = []
+
+    def record(label, data, **kwargs):
+        given.append(data)
+        return False
+
+    monkeypatch.setattr(st, "download_button", record)
+    return given
+
+
+def csv_of(downloads) -> pd.DataFrame:
+    return read_csv(io.StringIO(downloads[-1]))
+
+
+def event_table(at: AppTest) -> pd.DataFrame:
+    return at.dataframe[0].value.astype(str)
+
+
+def line_of(at: AppTest, title: str) -> dict:
+    table = event_table(at)
+    found = table[table["title"] == title]
+    assert len(found) == 1, title
+    return found.iloc[0].to_dict()
+
+
+def numbers(array) -> list:
+    """Values of a Plotly array, which Plotly 7 sends as base64 when numeric."""
+    if isinstance(array, dict):
+        return np.frombuffer(
+            base64.b64decode(array["bdata"]), dtype=array["dtype"]
+        ).tolist()
+    return list(array)
+
+
+def by_domain(at: AppTest) -> dict[str, int]:
+    """Incidents of the timeline, by domain."""
+    return {trace.name: int(sum(numbers(trace.y))) for trace in chart(at, 0).data}
+
+
+def app_state(at: AppTest) -> dict:
+    """Figures, charts, table values and captions that a filter can change."""
+    return {
+        "figures": metrics(at),
+        "charts": [item.proto.spec for item in at.get("plotly_chart")],
+        "table": event_table(at).to_dict("list") if at.dataframe else None,
+        "texts": captions(at) + " ".join(info.value for info in at.info),
+    }
+
+
+def test_one_line_for_each_incident(sample_data_dir, downloads):
+    link_incidents()
     at = run_app()
-    shown = expected_events(read_all_events())
-    coverage = coordinate_coverage(shown)
-    assert coverage.on_no_map == 2
-    note = f"{coverage.on_no_map} events have no country (open sea) and are on no map."
-    assert note in captions(at)
+    rows = read_all_events()
+    expected = rows[rows["event_status"] != "dismissed"]["event_id"].map(
+        lambda event_id: LINKS.get(event_id, event_id)
+    )
+    assert metrics(at)["Incidents"] == str(len(event_table(at)))
+    assert len(event_table(at)) == csv_of(downloads)["cluster_id"].nunique()
+    assert len(event_table(at)) >= expected.nunique()
+
+
+def test_the_line_of_two_sources_shows_the_value_of_each(sample_data_dir):
+    link_incidents()
+    line = line_of(run_app(), BROGEL_TITLE)
+    assert line["domain_label"] == "Air (EODI); Espionage (Leiden)"
+    assert line["category_label"] == (
+        "Drone overflight (EODI); Reconnaissance (Leiden)"
+    )
+    assert line["status_label"] == "Reported, not confirmed (EODI); Confirmed (Leiden)"
+    assert line["attribution_label"] == (
+        "No attribution in the source (EODI); "
+        "Assessed by the source's analysts (Leiden)"
+    )
+    assert line["actor_names"] == "(EODI); Russian Federation (Leiden)"
+    assert line["country_names"] == "Belgium (EODI); Belgium, Sweden (Leiden)"
+
+
+def test_a_line_that_the_sources_agree_on_shows_one_value(sample_data_dir):
+    link_incidents(**{"leiden:K": {"domain": "air"}})
+    assert line_of(run_app(), BROGEL_TITLE)["domain_label"] == "Air"
+
+
+def test_an_incident_counts_in_the_domain_of_each_source(sample_data_dir):
+    link_incidents()
+    at = run_app()
+    totals = by_domain(at)
+    assert totals["Espionage"] == 3
+    assert totals["Air"] > 0
+    assert sum(totals.values()) > int(metrics(at)["Incidents"])
+    assert "can add up to more than the number of incidents" in captions(at)
+
+
+def test_the_domain_filter_leaves_the_line_unchanged(sample_data_dir):
+    link_incidents()
+    at = run_app()
+    before = line_of(at, BROGEL_TITLE)
+    at.multiselect(key="domains").set_value(["espionage"]).run()
+    assert not at.exception
+    assert line_of(at, BROGEL_TITLE) == before
+    assert by_domain(at) == {"Espionage": 3}
+    assert metrics(at)["Incidents"] == "3"
+
+
+def test_the_source_filter_removes_the_rows_of_the_other_sources(
+    sample_data_dir, downloads
+):
+    link_incidents()
+    at = run_app()
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    assert not at.exception
+    table = event_table(at)
+    assert metrics(at)["Incidents"] == str(len(table))
+    assert not table.apply(lambda column: column.str.contains("EODI")).to_numpy().any()
+    assert not table["title"].str.contains("Vilnius airport").any()
+    assert set(csv_of(downloads)["source"]) == {"leiden"}
+    assert by_domain(at)["Air"] == 1
+    at.multiselect(key="sources").set_value(["eodi"]).run()
+    assert not at.exception
+    table = event_table(at)
+    assert metrics(at)["Incidents"] == str(len(table))
+    assert (
+        not table.apply(lambda column: column.str.contains("Leiden")).to_numpy().any()
+    )
+    assert set(csv_of(downloads)["source"]) == {"eodi"}
+    assert set(by_domain(at)) == {"Air"}
+
+
+def test_the_line_takes_its_dates_from_the_first_source_in_scope(sample_data_dir):
+    link_incidents()
+    at = run_app()
+    line = line_of(at, VILNIUS_TITLE)
+    assert line["date"].startswith("2025-10-04")
+    assert line["end_date"].startswith("2025-10-05")
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    line = line_of(at, LEIDEN_ONLY["leiden:V"])
+    assert line["date"].startswith("2025-10-01")
+    assert line["end_date"].startswith("2025-12-31")
+
+
+def test_the_status_of_each_source_shows_and_a_dismissed_filter_changes_nothing(
+    sample_data_dir,
+):
+    link_incidents()
+    at = run_app()
+    line = line_of(at, VILNIUS_TITLE)
+    assert line["status_label"] == "Dismissed by the source (EODI); Confirmed (Leiden)"
+    at.multiselect(key="statuses").set_value(
+        ["confirmed", "unconfirmed", "dismissed"]
+    ).run()
+    assert not at.exception
+    assert line_of(at, VILNIUS_TITLE) == line
+
+
+def test_a_filter_tests_its_conditions_on_the_same_row_of_the_incident(
+    sample_data_dir,
+):
+    link_incidents()
+    at = run_app()
+    at.multiselect(key="domains").set_value(["air"]).run()
+    at.multiselect(key="statuses").set_value(["confirmed"]).run()
+    assert not at.exception
+    titles = set(event_table(at)["title"])
+    assert VILNIUS_TITLE not in titles
+    assert BROGEL_TITLE not in titles
+    assert "Drones over Hanover airport force flight diversions" in titles
+
+
+def test_the_countries_filter_shows_the_countries_of_each_source(sample_data_dir):
+    link_incidents()
+    at = run_app()
+    at.multiselect(key="countries").set_value(["SE"]).run()
+    assert not at.exception
+    assert line_of(at, BROGEL_TITLE)["country_names"] == (
+        "Belgium (EODI); Belgium, Sweden (Leiden)"
+    )
+    assert metrics(at)["Countries"] == "1"
+    assert metrics(at)["Incidents"] == "1"
+
+
+def test_the_download_holds_the_rows_in_scope_of_the_listed_incidents(
+    sample_data_dir, downloads
+):
+    link_incidents()
+    at = run_app()
+    rows = csv_of(downloads)
+    assert list(rows.columns) == PUBLISHED_COLUMNS
+    brogel = rows[rows["cluster_id"] == BROGEL_EODI].set_index("source")
+    assert brogel.loc["eodi", "domain"] == "air"
+    assert brogel.loc["leiden", "domain"] == "espionage"
+    assert brogel.loc["leiden", "countries"] == "BE;SE"
+    at.multiselect(key="domains").set_value(["espionage"]).run()
+    rows = csv_of(downloads)
+    assert set(rows["cluster_id"]) == {BROGEL_EODI, VILNIUS_EODI, "leiden:002"}
+    assert len(rows[rows["cluster_id"] == VILNIUS_EODI]) == 2
+
+
+def test_the_map_has_one_marker_for_each_domain_of_an_incident(sample_data_dir):
+    link_incidents()
+    at = run_app()
+    eodi = read_events("eodi").set_index("event_id")
+    place = (eodi.loc[BROGEL_EODI, "lat"], eodi.loc[BROGEL_EODI, "lon"])
+    traces = {trace.name: trace for trace in chart(at, 1).data}
+    for name in ("Air", "Espionage"):
+        points = list(
+            zip(numbers(traces[name].lat), numbers(traces[name].lon), strict=True)
+        )
+        assert sum(point == place for point in points) == 1, name
+
+
+def test_the_timeline_counts_an_incident_in_the_month_of_its_line(sample_data_dir):
+    link_incidents(**{"leiden:V": {"date": "2025-09-01"}})
+    at = run_app()
+    espionage = next(t for t in chart(at, 0).data if t.name == "Espionage")
+    months = {str(month)[:7] for month in espionage.x}
+    assert "2025-10" in months
+    assert "2025-09" not in months
+
+
+def test_last_30_days_tests_the_date_of_the_line_and_ignores_the_period(
+    sample_data_dir,
+):
+    recent = (utc_today() - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
+    old = (utc_today() - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    link_incidents(**{BROGEL_EODI: {"date": recent}, "leiden:K": {"date": old}})
+    at = run_app()
+    assert metrics(at)["Last 30 days"] == "1"
+    at.selectbox(key="period").set_value("Last 90 days").run()
+    assert not at.exception
+    assert metrics(at)["Last 30 days"] == "1"
+    at.selectbox(key="period").set_value("All time").run()
+    at.multiselect(key="sources").set_value(["leiden"]).run()
+    assert metrics(at)["Last 30 days"] == "0"
+
+
+def test_the_period_filter_tests_the_date_of_the_line(sample_data_dir):
+    recent = (utc_today() - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
+    old = (utc_today() - pd.Timedelta(days=500)).strftime("%Y-%m-%d")
+    link_incidents(**{BROGEL_EODI: {"date": old}, "leiden:K": {"date": recent}})
+    at = run_app()
+    at.selectbox(key="period").set_value("Last 12 months").run()
+    assert not at.exception
+    assert BROGEL_TITLE not in set(event_table(at)["title"])
+    at.selectbox(key="period").set_value("All time").run()
+    assert BROGEL_TITLE in set(event_table(at)["title"])
+
+
+def test_the_official_count_takes_the_states_from_the_official_rows(sample_data_dir):
+    link_incidents(
+        **{
+            "leiden:K": {"attribution": "official", "actors": "RU;BY"},
+            BROGEL_EODI: {"attribution": "none", "actors": ""},
+        }
+    )
+    at = run_app()
+    kpi = next(m for m in at.metric if m.label == "Officially attributed")
+    assert "Belarus 1" in kpi.help
+    assert "Russian Federation 2" in kpi.help
+
+
+@pytest.mark.parametrize(
+    ("key", "changed"),
+    [
+        ("period", "Last 12 months"),
+        ("sources", ["leiden"]),
+        ("domains", ["espionage"]),
+        ("categories", ["reconnaissance"]),
+        ("actors", ["RU"]),
+        ("attributions", ["assessed"]),
+        ("statuses", ["unconfirmed"]),
+        ("countries", ["SE"]),
+    ],
+)
+def test_a_change_of_a_filter_and_its_undo_restore_the_whole_state(
+    sample_data_dir, key, changed
+):
+    link_incidents()
+    at = run_app()
+    before = app_state(at)
+    widget = at.selectbox(key=key) if key == "period" else at.multiselect(key=key)
+    original = widget.value
+    widget.set_value(changed).run()
+    assert not at.exception
+    assert app_state(at) != before, key
+    widget = at.selectbox(key=key) if key == "period" else at.multiselect(key=key)
+    widget.set_value(original).run()
+    assert not at.exception
+    assert app_state(at) == before
