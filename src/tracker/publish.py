@@ -270,6 +270,8 @@ def publish_family(api: Any, family: str, folder: Path) -> list[str]:
     from huggingface_hub import CommitOperationAdd, CommitOperationDelete
 
     repo_id = DATASETS[family]
+    if not folder.is_dir():
+        raise UserError(f"{folder / 'events.parquet'} not found, run `tracker build`")
     sent = {
         path.name: path.read_bytes()
         for path in sorted(folder.iterdir())

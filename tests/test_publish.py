@@ -37,6 +37,7 @@ class FakeHfApi:
         self.tag_error: Exception | None = None
         self.corrupt: str | None = None
         self.skip: str | None = None
+        self.keep: str | None = None
 
     def list_repo_files(self, repo_id, *, repo_type, revision=None):
         assert repo_type == "dataset"
@@ -56,7 +57,8 @@ class FakeHfApi:
                     )
             else:
                 assert isinstance(op, CommitOperationDelete)
-                del files[op.path_in_repo]
+                if op.path_in_repo != self.keep:
+                    del files[op.path_in_repo]
         oid = f"{repo_id}@{len(self.snapshots) + 1}"
         self.main[repo_id] = files
         self.snapshots[oid] = files
@@ -254,3 +256,18 @@ def test_a_build_folder_without_the_events_table_stops(api, build):
 def test_an_unknown_family_stops(api, build):
     with pytest.raises(UserError, match="Unknown family"):
         publish.run("other", build, api)
+
+
+def test_the_read_back_fails_on_a_legacy_file_that_is_still_there(api, build):
+    api.main[OPEN] = {"eodi.csv": b"old", "leiden.csv": b"old"}
+    api.keep = "eodi.csv"
+
+    with pytest.raises(UserError, match="eodi.csv is still in"):
+        publish.run("open", build, api)
+
+
+def test_a_missing_build_folder_stops_with_the_build_hint(api, tmp_path):
+    with pytest.raises(UserError, match="run `tracker build`"):
+        publish.run("open", tmp_path / "nonexistent", api)
+
+    assert api.main == {}
