@@ -220,8 +220,9 @@ Reasons:
   once, and each EODI row counts once.
 - A link from the Leiden row to its other EODI rows would come from the
   matched pairs of the rule. For these 6 Leiden rows, 9 of the 20 links are
-  another night at a site that the Leiden row names (`no_match`). A link would
-  show a relation that the sources do not record.
+  another incident, on another day or night, at a site that the Leiden row
+  names (`no_match`). A link would show a relation that the sources do not
+  record.
 
 The cluster view shows the date, the place, the domain and the title of each
 row of the cluster, not only those of the canonical record.
