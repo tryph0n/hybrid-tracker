@@ -4,8 +4,8 @@ Run through the `tracker` command: `uv run tracker build [--out build]`. A raw
 store is needed (see `tracker.store`).
 
 DuckDB runs in memory. Before the SQL files run, three tables and one function
-exist: `clean`, the union of the clean tables of every source; `registry`, one
-row per source with its metadata and licence family; `geocode`, one GeoNames
+exist: `clean`, the union of the clean tables of the built sources; `registry`, one
+row per built source with its metadata and licence family; `geocode`, one GeoNames
 town per (folded name, country) from the latest stored GeoNames file (see
 `tracker.geonames`); and `fold(text)`, which folds a name as `geocode` is
 folded. A raw store without a GeoNames file fails the build: run
@@ -111,7 +111,8 @@ def load_clean(store: Store, work: Path) -> dict[str, int]:
     A source with no clean table is left out of the result and logged.
 
     Raises:
-        UserError: A source has an unknown family, or no source has a clean table.
+        UserError: No source has a clean table.
+        ValueError: A source has an unknown family.
     """
     counts: dict[str, int] = {}
     for name, source in SOURCES.items():
@@ -411,6 +412,7 @@ def build(
 
     Raises:
         UserError: No source has a clean table, or a check of `check` fails.
+        ValueError: A source has an unknown family.
         duckdb.Error: A SQL file fails.
     """
     files = sorted(sql_dir.glob("*.sql"))
