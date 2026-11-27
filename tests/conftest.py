@@ -130,7 +130,8 @@ def geonames_archive(places: list[dict[str, str | int]] | None = None) -> bytes:
         lines.append("\t".join(fields))
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("cities500.txt", "\n".join(lines) + "\n")
+        entry = zipfile.ZipInfo("cities500.txt", date_time=(2020, 1, 1, 0, 0, 0))
+        archive.writestr(entry, "\n".join(lines) + "\n")
     return buffer.getvalue()
 
 
