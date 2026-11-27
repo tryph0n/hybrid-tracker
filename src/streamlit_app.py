@@ -33,6 +33,7 @@ from tracker.views import (
     memberships,
     official_by_actor,
     passing_rows,
+    published_sources,
     scope_rows,
     with_clusters,
     with_code_lists,
@@ -338,10 +339,13 @@ def countries_bar(counts: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def sources_table(events: pd.DataFrame, quality: pd.DataFrame | None) -> pd.DataFrame:
+def sources_table(
+    events: pd.DataFrame, quality: pd.DataFrame | None, published: list[str]
+) -> pd.DataFrame:
     dates = latest_dates(quality)
     rows = []
-    for name, source in SOURCES.items():
+    for name in published:
+        source = SOURCES[name]
         own = events[events["source"] == name]
         rows.append(
             {
@@ -370,6 +374,7 @@ colors = dict(zip(DOMAIN_LABELS.values(), DARK_COLORS if dark else LIGHT_COLORS)
 all_events, data_revision, data_date, hub_failure, quality = load_events(
     configured_revision()
 )
+published = published_sources(all_events, list(SOURCES))
 
 st.title("Europe Hybrid Incidents Tracker")
 st.caption(
@@ -393,8 +398,8 @@ with st.sidebar:
     period_note = st.container()
     source_names = st.multiselect(
         "Sources",
-        list(SOURCES),
-        default=list(SOURCES),
+        published,
+        default=published,
         format_func=lambda name: SOURCES[name].title,
         key="sources",
     )
@@ -456,7 +461,7 @@ with st.sidebar:
         key="countries",
     )
 
-scope = scope_rows(all_events, sources=source_names, order=list(SOURCES))
+scope = scope_rows(all_events, sources=source_names, order=published)
 # Every filter except the period: used for the "last 30 days" figure.
 passing = passing_rows(
     scope,
@@ -498,7 +503,7 @@ lines = incident_lines(scope, rows, fields=LINE_FIELDS, names=SOURCE_NAMES).sort
     "date", ascending=False, kind="stable"
 )
 listed = scope[scope["cluster_id"].isin(lines["cluster_id"])]
-link_sources = [name for name in SOURCES if name in source_names]
+link_sources = [name for name in published if name in source_names]
 for name in link_sources:
     own = listed[listed["source"] == name].drop_duplicates("cluster_id")
     links = own.set_index("cluster_id")["url"].to_dict()
@@ -681,7 +686,7 @@ st.download_button(
 
 st.subheader("Sources")
 st.dataframe(
-    sources_table(all_events, quality),
+    sources_table(all_events, quality, published),
     hide_index=True,
     column_config={
         "Downloaded": st.column_config.TextColumn(
@@ -699,7 +704,7 @@ st.dataframe(
     },
 )
 st.caption(
-    " ".join(f"{source.citation} {source.licence}." for source in SOURCES.values())
+    " ".join(f"{SOURCES[name].citation} {SOURCES[name].licence}." for name in published)
 )
 revision_note = f"revision {data_revision[:7]}" + (
     f" of {data_date}" if data_date else ""
