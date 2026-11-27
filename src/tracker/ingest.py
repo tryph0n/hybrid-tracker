@@ -67,6 +67,9 @@ def lineage(
     Args:
         name: Key of `SOURCES`.
         files: Payload file name to bytes, the ones that make the table.
+            For a source that the store keeps compressed (Stanford), the decoded
+            files: the manifest holds their hash, and the `sha256` of the record
+            is then the hash of the decoded file, not of the file at `path`.
         store: The raw store, whose manifest gives the path of each payload.
         rows: Number of rows of the table.
 

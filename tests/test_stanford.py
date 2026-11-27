@@ -1,11 +1,13 @@
 """The Stanford fetch: TLS check, brotli payloads and the raw store."""
 
+import functools
 import hashlib
 import http.server
 import ssl
 import subprocess
 import threading
-from datetime import date
+from datetime import date, timedelta
+from types import SimpleNamespace
 
 import brotli
 import pandas as pd
@@ -13,6 +15,9 @@ import pytest
 from conftest import FIXTURES
 
 from tracker import clock, stanford
+from tracker.errors import UserError
+from tracker.ingest import lineage
+from tracker.sources import SOURCES
 from tracker.store import LocalBackend, Store
 
 DAY = date(2026, 11, 22)
@@ -54,7 +59,7 @@ def tls_server(tmp_path):
     )  # fmt: skip
     seen: list[str] = []
     connections: list[str] = []
-    answer = {"status": 200}
+    answer: dict = {"status": 200, "files": None, "paths": []}
 
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -65,8 +70,14 @@ def tls_server(tmp_path):
 
         def do_GET(self):
             seen.append(self.headers["Accept-Encoding"])
-            body = brotli.compress(FIXTURE)
-            self.send_response(answer["status"])
+            answer["paths"].append(self.path)
+            status = answer["status"]
+            content = FIXTURE
+            if answer["files"] is not None:
+                content = answer["files"].get(self.path)
+                status = 200 if content is not None else 404
+            body = brotli.compress(content or b"")
+            self.send_response(status)
             self.send_header("Content-Encoding", "br")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -190,3 +201,151 @@ def test_the_fetch_raises_oserror_when_the_server_answers_404(tls_server):
     answer["status"] = 404
     with pytest.raises(OSError, match="HTTP 404"):
         stanford.fetch_days([DAY], stanford.tls_context(cert), "localhost", port)
+
+
+FIRST = date(2026, 11, 20)
+
+
+def heatmap_path(day: date) -> str:
+    return stanford.HEATMAP_PATH.format(day=day)
+
+
+def served(days: dict[date, bytes]) -> dict[str, bytes]:
+    return {heatmap_path(day): content for day, content in days.items()}
+
+
+def changed(low: int) -> bytes:
+    return FIXTURE.replace(b'"lowQualityCount":3', f'"lowQualityCount":{low}'.encode())
+
+
+def seed(store, days: dict[date, bytes]) -> None:
+    for day, content in days.items():
+        store.save(stanford.make_payload(day, URL, 200, brotli.compress(content), "br"))
+
+
+def run(port, cert, store, today: date):
+    fetch = functools.partial(
+        stanford.fetch_days,
+        context=stanford.tls_context(cert),
+        host="localhost",
+        port=port,
+        skip_missing=True,
+    )
+    return stanford.catch_up(store, today, fetch)
+
+
+@pytest.mark.enable_socket
+def test_the_catch_up_fetches_missing_days_and_the_stored_ones_again(tls_server, local):
+    port, cert, _, _, answer = tls_server
+    days = [FIRST + timedelta(days=n) for n in range(5)]
+    seed(local, {days[0]: FIXTURE, days[2]: FIXTURE})
+    answer["files"] = served({day: FIXTURE for day in days[:4]})
+    lines = run(port, cert, local, days[4])
+    assert answer["paths"] == [heatmap_path(day) for day in days]
+    assert {line["name"]: line["stored"] for line in lines} == {
+        "heatmap-2026-11-20.json.br": False,
+        "heatmap-2026-11-21.json.br": True,
+        "heatmap-2026-11-22.json.br": False,
+        "heatmap-2026-11-23.json.br": True,
+    }
+    answer["paths"].clear()
+    answer["files"] = served({day: FIXTURE for day in days})
+    lines = run(port, cert, local, days[4])
+    assert heatmap_path(days[4]) in answer["paths"]
+    assert [line["stored"] for line in lines] == [False] * 4 + [True]
+    assert stanford.stored_days(local) == days
+
+
+@pytest.mark.enable_socket
+def test_the_first_run_stores_only_the_newest_day_and_the_table_starts_on_it(
+    tls_server, local
+):
+    port, cert, _, _, answer = tls_server
+    days = [FIRST + timedelta(days=n) for n in range(4)]
+    answer["files"] = served({day: FIXTURE for day in days})
+    run(port, cert, local, FIRST + timedelta(days=4))
+    assert answer["paths"] == [
+        heatmap_path(days[3] + timedelta(days=1)),
+        heatmap_path(days[3]),
+    ]
+    assert stanford.stored_days(local) == [days[3]]
+    table = stanford.context_table(stanford.decoded_files(local))
+    assert set(table["day"]) == {days[3]}
+
+
+@pytest.mark.enable_socket
+def test_the_recheck_covers_the_last_seven_days_and_the_table_takes_the_new_file(
+    tls_server, local
+):
+    port, cert, _, _, answer = tls_server
+    days = [FIRST + timedelta(days=n) for n in range(8)]
+    seed(local, {day: FIXTURE for day in days})
+    answer["files"] = served({day: FIXTURE for day in days} | {days[3]: changed(4)})
+    lines = run(port, cert, local, days[7] + timedelta(days=1))
+    requested = [heatmap_path(day) for day in days[1:]]
+    assert answer["paths"] == [*requested, heatmap_path(days[7] + timedelta(days=1))]
+    assert [line["name"] for line in lines if line["stored"]] == [
+        "heatmap-2026-11-23.json.br"
+    ]
+    table = stanford.context_table(stanford.decoded_files(local))
+    on_day = table[(table["day"] == days[3]) & (table["h3_index"] == "841f91dffffffff")]
+    assert on_day["low_quality_count"].tolist() == [4]
+
+
+def test_the_table_reads_the_fixture_with_no_network():
+    table = stanford.context_table({"heatmap-2026-11-22.json.br": FIXTURE})
+    assert list(table.columns) == stanford.COLUMNS
+    assert len(table) == 4
+
+
+def test_the_table_keeps_the_cells_whose_centre_is_in_the_area_only():
+    table = stanford.context_table({"heatmap-2026-11-22.json.br": FIXTURE})
+    assert "84381a1ffffffff" not in set(table["h3_index"])
+    assert "841f91dffffffff" in set(table["h3_index"])
+
+
+def test_the_table_has_the_counts_and_the_percentage_and_keeps_a_one_aircraft_cell():
+    table = stanford.context_table({"heatmap-2026-11-22.json.br": FIXTURE})
+    cell = table[table["h3_index"] == "841f91dffffffff"].iloc[0]
+    assert (cell["low_quality_count"], cell["total_aircraft_count"]) == (3, 120)
+    assert cell["low_quality_percent"] == pytest.approx(2.5)
+    one = table[table["total_aircraft_count"] == 1]
+    assert one["h3_index"].tolist() == ["841fa81ffffffff"]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "reason"),
+    [
+        (
+            b'"totalAircraftCount":48',
+            b'"totalAircraftCount":0',
+            "totalAircraftCount is 0",
+        ),
+        (b'"lowQualityCount":17', b'"lowQualityCount":65', "above totalAircraftCount"),
+    ],
+)
+def test_a_row_with_no_aircraft_or_too_many_low_quality_ones_stops_the_table(
+    old, new, reason
+):
+    with pytest.raises(UserError, match=f"2026-11-22 cell 841f.*{reason}"):
+        stanford.context_table(
+            {"heatmap-2026-11-22.json.br": FIXTURE.replace(old, new)}
+        )
+
+
+def test_the_lineage_takes_the_decoded_files_and_refuses_the_stored_bytes(
+    local, monkeypatch, tmp_path
+):
+    monkeypatch.setitem(
+        SOURCES, stanford.SOURCE, SimpleNamespace(updated_by_source=lambda files: None)
+    )
+    seed(local, {DAY: FIXTURE})
+    seed(local, {DAY: changed(4)})
+    files = stanford.decoded_files(local)
+    record = lineage(stanford.SOURCE, files, local, rows=4)
+    (entry,) = record["payloads"]
+    assert entry["sha256"] == hashlib.sha256(changed(4)).hexdigest()
+    assert entry["path"] == local.payloads(stanford.SOURCE)[-1]["path"]
+    stored = (tmp_path / entry["path"]).read_bytes()
+    with pytest.raises(UserError, match="not in the manifest"):
+        lineage(stanford.SOURCE, {"heatmap-2026-11-22.json.br": stored}, local, rows=4)

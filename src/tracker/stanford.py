@@ -1,23 +1,35 @@
-"""Stanford GNSS interference (rfi.stanford.edu): fetch of the daily heatmaps.
+"""Stanford GNSS interference (rfi.stanford.edu): daily heatmaps and context table.
 
 Licence: CC BY-NC 4.0. One file per day, `jamming/YYYY/MM/DD/heatmap.json`,
 for the whole world. The server sends only its own certificate, not the
 intermediate "InCommon RSA Server CA 2", so the fetch trusts the copy that this
 package holds (`CA_FILE`) and always checks TLS. The server compresses only
 with brotli, so the fetch asks for it and keeps the body as sent.
+
+The raw store keeps the brotli bytes, but its manifest holds the SHA-256 of the
+decoded file. So `ingest.lineage` gets the decoded files (`decoded_files`), not
+the stored bytes, and the `sha256` of the lineage is the hash of the decoded
+file, not of the file at `path`.
 """
 
+import functools
 import http.client
+import io
+import json
 import logging
 import ssl
 import time
-from collections.abc import Sequence
-from datetime import date
+from collections.abc import Callable, Mapping, Sequence
+from datetime import date, timedelta
 from pathlib import Path
+from typing import Any
 
 import brotli
+import h3
+import pandas as pd
 
-from tracker.store import Payload
+from tracker.errors import UserError
+from tracker.store import Payload, Store
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +42,18 @@ HEADERS = {
     "Accept-Encoding": "br",
 }
 TIMEOUT = 60
+RECHECK_DAYS = 7
+FIRST_RUN_LOOKBACK = 14
+MAX_PAYLOADS_PER_SAVE = 50
+LAT_RANGE = (34.0, 72.0)
+LON_RANGE = (-25.0, 45.0)
+COLUMNS = [
+    "day",
+    "h3_index",
+    "low_quality_count",
+    "total_aircraft_count",
+    "low_quality_percent",
+]
 
 
 def tls_context(extra_ca: Path = CA_FILE) -> ssl.SSLContext:
@@ -94,6 +118,7 @@ def fetch_days(
     context: ssl.SSLContext | None = None,
     host: str = HOST,
     port: int = 443,
+    skip_missing: bool = False,
 ) -> list[Payload]:
     """Fetch the daily heatmaps of `days` over one TLS connection.
 
@@ -102,14 +127,17 @@ def fetch_days(
         context: The TLS context. Default: `tls_context()`.
         host: The server.
         port: The server port.
+        skip_missing: Leave out a day that the server answers with 404 (not
+            published yet) instead of raising.
 
     Returns:
-        One payload per day, in the order of `days`.
+        One payload per day, in the order of `days` (without the missing days
+        when `skip_missing` is set).
 
     Raises:
         OSError: A TLS check failed (`ssl.SSLCertVerificationError`), a request
             failed, or the status of a day is not 200 (a day not published yet
-            gives 404).
+            gives 404, unless `skip_missing` is set).
     """
     started = time.monotonic()
     connection = http.client.HTTPSConnection(
@@ -123,6 +151,9 @@ def fetch_days(
             connection.request("GET", path, headers=HEADERS)
             response = connection.getresponse()
             body = response.read()
+            if response.status == 404 and skip_missing:
+                logger.info("stanford: %s not published yet", day)
+                continue
             if response.status != 200:
                 raise OSError(f"{url}: HTTP {response.status}")
             payloads.append(
@@ -137,6 +168,173 @@ def fetch_days(
     finally:
         connection.close()
     logger.info(
-        "stanford: %d day(s) fetched in %.1f s", len(days), time.monotonic() - started
+        "stanford: %d of %d day(s) fetched in %.1f s",
+        len(payloads),
+        len(days),
+        time.monotonic() - started,
     )
     return payloads
+
+
+Fetcher = Callable[[Sequence[date]], list[Payload]]
+
+
+def day_of(name: str) -> date:
+    """The day of a payload name made by `payload_name`."""
+    return date.fromisoformat(name.removeprefix("heatmap-").removesuffix(".json.br"))
+
+
+def stored_days(store: Store) -> list[date]:
+    """The days that the raw store holds, oldest first."""
+    return sorted({day_of(line["name"]) for line in store.payloads(SOURCE)})
+
+
+def days_to_fetch(stored: Sequence[date], today: date) -> list[date]:
+    """The days that a run requests, oldest first.
+
+    Args:
+        stored: The days in the raw store (not empty).
+        today: The day of the run.
+
+    Returns:
+        Each day from the first stored day to `today` that is not stored, and
+        the last `RECHECK_DAYS` stored days again.
+    """
+    held = set(stored)
+    first = min(held)
+    missing = {
+        first + timedelta(days=n)
+        for n in range((today - first).days + 1)
+        if first + timedelta(days=n) not in held
+    }
+    return sorted(missing | set(sorted(held)[-RECHECK_DAYS:]))
+
+
+def newest_day(today: date, fetch: Fetcher) -> list[Payload]:
+    """Fetch the newest day that the source has, trying from `today` back.
+
+    Raises:
+        OSError: No day in the last `FIRST_RUN_LOOKBACK` days is published.
+    """
+    for back in range(FIRST_RUN_LOOKBACK):
+        found = fetch([today - timedelta(days=back)])
+        if found:
+            return found
+    raise OSError(
+        f"stanford: no heatmap published in the last {FIRST_RUN_LOOKBACK} days"
+    )
+
+
+def catch_up(
+    store: Store, today: date, fetch: Fetcher | None = None
+) -> list[dict[str, Any]]:
+    """Fetch the missing days and the last stored days again, and save them.
+
+    With an empty store, only the newest published day is fetched (the days
+    before it are the history, a separate task). A day that is not published
+    yet (404) is left for a later run. The store adds a payload of a day only
+    when the decoded file changed.
+
+    Args:
+        store: The raw store.
+        today: The day of the run.
+        fetch: Fetches days and leaves out the missing ones. Default:
+            `fetch_days` with `skip_missing`.
+
+    Returns:
+        The manifest line of each payload fetched.
+    """
+    fetch = fetch or functools.partial(fetch_days, skip_missing=True)
+    stored = stored_days(store)
+    payloads = (
+        fetch(days_to_fetch(stored, today)) if stored else newest_day(today, fetch)
+    )
+    lines: list[dict[str, Any]] = []
+    for start in range(0, len(payloads), MAX_PAYLOADS_PER_SAVE):
+        lines.extend(store.save_many(payloads[start : start + MAX_PAYLOADS_PER_SAVE]))
+    logger.info(
+        "stanford: %d payload(s) fetched, %d new",
+        len(lines),
+        sum(line["stored"] for line in lines),
+    )
+    return lines
+
+
+def decoded_files(store: Store) -> dict[str, bytes]:
+    """The newest payload of each stored day, decoded: payload name to file.
+
+    These are the files for `context_table` and for `ingest.lineage`.
+    """
+    files = {}
+    for day in stored_days(store):
+        name = payload_name(day)
+        content = store.latest(SOURCE, name)
+        if content is None:
+            raise UserError(f"stanford: {name} is in no manifest of the store")
+        files[name] = brotli.decompress(content)
+    return files
+
+
+def reduce_day(day: date, decoded: bytes) -> pd.DataFrame:
+    """The rows of one daily file that lie in the area, with the percentage.
+
+    Args:
+        day: The day of the file.
+        decoded: The file as the source gives it.
+
+    Returns:
+        The columns `COLUMNS`: the cells whose centre is in `LAT_RANGE` and
+        `LON_RANGE` (bounds included), with the two counts of the source and
+        the percentage of aircraft with low quality.
+
+    Raises:
+        UserError: A row has no aircraft, or more low quality aircraft than
+            aircraft.
+    """
+    frame = pd.DataFrame(
+        json.load(io.BytesIO(decoded)),
+        columns=["h3Index", "lowQualityCount", "totalAircraftCount"],
+    )
+    for reason, bad in (
+        ("totalAircraftCount is 0", frame["totalAircraftCount"] == 0),
+        (
+            "lowQualityCount is above totalAircraftCount",
+            frame["lowQualityCount"] > frame["totalAircraftCount"],
+        ),
+    ):
+        if bad.any():
+            cell = frame["h3Index"][bad].iloc[0]
+            raise UserError(f"stanford: {day} cell {cell}: {reason}")
+    centres = [h3.cell_to_latlng(cell) for cell in frame["h3Index"]]
+    inside = [
+        LAT_RANGE[0] <= lat <= LAT_RANGE[1] and LON_RANGE[0] <= lon <= LON_RANGE[1]
+        for lat, lon in centres
+    ]
+    kept = frame[inside]
+    return pd.DataFrame(
+        {
+            "day": day,
+            "h3_index": kept["h3Index"],
+            "low_quality_count": kept["lowQualityCount"],
+            "total_aircraft_count": kept["totalAircraftCount"],
+            "low_quality_percent": kept["lowQualityCount"]
+            / kept["totalAircraftCount"]
+            * 100,
+        },
+        columns=COLUMNS,
+    ).reset_index(drop=True)
+
+
+def context_table(files: Mapping[str, bytes]) -> pd.DataFrame:
+    """The context table: one row per cell in the area and per day.
+
+    Args:
+        files: Payload name to decoded file, as `decoded_files` returns.
+
+    Returns:
+        The columns `COLUMNS`, oldest day first.
+    """
+    frames = [reduce_day(day_of(name), files[name]) for name in sorted(files)]
+    if not frames:
+        return pd.DataFrame(columns=COLUMNS)
+    return pd.concat(frames, ignore_index=True)

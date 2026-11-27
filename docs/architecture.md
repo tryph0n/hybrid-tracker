@@ -241,6 +241,7 @@ flowchart TB
   module_tracker_sources --> module_tracker_geonames
   module_tracker_sources --> module_tracker_leiden
   module_tracker_sources --> module_tracker_store
+  module_tracker_stanford --> module_tracker_errors
   module_tracker_stanford --> module_tracker_store
   module_tracker_store --> module_tracker_clock
   module_tracker_views --> module_tracker_schema
@@ -268,7 +269,7 @@ flowchart TB
 | `tracker.quality` | `src/tracker/quality.py` | Quality table and run summary: one row per source and per run. | pandas |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
 | `tracker.sources` | `src/tracker/sources.py` | Registry of data sources. | pandas |
-| `tracker.stanford` | `src/tracker/stanford.py` | Stanford GNSS interference (rfi.stanford.edu): fetch of the daily heatmaps. | brotli |
+| `tracker.stanford` | `src/tracker/stanford.py` | Stanford GNSS interference (rfi.stanford.edu): daily heatmaps and context table. | brotli, h3, pandas |
 | `tracker.store` | `src/tracker/store.py` | Raw store client: keeps each source payload as fetched, with a manifest. | huggingface_hub |
 | `tracker.views` | `src/tracker/views.py` | Filters and headline counts of the dashboard, as plain functions on a frame. | pandas |
 | `architecture.py` | `scripts/architecture.py` | Generate docs/architecture.md, the architecture diagrams, from the code. | yaml |
