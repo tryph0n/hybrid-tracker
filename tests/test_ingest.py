@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from conftest import FIXTURES, recorded_payloads
 
-from tracker import cli, eodi, ingest, sources
+from tracker import cli, clock, eodi, ingest, sources
 from tracker.schema import read_csv
 from tracker.store import LocalBackend, Payload, Store, open_store
 
@@ -516,6 +516,12 @@ def test_the_live_target_does_not_download_geonames(tmp_path, monkeypatch):
     assert calls == []
 
 
+@pytest.fixture
+def fixed_clock(monkeypatch):
+    now = pd.Timestamp("2026-03-05 10:00:00", tz="UTC")
+    monkeypatch.setattr(clock, "utc_now", lambda: now)
+
+
 def lineage_of(store: Store, name: str) -> dict:
     stored = store.backend.read(ingest.lineage_path(name))
     assert stored is not None
@@ -539,7 +545,7 @@ def test_the_lineage_lists_each_payload_with_its_path_and_sha256(store, monkeypa
 
 
 def test_the_lineage_points_to_the_earlier_file_of_an_unchanged_payload(
-    store, monkeypatch
+    store, monkeypatch, fixed_clock
 ):
     serve_recorded(monkeypatch, "eodi")
     ingest.ingest("eodi", store)
@@ -553,7 +559,7 @@ def test_the_lineage_points_to_the_earlier_file_of_an_unchanged_payload(
 
 
 def test_the_lineage_records_the_code_commit_without_a_new_commit_for_it(
-    store, monkeypatch
+    store, monkeypatch, fixed_clock
 ):
     serve_recorded(monkeypatch, "eodi")
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)

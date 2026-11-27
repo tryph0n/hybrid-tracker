@@ -12,6 +12,18 @@ The branch `main` holds `events.parquet`, `events.csv`, `sources.parquet` and
 the quality table, and no longer holds `eodi.csv` or `leiden.csv`. To read a
 tag, use the file names of that tag.
 
+### 2.4.0
+
+Two new columns in the `quality` table: `downloaded_at` and
+`updated_by_source`. `downloaded_at` is the time of the newest download that
+the mapping, the validation and the shrink guard accepted, so it gives the age
+of the data in the dataset. `last_fetch_at` keeps its meaning: the last download
+that reached the source, also when its file was then rejected.
+`updated_by_source` is the date of the last change that the source gives, and it
+is blank when the source gives none. Both are blank in the rows of the runs
+before this version. It changes no column of `events`, `sources` or
+`threat_actors`. The tag `v2.4.0` is on the commit of the first upload.
+
 ### 2.3.0
 
 New table `threat_actors`: one row per threat group, with its aliases, its

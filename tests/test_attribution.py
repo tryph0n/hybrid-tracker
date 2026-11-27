@@ -247,14 +247,21 @@ def test_the_newest_versions_section_of_each_card_is_the_schema_version(family):
     assert newest_version(family) == SCHEMA_VERSION
 
 
-def test_the_open_version_section_names_the_threat_actors_table():
-    assert "`threat_actors`" in version_section("open", SCHEMA_VERSION)
+@pytest.mark.parametrize("family", FAMILIES)
+def test_the_version_section_of_each_card_names_the_new_quality_columns(family):
+    section = version_section(family, SCHEMA_VERSION)
+
+    assert "`downloaded_at`" in section
+    assert "`updated_by_source`" in section
 
 
-def test_the_nc_card_has_a_section_for_the_schema_version_and_no_new_table():
-    section = version_section("nc", SCHEMA_VERSION)
+def test_the_open_card_keeps_the_threat_actors_entry_of_2_3_0():
+    assert "`threat_actors`" in version_section("open", "2.3.0")
 
-    assert section.strip()
+
+def test_the_nc_card_keeps_the_entry_of_2_3_0_with_no_new_table():
+    section = version_section("nc", "2.3.0")
+
     assert "The same data as 2.2.0" in section
 
 
