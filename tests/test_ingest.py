@@ -401,6 +401,34 @@ def test_if_missing_downloads_again_when_the_clean_table_is_gone(tmp_path, monke
     assert len(clean_table(store, "leiden")) > 0
 
 
+def test_if_missing_gives_a_clean_table_with_no_lineage_its_version_and_record(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    serve_geonames(monkeypatch)
+    cli.main(["ingest", "static"])
+    store = open_store()
+    (tmp_path / "store" / ingest.lineage_path("leiden")).unlink()
+    assert ingest.read_lineage("leiden", store) is None
+    files = recorded_payloads("leiden")
+    files["version.json"] = (FIXTURES / "leiden_dataverse_version.json").read_bytes()
+    monkeypatch.setitem(
+        sources.SOURCES,
+        "leiden",
+        dataclasses.replace(
+            sources.SOURCES["leiden"],
+            extract=lambda: [
+                Payload("leiden", n, c, f"https://e/{n}", 200) for n, c in files.items()
+            ],
+        ),
+    )
+
+    cli.main(["ingest", "static", "--if-missing"])
+    assert lineage_of(store, "leiden")["updated_by_source"] == "2026-01-13T14:22:43Z"
+
+
 def test_geonames_is_kept_in_the_store_with_its_digest_and_has_no_clean_table(
     tmp_path, monkeypatch
 ):

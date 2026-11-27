@@ -49,8 +49,8 @@ A source is live or static (`Source.kind` in `src/tracker/sources.py`).
 - A static source is a frozen historical snapshot, pinned to one upstream file
   version. You re-ingest it by hand. The pipeline runs
   `tracker ingest static --if-missing` before the build: it downloads only a
-  static source that has no clean table in the raw store, so a new or reset
-  store gets them with no manual step.
+  static source that has no clean table or no lineage record in the raw store,
+  so a new, reset or older store gets them with no manual step.
 
 Each source goes through two steps. `extract()` downloads the files and saves
 them, as served, in the raw store with a manifest line each. `normalize()` maps
@@ -61,9 +61,9 @@ the same commit: the path and SHA-256 of each payload that made the table, the
 row count, the code commit (from `GITHUB_SHA`, empty outside a workflow run) and
 `updated_by_source`, the date of the last change that the source gives (EODI:
 newest `ultima_actualizacion` of its rows; Leiden: `releaseTime` of the stored
-`version.json`; none when the source gives none). Run `uv run tracker ingest
-leiden` once to store `version.json`: a store filled before that has no Leiden
-date. Each dataset commit of a publish names the code commit and the workflow
+`version.json`; none when the source gives none). A store filled before the
+record existed has a clean table and no record: the next `--if-missing` run
+downloads that source again and stores `version.json` and the record. Each dataset commit of a publish names the code commit and the workflow
 run in its message. No data file is committed to the
 repository: the raw store and the two public datasets hold the data.
 

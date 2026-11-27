@@ -8,8 +8,8 @@ Run through the `tracker` command, from the repository root after `uv sync`:
 - `uv run tracker ingest eodi`: a single source or reference dataset
   (`geonames`: payloads only, no clean table)
 - `uv run tracker ingest static --if-missing`: only what is not in the raw store:
-  a source with no clean table, a reference dataset with no payload (scheduled
-  pipeline)
+  a source with no clean table or no lineage record, a reference dataset with
+  no payload (scheduled pipeline)
 - `uv run tracker rebuild [source]`: write the clean tables again from the
   stored payloads, download nothing
 
@@ -262,9 +262,9 @@ def run(target: str, if_missing: bool = False) -> None:
 
     Args:
         target: The target to run.
-        if_missing: Skip each source that already has a clean table, and each
-            reference dataset that already has a payload, in the raw store:
-            it is not downloaded again.
+        if_missing: Skip each source that already has a clean table and a
+            lineage record, and each reference dataset that already has a
+            payload, in the raw store: it is not downloaded again.
 
     Raises:
         ValueError: `target` is not a target.
@@ -284,7 +284,11 @@ def run(target: str, if_missing: bool = False) -> None:
                 logger.info("%s: payload in the store, skipped", name)
                 continue
             ingest_reference(name, store)
-        elif if_missing and store.backend.read(clean_path(name)) is not None:
-            logger.info("%s: clean table in the store, skipped", name)
+        elif (
+            if_missing
+            and store.backend.read(clean_path(name)) is not None
+            and read_lineage(name, store) is not None
+        ):
+            logger.info("%s: clean table and lineage in the store, skipped", name)
         else:
             ingest(name, store)
