@@ -199,6 +199,7 @@ flowchart TB
   module_tracker_geonames --> module_tracker_errors
   module_tracker_geonames --> module_tracker_store
   module_tracker_hub --> module_tracker_publish
+  module_tracker_ingest --> module_tracker_clock
   module_tracker_ingest --> module_tracker_errors
   module_tracker_ingest --> module_tracker_provenance
   module_tracker_ingest --> module_tracker_schema
