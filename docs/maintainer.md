@@ -501,6 +501,7 @@ A failed run shows a red job in Actions. Read the log of that job first.
 |---|---|---|
 | Lint | Style error | Run `uv run ruff check --fix . && uv run ruff format .` and commit. |
 | Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | The source keeps its last clean table and the other sources go on: the run stays green and the run summary names the source with its error. Run `uv run tracker ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
+| Data, a source alert | A cause of one source in the quality check: a failed refresh, no clean table, no row, or no successful fetch for more than three days. The run stays green. | Open the issue `Source alert: <source>` (label `source-alert`): it lists the causes of the last run. Fix each cause as in the row "Data, refresh". The issue closes by itself on the first run where the source has no cause. |
 | Data, build or tests | An adapter bug, or a published table that breaks the schema. The error usually names the column. | Find the cause, fix it, push. |
 | Docs, architecture | The page does not match the code | Run `uv run python scripts/architecture.py` and commit the page. |
 | Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `uv run sphinx-build` command above and read the warning. |
@@ -518,7 +519,7 @@ checks nothing.
 
 ## Alerts
 
-Two signals tell the owner that the data does not refresh.
+Three signals tell the owner that the data does not refresh.
 
 - A failed scheduled or manual run opens one issue with the label
   `pipeline-failure` and the link of the run. While that issue is open, each
@@ -530,6 +531,7 @@ Two signals tell the owner that the data does not refresh.
   `HEARTBEAT_URL`. A manual run does not ping. The monitor alerts the owner
   when no ping arrives for 48 hours. A run that GitHub drops or disables fails
   nothing and opens no issue: only this alert shows it.
+- A source with a cause in the quality check has its own issue, titled `Source alert: <source>`, with the label `source-alert`. The Source alerts job of a scheduled or manual run opens it, or comments on it when it is already open, with the causes of that run. It closes the issue only on the first run where the source has no cause: a source with two causes stays open until both end. A successful fetch ends only the cause "no successful fetch for more than three days". The job needs the Data job to succeed, and the Close failure job does not touch this label. The heartbeat pings after a green run even when a source has a cause: it shows that a run succeeded, not that each source is fresh.
 
 On a failure issue, open the linked run and follow the table above. On a
 heartbeat alert, check Actions: if the schedule is off, see "Schedule stops
