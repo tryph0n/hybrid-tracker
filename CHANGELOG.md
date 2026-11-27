@@ -37,6 +37,10 @@ The version number is set by hand in `pyproject.toml` only.
   the dashboard counts incidents, not rows. The curation files are
   `curation/merges.csv` and `curation/splits.csv`. RapidFuzz is a new
   dependency.
+- The Events table and the map hover show the drone presence ("Confirmed", "Not
+  confirmed", "Not substantiated", "Ruled out"). A published table that has no
+  `drone_presence` column shows it empty. The help of the Event status filter says that
+  a dismissed event is one that a source or an authority denies.
 
 ### Changed
 

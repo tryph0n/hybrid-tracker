@@ -84,6 +84,12 @@ EVENT_STATUS_LABELS = {
     "unconfirmed": "Reported, not confirmed",
     "dismissed": "Dismissed by the source",
 }
+DRONE_PRESENCE_LABELS = {
+    "confirmed": "Confirmed",
+    "not_confirmed": "Not confirmed",
+    "not_substantiated": "Not substantiated",
+    "ruled_out": "Ruled out",
+}
 ATTRIBUTION_LABELS = {
     "official": "Attributed by an authority",
     "assessed": "Assessed by the source's analysts",
@@ -143,6 +149,7 @@ LINE_FIELDS = [
     "domain_label",
     "category_label",
     "status_label",
+    "drone_presence_label",
     "attribution_label",
     "actor_names",
     "attributed_by_label",
@@ -163,12 +170,17 @@ def load_events(
     """
     published = load_published(revision, snapshot_dir())
     events = published.events
+    if "drone_presence" not in events:
+        events["drone_presence"] = None
     events["date"] = pd.to_datetime(events["date"])
     events["end_date"] = pd.to_datetime(events["end_date"])
     events["domain_label"] = events["domain"].map(DOMAIN_LABELS)
     events["category_label"] = events["category"].map(CATEGORY_LABELS)
     events["attribution_label"] = events["attribution"].map(ATTRIBUTION_LABELS)
     events["status_label"] = events["event_status"].map(EVENT_STATUS_LABELS)
+    events["drone_presence_label"] = (
+        events["drone_presence"].map(DRONE_PRESENCE_LABELS).fillna("")
+    )
     events["attributed_by_label"] = events["attributed_by"].fillna("")
     events["actor_names"] = (
         events["actors"]
@@ -278,6 +290,7 @@ def points_map(
             "day": True,
             "place": True,
             "category_label": True,
+            "drone_presence_label": True,
             "attribution_label": True,
             "attributed_by_label": True,
             "actor_names": True,
@@ -294,6 +307,7 @@ def points_map(
             "day": "Date",
             "place": "Place",
             "category_label": "Category",
+            "drone_presence_label": "Drone presence",
             "attribution_label": "Attribution",
             "attributed_by_label": "Attributed by",
             "actor_names": "Actors",
@@ -606,7 +620,10 @@ with st.sidebar:
         EVENT_STATUSES,
         default=["confirmed", "unconfirmed"],
         format_func=lambda key: EVENT_STATUS_LABELS[key],
-        help="Dismissed events (the source found no incident) are hidden by default.",
+        help=(
+            "Dismissed events (a source or an authority denies that the "
+            "incident happened) are hidden by default."
+        ),
         key="statuses",
     )
     country_options = sorted(
@@ -804,6 +821,7 @@ st.dataframe(
             "category_label",
             "title",
             "status_label",
+            "drone_presence_label",
             "attribution_label",
             "actor_names",
             "attributed_by_label",
@@ -819,6 +837,7 @@ st.dataframe(
         "category_label": "Category",
         "title": st.column_config.TextColumn("What", width="large"),
         "status_label": "Status",
+        "drone_presence_label": "Drone presence",
         "attribution_label": "Attribution",
         "actor_names": "Actors",
         "attributed_by_label": "Attributed by",

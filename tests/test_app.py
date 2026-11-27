@@ -93,8 +93,16 @@ def open_sea_rows(copies: int):
     pd.DataFrame(rows).to_csv(events_path("leiden"), index=False)
 
 
+def dismiss_vilnius():
+    """Set the sample row `EODI-2025-00112` to dismissed: no sample row is."""
+    eodi = read_events("eodi")
+    eodi.loc[eodi["event_id"] == "eodi:EODI-2025-00112", "event_status"] = "dismissed"
+    eodi.to_csv(events_path("eodi"), index=False)
+
+
 def share_places(count: int):
     """Move `count` shown, located EODI events and the dismissed ones to one place."""
+    dismiss_vilnius()
     eodi = read_events("eodi")
     located = eodi[eodi["lat"].notna()]
     shown = expected_events(located)
@@ -422,8 +430,58 @@ def test_status_filter_says_dismissed_events_are_hidden(sample_data_dir):
     at = run_app()
     status = at.multiselect(key="statuses")
     assert status.label == "Event status"
-    assert "dismissed" in status.help.lower()
+    assert status.help == (
+        "Dismissed events (a source or an authority denies that the incident "
+        "happened) are hidden by default."
+    )
     assert "dismissed" not in status.value
+
+
+def hover_values(at: AppTest, label: str) -> list:
+    traces = chart(at, 1).data
+    pattern = rf"{label}=%\{{customdata\[(\d+)\]"
+    index = int(re.search(pattern, traces[0].hovertemplate)[1])
+    return [row[index] for trace in traces for row in trace.customdata]
+
+
+def test_the_default_filter_shows_an_incident_with_a_ruled_out_drone(
+    sample_data_dir,
+):
+    row = read_events("eodi").set_index("event_id").loc["eodi:EODI-2025-00112"]
+    assert (row["event_status"], row["drone_presence"]) == ("confirmed", "ruled_out")
+    at = run_app()
+    assert at.multiselect(key="statuses").value == ["confirmed", "unconfirmed"]
+    line = line_of(at, VILNIUS_TITLE)
+    assert line["status_label"] == "Confirmed"
+    assert line["drone_presence_label"] == "Ruled out"
+
+
+def test_the_table_and_the_hover_show_the_drone_presence(sample_data_dir):
+    at = run_app()
+    assert "Drone presence" in str(at.dataframe[0].proto.columns)
+    table = event_table(at)
+    assert {"Ruled out", "Confirmed", "Not confirmed"} <= set(
+        table["drone_presence_label"]
+    )
+    assert (table["drone_presence_label"] == "").any()
+    assert "Drone presence=" in chart(at, 1).data[0].hovertemplate
+    hovered = set(hover_values(at, "Drone presence"))
+    assert {"Ruled out", "Confirmed"} <= hovered
+    assert not {"nan", "None"} & {str(value) for value in hovered}
+
+
+def test_the_app_shows_an_empty_drone_presence_when_the_table_has_no_column(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    def fetch_old_table(revision):
+        path = tmp_path / "old.parquet"
+        read_all_events().drop(columns="drone_presence").to_parquet(path)
+        return path, REVISION, REVISION_DATE
+
+    monkeypatch.setattr(hub, "fetch", fetch_old_table)
+    at = run_app()
+    assert set(event_table(at)["drone_presence_label"]) == {""}
+    assert set(hover_values(at, "Drone presence")) == {""}
 
 
 def test_country_bar_keeps_the_countries_tied_at_the_cut(sample_data_dir):
@@ -744,6 +802,7 @@ def link_incidents(**changes):
     ]
     leiden = pd.concat([leiden, pd.DataFrame(added)], ignore_index=True)
     eodi.loc[eodi["event_id"] == VILNIUS_EODI, "end_date"] = "2025-10-05"
+    eodi.loc[eodi["event_id"] == VILNIUS_EODI, "event_status"] = "dismissed"
     both = pd.concat([eodi, leiden], ignore_index=True)
     both["cluster_id"] = both["event_id"].map(LINKS).fillna(both["event_id"])
     both["n_sources"] = both.groupby("cluster_id")["source"].transform("nunique")
@@ -834,6 +893,7 @@ def test_the_line_of_two_sources_shows_the_value_of_each(sample_data_dir):
         "Drone overflight (EODI); Reconnaissance (Leiden)"
     )
     assert line["status_label"] == "Reported, not confirmed (EODI); Confirmed (Leiden)"
+    assert line["drone_presence_label"] == "Not confirmed (EODI); — (Leiden)"
     assert line["attribution_label"] == (
         "No attribution in the source (EODI); "
         "Assessed by the source's analysts (Leiden)"
@@ -1271,11 +1331,11 @@ def test_a_source_that_keeps_its_last_data_shows_the_dates_of_its_accepted_downl
 def test_the_split_line_and_the_line_under_the_map(sample_data_dir):
     at = run_app()
     assert (
-        "17 incidents: 7 at a place (map), 9 in a country only (bars below), "
+        "18 incidents: 8 at a place (map), 9 in a country only (bars below), "
         "1 at sea only (listed below)" in captions(at)
     )
     assert "At sea only, no country: North Sea; Baltic Sea (1)." in captions(at)
-    assert sum(len(trace.customdata) for trace in chart(at, 1).data) == 7
+    assert sum(len(trace.customdata) for trace in chart(at, 1).data) == 8
 
 
 def test_the_split_line_for_a_domain_and_a_country(sample_data_dir):
@@ -1395,7 +1455,7 @@ def test_the_bars_count_the_incidents_in_a_country_only(sample_data_dir):
     assert "The bars add up to 24, more than the 9 incidents." in text
     assert "not counted here: Ukraine (1), United States (1)." in text
     assert (
-        "17 incidents: 7 at a place (map), 9 in a country only (bars below), "
+        "18 incidents: 8 at a place (map), 9 in a country only (bars below), "
         "1 at sea only (listed below)" in text
     )
 

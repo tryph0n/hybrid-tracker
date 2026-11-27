@@ -436,7 +436,7 @@ def test_the_split_line_of_the_fixture_lines_is_the_text_of_the_first_box():
     lines = incident_lines(scope, passing, fields=[], names=names)
 
     assert split_line(where_split(lines)) == (
-        "17 incidents: 7 at a place (map), 9 in a country only (Countries view), "
+        "18 incidents: 8 at a place (map), 9 in a country only (Countries view), "
         "1 at sea only (listed below)"
     )
 
