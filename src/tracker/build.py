@@ -19,12 +19,17 @@ gets `threat_actors.parquet`, the threat-group table that `tracker.actors`
 reduces from the latest stored MISP galaxy file and `curation/actors.csv`; a
 store without that file fails the build: run `tracker ingest misp_galaxy`.
 Nothing is written to `<out>` if a check fails.
+
+A source with no clean table is left out: `build` returns its name, and the
+registry, the clusters, the row-count check and the `sources` table all use
+the other sources only. The build fails when no source has a clean table.
 """
 
 import hashlib
 import logging
 import shutil
 import tempfile
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import duckdb
@@ -63,15 +68,21 @@ ACTORS_FAMILY = "open"
 SOURCE_COLUMNS = ["source", "title", "kind", "homepage", "licence", "citation"]
 
 
-def family_sources(family: str) -> list[str]:
+def family_sources(family: str, names: Iterable[str] | None = None) -> list[str]:
     """Keys of the sources whose rows the public dataset of `family` holds.
 
     The `open` family holds `open` sources. The `nc` family holds every source.
+
+    Args:
+        family: One of `FAMILIES`.
+        names: The sources that are published. Default: every source of the
+            registry.
     """
+    kept = set(SOURCES if names is None else names)
     return [
         name
         for name, source in SOURCES.items()
-        if family == "nc" or source.family == family
+        if name in kept and (family == "nc" or source.family == family)
     ]
 
 
@@ -95,10 +106,12 @@ def type_name(arrow_type: pa.DataType) -> str:
 
 
 def load_clean(store: Store, work: Path) -> dict[str, int]:
-    """Copy the clean table of each source to `work` and count its rows.
+    """Copy the clean table of each source that has one to `work`, and count its rows.
+
+    A source with no clean table is left out of the result and logged.
 
     Raises:
-        ValueError: A source has an unknown family or no clean table.
+        UserError: A source has an unknown family, or no source has a clean table.
     """
     counts: dict[str, int] = {}
     for name, source in SOURCES.items():
@@ -106,10 +119,20 @@ def load_clean(store: Store, work: Path) -> dict[str, int]:
             raise ValueError(f"{name}: unknown licence family {source.family!r}")
         table = store.backend.read(clean_path(name))
         if table is None:
-            raise UserError(f"{name}: no clean table, run `tracker ingest {name}`")
+            logger.warning("%s: no clean table, left out of the build", name)
+            continue
         (work / f"{name}.parquet").write_bytes(table)
         counts[name] = pq.read_metadata(work / f"{name}.parquet").num_rows
+    if not counts:
+        raise UserError("No source has a clean table, run `tracker ingest`")
     return counts
+
+
+def left_out_summary(names: Sequence[str]) -> str:
+    """The run summary section that names each source left out of the build."""
+    lines = ["### Sources left out of the build (no clean table)", ""]
+    lines += [f"- `{name}`: run `tracker ingest {name}`" for name in names]
+    return "\n".join([*lines, ""])
 
 
 def load_geocode(store: Store) -> pd.DataFrame:
@@ -178,8 +201,16 @@ def check_actors(folder: Path, table: pd.DataFrame) -> None:
         raise UserError(f"{ACTORS_FILE} breaks its schema: {list(written.columns)}")
 
 
-def prepare(con: duckdb.DuckDBPyConnection, work: Path, geocode: pd.DataFrame) -> None:
+def prepare(
+    con: duckdb.DuckDBPyConnection,
+    work: Path,
+    geocode: pd.DataFrame,
+    names: Sequence[str],
+) -> None:
     """Create the tables and the function that the SQL files read.
+
+    `names` are the sources that have a clean table: `clean` and `registry`
+    hold those only.
 
     `clean` casts each column to its published type: pandas writes a column
     with no value as `double`, and the union must not inherit that. `geocode`
@@ -189,7 +220,7 @@ def prepare(con: duckdb.DuckDBPyConnection, work: Path, geocode: pd.DataFrame) -
     con.register("geocode_frame", geocode)
     con.execute("CREATE TABLE geocode AS SELECT * FROM geocode_frame")
     con.unregister("geocode_frame")
-    files = [str(work / f"{name}.parquet") for name in SOURCES]
+    files = [str(work / f"{name}.parquet") for name in names]
     columns = ", ".join(
         f"CAST({column} AS {'DOUBLE' if column in NUMERIC_COLUMNS else 'VARCHAR'}) "
         f"AS {column}"
@@ -212,6 +243,7 @@ def prepare(con: duckdb.DuckDBPyConnection, work: Path, geocode: pd.DataFrame) -
                 "citation": source.citation,
             }
             for name, source in SOURCES.items()
+            if name in names
         ]
     )
     con.register("registry_frame", registry)
@@ -245,8 +277,12 @@ def check_coordinates(con: duckdb.DuckDBPyConnection) -> None:
         raise UserError(f"{added} rows gained coordinates without `place` precision")
 
 
-def add_clusters(con: duckdb.DuckDBPyConnection, curation_dir: Path) -> None:
+def add_clusters(
+    con: duckdb.DuckDBPyConnection, curation_dir: Path, names: Sequence[str]
+) -> None:
     """Add the cluster columns to `events_<family>` of each family.
+
+    `names` are the sources that are built, in rank order.
 
     The clusters of a family come from its own rows: the `open` family has no
     row of a NonCommercial source, so its clusters never use one. A line of a
@@ -267,7 +303,7 @@ def add_clusters(con: duckdb.DuckDBPyConnection, curation_dir: Path) -> None:
         present = set(frame["event_id"])
         clustered = dedup.assign_clusters(
             frame,
-            list(SOURCES),
+            list(names),
             dedup.pairs_within(merges, present),
             dedup.pairs_within(splits, present),
         )
@@ -310,7 +346,7 @@ def check(family: str, folder: Path, counts: dict[str, int]) -> None:
     Args:
         family: One of `FAMILIES`.
         folder: Where `export` wrote the family.
-        counts: Row count of the clean table of each source.
+        counts: Row count of the clean table of each built source.
 
     Raises:
         ValueError: The columns or types differ from the schema, `validate`
@@ -336,7 +372,7 @@ def check(family: str, folder: Path, counts: dict[str, int]) -> None:
     published = {
         str(name): int(count) for name, count in events["source"].value_counts().items()
     }
-    expected = {name: counts[name] for name in family_sources(family)}
+    expected = {name: counts[name] for name in family_sources(family, counts)}
     for name in sorted(set(expected) | set(published)):
         if published.get(name, 0) != expected.get(name, 0):
             raise UserError(
@@ -359,7 +395,7 @@ def build(
     out: Path,
     sql_dir: Path = SQL_DIR,
     curation_dir: Path | None = None,
-) -> None:
+) -> list[str]:
     """Run the SQL files, make the clusters and write the tables of each family.
 
     Args:
@@ -370,8 +406,11 @@ def build(
         curation_dir: Folder of `merges.csv` and `splits.csv` (see
             `tracker.dedup`). The default is `CURATION_DIR`.
 
+    Returns:
+        The sources that have no clean table, left out of the tables.
+
     Raises:
-        ValueError: A source has no clean table, or a check of `check` fails.
+        UserError: No source has a clean table, or a check of `check` fails.
         duckdb.Error: A SQL file fails.
     """
     files = sorted(sql_dir.glob("*.sql"))
@@ -380,16 +419,17 @@ def build(
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         counts = load_clean(store, work)
+        built = [name for name in SOURCES if name in counts]
         geocode = load_geocode(store)
         threat_actors = load_actors(store, curation_dir or CURATION_DIR)
         con = duckdb.connect(":memory:")
         try:
-            prepare(con, work, geocode)
+            prepare(con, work, geocode, built)
             for file in files:
                 logger.info("Running %s", file.name)
                 con.execute(file.read_text())
             check_coordinates(con)
-            add_clusters(con, curation_dir or CURATION_DIR)
+            add_clusters(con, curation_dir or CURATION_DIR, built)
             staged = work / "out"
             for family in FAMILIES:
                 export(con, family, staged / family)
@@ -405,4 +445,5 @@ def build(
             for file in (staged / family).iterdir():
                 shutil.copyfile(file, target / file.name)
     for family in FAMILIES:
-        logger.info("%s: %d sources", family, len(family_sources(family)))
+        logger.info("%s: %d sources", family, len(family_sources(family, built)))
+    return [name for name in SOURCES if name not in counts]

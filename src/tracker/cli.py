@@ -105,7 +105,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         elif args.command == "rebuild":
             ingest.rebuild(args.source, open_store(), args.allow_shrink)
         elif args.command == "build":
-            build.build(open_store(), args.out)
+            left_out = build.build(open_store(), args.out)
+            if left_out:
+                quality.write_summary(build.left_out_summary(left_out))
         elif args.command == "quality":
             quality.run(open_store(), args.out)
         elif args.command == "publish":

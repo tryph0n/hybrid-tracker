@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from conftest import FIXTURES, GEONAMES_PLACES, ROOT, geonames_archive
 
-from tracker import actors, build, cli, geonames, ingest, sources
+from tracker import actors, build, cli, geonames, ingest, publish, sources
 from tracker.schema import PUBLISHED_COLUMNS, read_csv
 from tracker.store import LocalBackend, Payload, Store
 
@@ -209,11 +209,59 @@ def test_a_nc_source_is_published_in_the_nc_family_only(store, tmp_path, monkeyp
     assert "fakenc:1" in (out / "nc" / "events.csv").read_text()
 
 
-def test_a_source_without_a_clean_table_fails_the_build(store, tmp_path):
+def test_a_source_without_a_clean_table_is_left_out(
+    store, tmp_path, monkeypatch, caplog
+):
     (store.backend.root / ingest.clean_path("leiden")).unlink()
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(store.backend.root))
+    out = tmp_path / "out"
 
-    with pytest.raises(ValueError, match="leiden"):
+    caplog.set_level("INFO")
+    cli.main(["build", "--out", str(out)])
+
+    assert "`leiden`" in summary.read_text(encoding="utf-8")
+    for family in sources.FAMILIES:
+        events = pd.read_parquet(out / family / "events.parquet")
+        assert set(events["source"]) == {"eodi"}
+        assert len(events) == len(fixture_events("eodi"))
+        assert "leiden" not in read_csv(out / family / "events.csv")["source"].tolist()
+        listed = pd.read_parquet(out / family / "sources.parquet")
+        assert list(listed["source"]) == ["eodi"]
+    assert "open: 1 sources" in caplog.text
+    assert "nc: 1 sources" in caplog.text
+
+
+def test_the_card_of_a_build_without_a_source_does_not_name_it(store, tmp_path):
+    (store.backend.root / ingest.clean_path("leiden")).unlink()
+    out = tmp_path / "out"
+    left_out = build.build(store, out)
+
+    assert left_out == ["leiden"]
+    leiden = sources.SOURCES["leiden"]
+    for family in sources.FAMILIES:
+        published = pd.read_parquet(out / family / "sources.parquet")["source"]
+        card = publish.render_card(family, set(FILES), published=list(published))
+        assert sources.SOURCES["eodi"].citation in card
+        assert leiden.citation not in card
+        assert leiden.homepage not in card
+        assert "all sources" not in card
+        assert "(one row per source)" not in card
+
+
+def test_a_build_with_every_clean_table_leaves_out_nothing(store, tmp_path):
+    assert build.build(store, tmp_path / "out") == []
+
+
+def test_a_build_with_no_clean_table_fails(store, tmp_path):
+    for name in sources.SOURCES:
+        (store.backend.root / ingest.clean_path(name)).unlink()
+
+    with pytest.raises(ValueError, match="No source has a clean table"):
         build.build(store, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
 
 
 def test_an_unknown_family_fails_the_build(store, tmp_path, monkeypatch):

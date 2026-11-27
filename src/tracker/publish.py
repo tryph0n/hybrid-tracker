@@ -15,10 +15,14 @@ creates the tag by hand.
 """
 
 import hashlib
+import io
 import logging
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 from tracker import actors, provenance
 from tracker.build import CURATION_DIR, family_sources
@@ -76,13 +80,14 @@ def versions_path(family: str) -> Path:
     return CARDS_DIR / f"versions-{family}.md"
 
 
-def credits(family: str) -> list[str]:
+def credits(family: str, published: Iterable[str] | None = None) -> list[str]:
     """Credit lines of the sources and reference datasets of one family.
 
     An `open` source or reference is credited in both cards, because the `nc`
     dataset holds its rows too. An `nc` one is credited in the `nc` card only.
+    A source is credited only when it is in `published` (default: every source).
     """
-    names = family_sources(family)
+    names = family_sources(family, published)
     lines = [
         f"- {SOURCES[name].citation} {SOURCES[name].licence}. <{SOURCES[name].homepage}>"
         for name in names
@@ -160,6 +165,7 @@ def render_card(
     files: set[str],
     versions: str | None = None,
     curation: list[actors.Curation] | None = None,
+    published: Iterable[str] | None = None,
 ) -> str:
     """The dataset card of one family.
 
@@ -171,6 +177,8 @@ def render_card(
             `cards/`.
         curation: The lines of the curated countries. Default: `curation/actors.csv`.
             Used only for the open card with `threat_actors.parquet` in `files`.
+        published: The sources that the dataset holds, as in its `sources` table.
+            Default: every source of the registry.
 
     Returns:
         The card, front matter first.
@@ -206,8 +214,8 @@ def render_card(
         INTRO[family],
         "",
         (
-            "Tables: `events` (one row per event, all sources), `sources` (one row "
-            "per source), `quality` (one row per source and per run, when "
+            "Tables: `events` (one row per event, from the sources listed in "
+            "`sources`), `sources` (one row per published source), `quality` (one row per source and per run, when "
             "present) and, in the open dataset, `threat_actors` (one row per "
             "threat group, with its aliases and country). The data is updated "
             "by the pipeline of the project."
@@ -226,7 +234,7 @@ def render_card(
             "reference data:"
         ),
         "",
-        *credits(family),
+        *credits(family, published),
         "",
         (
             "Approximate coordinates: in the published tables, an event with a "
@@ -338,7 +346,10 @@ def publish_family(api: Any, family: str, folder: Path) -> list[str]:
     for required in ("events.parquet", "sources.parquet"):
         if required not in sent:
             raise UserError(f"{folder / required} not found, run `tracker build`")
-    sent[CARD_FILE] = render_card(family, set(sent)).encode("utf-8")
+    published = pd.read_parquet(io.BytesIO(sent["sources.parquet"]))["source"]
+    sent[CARD_FILE] = render_card(family, set(sent), published=list(published)).encode(
+        "utf-8"
+    )
 
     on_hub = set(api.list_repo_files(repo_id, repo_type="dataset"))
     legacy = [name for name in LEGACY_FILES[family] if name in on_hub]
