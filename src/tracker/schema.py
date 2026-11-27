@@ -239,12 +239,12 @@ def validate(events: pd.DataFrame) -> None:
     is at least one row; no `REQUIRED` cell is missing (NaN, None, or an empty
     or whitespace-only string); `event_id` is unique; `ALLOWED_VALUES`
     columns hold allowed values (a column outside `REQUIRED` may be empty);
-    each `category` belongs to the row's `domain`; non-empty `countries` and `actors` match `COUNTRIES_PATTERN`
-    and `ACTORS_PATTERN`; `actors` is empty exactly when `attribution` is
-    "none"; `date` parses with `pd.to_datetime` and `%Y-%m-%d` (so "2025-1-5"
-    passes); a non-empty `end_date` parses the same way and is not before
-    `date`; `lat` and `lon` are both set or both missing, and in range when
-    set.
+    each `category` belongs to the row's `domain`; non-empty `countries` and
+    `actors` match `COUNTRIES_PATTERN` and `ACTORS_PATTERN`; `actors` is
+    empty exactly when `attribution` is "none"; `date` parses with
+    `pd.to_datetime` and `%Y-%m-%d` (so "2025-1-5" passes); a non-empty
+    `end_date` parses the same way and is not before `date`; `lat` and `lon`
+    are both set or both missing, and in range when set.
 
     Args:
         events: The events of one source or of all sources.
