@@ -35,6 +35,7 @@ from tracker.schema import (
     ATTRIBUTIONS,
     CATEGORY_DOMAINS,
     DOMAINS,
+    EUROPEAN_STATES,
     PUBLISHED_COLUMNS,
     read_csv,
 )
@@ -109,7 +110,8 @@ def test_counts_on_the_samples(sample_data_dir):
     codes = {code for cell in shown["countries"].dropna() for code in cell.split(";")}
     kpis = metrics(at)
     assert kpis["Incidents"] == str(len(shown))
-    assert kpis["Countries"] == str(len(codes))
+    assert len(codes) == 22
+    assert kpis["Countries"] == str(len(codes & EUROPEAN_STATES)) == "20"
     assert kpis["Officially attributed"] == str(
         (shown["attribution"] == "official").sum()
     )
@@ -284,6 +286,57 @@ def test_country_filter_restricts_kpi_and_bar(sample_data_dir):
     assert chart(at, 1).data[0].locations == ("DEU",)
 
 
+def countries_help(at: AppTest) -> str:
+    return next(m.help for m in at.metric if m.label == "Countries")
+
+
+def test_counts_by_country_keep_the_european_list_only(sample_data_dir):
+    at = run_app()
+    help_text = countries_help(at)
+    assert help_text.startswith(
+        "States of the European list of the data scope (43 states) that the "
+        "selected incidents name."
+    )
+    assert help_text.endswith("not counted here: Ukraine (1), United States (1).")
+    assert "decision record" not in help_text
+    assert set(chart(at, 2).data[0].y).isdisjoint({"United States", "Ukraine"})
+    assert len(chart(at, 2).data[0].y) == 20
+    at.segmented_control[0].set_value("Countries").run()
+    assert set(chart(at, 1).data[0].locations).isdisjoint({"USA", "UKR"})
+    assert "states of the European list only" in captions(at)
+
+
+def test_country_filter_on_a_state_outside_the_list_counts_nothing(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="countries").set_value(["US"]).run()
+    assert not at.exception
+    assert metrics(at)["Countries"] == "0"
+    help_text = countries_help(at)
+    assert "United States (1)" in help_text
+    assert "Ukraine" not in help_text
+    assert all(len(trace.y) == 0 for trace in chart(at, -1).data)
+    at.segmented_control[0].set_value("Countries").run()
+    assert all(len(trace.locations) == 0 for trace in chart(at, 1).data)
+
+
+def test_country_filter_on_germany_has_no_outside_sentence(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="countries").set_value(["DE"]).run()
+    assert metrics(at)["Countries"] == "1"
+    assert "not counted here" not in countries_help(at)
+
+
+def test_the_events_table_and_the_filter_keep_the_states_outside_the_list(
+    sample_data_dir,
+):
+    at = run_app()
+    assert "United States" in at.multiselect(key="countries").options
+    table = event_table(at)
+    row = table[table["country_names"].str.contains("United States")]
+    assert len(row) == 1
+    assert "Ukraine" in row.iloc[0]["country_names"]
+
+
 def test_multi_country_events_count_for_each_selected_country(sample_data_dir):
     at = run_app()
     at.multiselect(key="countries").set_value(["AT", "DE"]).run()
@@ -366,7 +419,7 @@ def test_status_filter_says_dismissed_events_are_hidden(sample_data_dir):
 def test_country_bar_keeps_the_countries_tied_at_the_cut(sample_data_dir):
     events = read_all_events()
     template = read_events("eodi").iloc[0]
-    codes = [f"{a}{b}" for a in "ABC" for b in "DEFGHI"][:17]
+    codes = sorted(EUROPEAN_STATES)[:17]
     # 14 countries with 2 events and 3 with 1: the 3 tie for place 15.
     countries = codes[:14] * 2 + codes[14:]
     tied = pd.DataFrame(

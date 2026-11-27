@@ -17,6 +17,8 @@ from typing import Any
 
 import pandas as pd
 
+from tracker.schema import EUROPEAN_STATES
+
 EMPTY = "—"
 DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -203,6 +205,25 @@ def memberships(rows: pd.DataFrame, column: str) -> pd.DataFrame:
     found = found.explode("value").dropna(subset=["value"])
     found = found[found["value"] != ""]
     return found.drop_duplicates(["cluster_id", "value"])
+
+
+def split_by_scope(
+    in_country: pd.DataFrame, selected: Collection[str] = ()
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split country memberships into the European list and the other states.
+
+    Args:
+        in_country: The memberships of `country_codes`, from `memberships`.
+        selected: The codes of the Countries filter. Empty keeps every code.
+
+    Returns:
+        The memberships of the states on the list, and those of the other
+        states. Both keep only the selected codes when `selected` is set.
+    """
+    if selected:
+        in_country = in_country[in_country["value"].isin(selected)]
+    on_list = in_country["value"].isin(EUROPEAN_STATES)
+    return in_country[on_list], in_country[~on_list]
 
 
 def official_by_actor(rows: pd.DataFrame) -> dict[str, int]:

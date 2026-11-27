@@ -35,6 +35,7 @@ from tracker.views import (
     passing_rows,
     published_sources,
     scope_rows,
+    split_by_scope,
     with_clusters,
     with_code_lists,
 )
@@ -176,6 +177,12 @@ def load_events(
         published.failure,
         published.quality,
     )
+
+
+COUNTRIES_HELP = (
+    "States of the European list of the data scope (43 states) that the "
+    "selected incidents name."
+)
 
 
 def country_name(code: str) -> str:
@@ -509,9 +516,22 @@ for name in link_sources:
     links = own.set_index("cluster_id")["url"].to_dict()
     lines[f"link_{name}"] = [links.get(cluster, "") for cluster in lines["cluster_id"]]
 in_domain = memberships(rows, "domain_label")
-by_country = count_by_country(memberships(rows, "country_codes"))
-if countries:
-    by_country = by_country[by_country["code"].isin(countries)]
+in_list, outside = split_by_scope(memberships(rows, "country_codes"), countries)
+by_country = count_by_country(in_list)
+outside_counts = count_by_country(outside).sort_values(
+    ["events", "country"], ascending=[False, True], kind="stable"
+)
+countries_help = COUNTRIES_HELP
+if not outside_counts.empty:
+    named = ", ".join(
+        f"{name} ({n:,})"
+        for name, n in zip(outside_counts["country"], outside_counts["events"])
+    )
+    countries_help += (
+        " The Countries filter selects states outside the list"
+        if countries and by_country.empty
+        else " The incidents also name states outside the list"
+    ) + f", not counted here: {named}."
 last_30 = (line_dates > today - pd.Timedelta(days=30)).sum()
 previous_30 = (
     (line_dates > today - pd.Timedelta(days=60))
@@ -524,7 +544,7 @@ kpi_events.metric(
     f"{len(lines):,}",
     help="Events that more than one source reports count once.",
 )
-kpi_countries.metric("Countries", len(by_country))
+kpi_countries.metric("Countries", len(by_country), help=countries_help)
 kpi_recent.metric(
     "Last 30 days",
     int(last_30),
@@ -586,8 +606,8 @@ else:
 if map_view == "Countries":
     st.plotly_chart(countries_map(by_country, dark))
     st.caption(
-        "Incidents per country, Europe only. An incident counts once in each "
-        "country that one of its sources gives it." + no_map_note
+        "Incidents per country, states of the European list only. An incident "
+        "counts once in each country that one of its sources gives it." + no_map_note
     )
 elif located.empty:
     st.info(
