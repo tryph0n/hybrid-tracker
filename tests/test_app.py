@@ -1038,3 +1038,67 @@ def test_a_value_that_every_row_leaves_empty_stays_empty(sample_data_dir):
     link_incidents(**{"leiden:K": {"actors": "", "attribution": "none"}})
     line = line_of(run_app(), BROGEL_TITLE)
     assert line["actor_names"] == ""
+
+
+def quality_rows(**dates):
+    """Quality rows of two runs: the older run has dates that must not show."""
+    rows = [
+        {
+            "run_at": "2026-11-25T03:00:00+00:00",
+            "source": name,
+            "downloaded_at": "2026-11-25T02:00:00+00:00",
+            "updated_by_source": "2026-11-01",
+        }
+        for name in SOURCES
+    ]
+    rows += [
+        {"run_at": "2026-11-26T03:00:00+00:00", "source": name} | values
+        for name, values in dates.items()
+    ]
+    return pd.DataFrame(rows)
+
+
+def test_sources_show_the_two_dates_and_blank_cells(sample_data_dir, monkeypatch):
+    quality = quality_rows(
+        eodi={
+            "downloaded_at": "2026-11-26T02:15:42.123456+00:00",
+            "updated_by_source": "2026-11-20T08:30:15Z",
+        },
+        leiden={
+            "downloaded_at": "2026-11-26T02:16:00+01:00",
+            "updated_by_source": None,
+        },
+    )
+    monkeypatch.setattr(hub, "fetch_quality", lambda commit: quality)
+    at = run_app()
+    table = at.dataframe[-1].value.set_index("Source")
+    config = json.loads(str(at.dataframe[-1].proto.columns))
+    assert config["Downloaded"]["help"] == (
+        "Time of the download whose data this table shows."
+    )
+    assert config["Updated by source"]["help"] == (
+        "Date of the last change that the source gives. "
+        "Blank: the source gives no date."
+    )
+    assert list(table.columns[:5]) == [
+        "Update",
+        "Events",
+        "Downloaded",
+        "Updated by source",
+        "From",
+    ]
+    eodi, leiden = SOURCES["eodi"].title, SOURCES["leiden"].title
+    assert table.loc[eodi, "Downloaded"] == "2026-11-26 02:15 UTC"
+    assert table.loc[eodi, "Updated by source"] == "2026-11-20 08:30 UTC"
+    assert table.loc[leiden, "Downloaded"] == "2026-11-26 01:16 UTC"
+    assert table.loc[leiden, "Updated by source"] == ""
+    assert table.loc[eodi, "Update"] == "Daily refresh"
+    assert "None" not in table.astype(str).to_string()
+
+
+def test_sources_with_no_quality_table_show_empty_cells(sample_data_dir):
+    at = run_app()
+    table = at.dataframe[-1].value
+    assert (table["Downloaded"] == "").all()
+    assert (table["Updated by source"] == "").all()
+    assert len(table) == len(SOURCES)

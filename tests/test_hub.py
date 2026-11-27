@@ -18,6 +18,12 @@ def refuse(revision):
     raise ConnectionError("no network")
 
 
+@pytest.fixture(autouse=True)
+def no_quality(monkeypatch):
+    """No test reads the quality table from the Hub unless it sets one."""
+    monkeypatch.setattr(hub, "fetch_quality", refuse)
+
+
 @pytest.fixture
 def snapshot(tmp_path):
     folder = tmp_path / "snapshot"
@@ -135,3 +141,24 @@ def test_the_snapshot_folder_follows_its_variable(monkeypatch, tmp_path):
     assert hub.snapshot_dir() == hub.SNAPSHOT_DIR
     monkeypatch.setenv(hub.SNAPSHOT_VARIABLE, str(tmp_path))
     assert hub.snapshot_dir() == tmp_path
+
+
+def test_a_good_read_carries_the_quality_table(tmp_path, monkeypatch, snapshot):
+    path = tmp_path / "events.parquet"
+    pd.DataFrame({"event_id": ["new:1"]}).to_parquet(path)
+    quality = pd.DataFrame({"source": ["eodi"]})
+    monkeypatch.setattr(hub, "fetch", lambda revision: (path, SHA, "2026-11-26"))
+    monkeypatch.setattr(hub, "fetch_quality", lambda commit: quality)
+    assert hub.load_published("main", snapshot).quality is quality
+
+
+def test_a_missing_quality_table_does_not_fail_the_read(
+    tmp_path, monkeypatch, snapshot
+):
+    path = tmp_path / "events.parquet"
+    pd.DataFrame({"event_id": ["new:1"]}).to_parquet(path)
+    monkeypatch.setattr(hub, "fetch", lambda revision: (path, SHA, "2026-11-26"))
+    monkeypatch.setattr(hub, "fetch_quality", refuse)
+    published = hub.load_published("main", snapshot)
+    assert published.quality is None
+    assert not published.from_snapshot

@@ -29,6 +29,7 @@ from tracker.sources import SOURCES
 from tracker.views import (
     coordinate_coverage,
     incident_lines,
+    latest_dates,
     memberships,
     official_by_actor,
     passing_rows,
@@ -135,12 +136,15 @@ LINE_FIELDS = [
 
 
 @st.cache_data(ttl="1h", max_entries=2)
-def load_events(revision: str) -> tuple[pd.DataFrame, str, str, str]:
+def load_events(
+    revision: str,
+) -> tuple[pd.DataFrame, str, str, str, pd.DataFrame | None]:
     """Load and prepare the published events: the Hub is read once an hour.
 
     Returns:
         The events, the revision read, its date and whether the bundled
-        snapshot was used because the Hub could not be read.
+        snapshot was used because the Hub could not be read, and the quality
+        table (None when it could not be read).
     """
     published = load_published(revision, snapshot_dir())
     events = published.events
@@ -169,6 +173,7 @@ def load_events(revision: str) -> tuple[pd.DataFrame, str, str, str]:
         published.revision,
         published.date,
         published.failure,
+        published.quality,
     )
 
 
@@ -333,7 +338,8 @@ def countries_bar(counts: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def sources_table(events: pd.DataFrame) -> pd.DataFrame:
+def sources_table(events: pd.DataFrame, quality: pd.DataFrame | None) -> pd.DataFrame:
+    dates = latest_dates(quality)
     rows = []
     for name, source in SOURCES.items():
         own = events[events["source"] == name]
@@ -344,6 +350,8 @@ def sources_table(events: pd.DataFrame) -> pd.DataFrame:
                 if source.kind == "live"
                 else "Frozen snapshot",
                 "Events": len(own),
+                "Downloaded": dates.get(name, ("", ""))[0],
+                "Updated by source": dates.get(name, ("", ""))[1],
                 "From": own["date"].min().date(),
                 "To": own["date"].max().date(),
                 "Licence": source.licence,
@@ -359,7 +367,9 @@ dark = st.context.theme.type == "dark"
 surface = "#0e1117" if dark else "#ffffff"
 colors = dict(zip(DOMAIN_LABELS.values(), DARK_COLORS if dark else LIGHT_COLORS))
 
-all_events, data_revision, data_date, hub_failure = load_events(configured_revision())
+all_events, data_revision, data_date, hub_failure, quality = load_events(
+    configured_revision()
+)
 
 st.title("Europe Hybrid Incidents Tracker")
 st.caption(
@@ -671,9 +681,22 @@ st.download_button(
 
 st.subheader("Sources")
 st.dataframe(
-    sources_table(all_events),
+    sources_table(all_events, quality),
     hide_index=True,
-    column_config={"Link": st.column_config.LinkColumn("Link")},
+    column_config={
+        "Downloaded": st.column_config.TextColumn(
+            "Downloaded",
+            help="Time of the download whose data this table shows.",
+        ),
+        "Updated by source": st.column_config.TextColumn(
+            "Updated by source",
+            help=(
+                "Date of the last change that the source gives. "
+                "Blank: the source gives no date."
+            ),
+        ),
+        "Link": st.column_config.LinkColumn("Link"),
+    },
 )
 st.caption(
     " ".join(f"{source.citation} {source.licence}." for source in SOURCES.values())

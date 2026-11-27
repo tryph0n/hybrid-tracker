@@ -6,11 +6,13 @@ import pytest
 from tracker.views import (
     coordinate_coverage,
     incident_lines,
+    latest_dates,
     memberships,
     official_by_actor,
     passing_rows,
     per_source_values,
     scope_rows,
+    source_date,
     with_clusters,
     with_code_lists,
 )
@@ -388,3 +390,28 @@ def test_a_table_without_cluster_columns_counts_each_row_once():
     assert list(result["cluster_id"]) == ["a", "b"]
     assert result["is_canonical"].all()
     assert (result["n_sources"] == 1).all()
+
+
+def test_a_source_date_keeps_the_precision_of_the_source():
+    assert source_date("2026-11-20") == "2026-11-20"
+    assert source_date("2026-01-13T14:22:43Z") == "2026-01-13 14:22 UTC"
+    assert source_date("2026-11-26T03:15:00+02:00") == "2026-11-26 01:15 UTC"
+    assert source_date(None) == ""
+    assert source_date(float("nan")) == ""
+
+
+def test_the_latest_dates_come_from_the_newest_run_of_each_source():
+    quality = pd.DataFrame(
+        {
+            "source": ["a", "a", "b"],
+            "run_at": ["2026-11-02T00:00:00+00:00"] + ["2026-11-01T00:00:00+00:00"] * 2,
+            "downloaded_at": ["2026-11-02T01:02:00+00:00", "x", None],
+            "updated_by_source": ["2026-11-02", "y", None],
+        }
+    )
+    assert latest_dates(quality) == {
+        "a": ("2026-11-02 01:02 UTC", "2026-11-02"),
+        "b": ("", ""),
+    }
+    assert latest_dates(quality.drop(columns="downloaded_at")) == {}
+    assert latest_dates(None) == {}
