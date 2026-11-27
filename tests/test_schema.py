@@ -4,12 +4,13 @@ import re
 
 import pandas as pd
 import pytest
-from conftest import read_all_events
+from conftest import ROOT, read_all_events
 
 from tracker.schema import (
     CATEGORIES,
     CATEGORY_DOMAINS,
     DOMAINS,
+    EUROPEAN_STATES,
     make_event_id,
     validate,
     validate_published,
@@ -191,3 +192,11 @@ def test_validate_published_rejects(events, change, message):
     validate_published(clustered(events))
     with pytest.raises(ValueError, match=message):
         validate_published(change(clustered(events)))
+
+
+def test_european_states_equal_the_list_of_decision_record_0002():
+    record = (ROOT / "docs" / "decisions" / "0002-schema-v2.md").read_text()
+    section = record.split("### European list")[1].split("- Ukraine")[0]
+    codes = re.search(r"ISO codes:(.*?)\.\n", section, re.DOTALL).group(1)
+    assert EUROPEAN_STATES == set(codes.split())
+    assert len(EUROPEAN_STATES) == 43

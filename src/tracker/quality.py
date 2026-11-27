@@ -13,16 +13,22 @@ unchanged and counts as no change. The table is also written to
 of that family. The run summary is Markdown, appended to the file named by
 `GITHUB_STEP_SUMMARY` when it is set, and logged otherwise.
 
-The run fails, after the table and the summary are written, when a source has
-no row, or when a live source has had no successful fetch for more than
-`MAX_FETCH_AGE_DAYS` days. A static source is refreshed by hand: only the empty
-check applies to it.
+A problem of one source does not fail the run. Each source has a list of causes:
+no clean table (the source is left out of the build and gets a row of zeros),
+a refresh that failed after a download (the record of `tracker.ingest`), no
+row in its clean table, or, for a live source, no successful fetch for more
+than `MAX_FETCH_AGE_DAYS` days. The causes are in the `cause` column of the
+row, in the run summary, and in `alerts.json` in the build folder: an object
+that maps each source that has a cause to the list of its causes, empty when no
+source has one. A static source is refreshed by hand: the three-day rule does
+not apply to it. The run fails only when no source has a clean table.
 """
 
 import io
+import json
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -32,7 +38,7 @@ import pandas as pd
 from tracker import clock
 from tracker.build import family_sources
 from tracker.errors import UserError
-from tracker.ingest import clean_path, read_lineage
+from tracker.ingest import clean_path, read_failure, read_lineage
 from tracker.schema import REQUIRED
 from tracker.sources import FAMILIES, SOURCES
 from tracker.store import Store
@@ -44,6 +50,7 @@ MAX_FETCH_AGE_DAYS = 3
 QUALITY_PATH = "quality/quality.parquet"
 EVENT_IDS_PATH = "quality/event_ids.parquet"
 SUMMARY_VAR = "GITHUB_STEP_SUMMARY"
+ALERTS_NAME = "alerts.json"
 
 KEY_COLUMNS = [*REQUIRED, "lat", "lon", "actors"]
 """Columns whose share of empty values is counted. `lat` and `lon` are here
@@ -65,6 +72,7 @@ TEXT_COLUMNS = [
     "last_fetch_at",
     "downloaded_at",
     "updated_by_source",
+    "cause",
 ]
 COLUMNS = [
     "run_at",
@@ -75,6 +83,7 @@ COLUMNS = [
     "last_fetch_at",
     "downloaded_at",
     "updated_by_source",
+    "cause",
 ]
 
 
@@ -126,6 +135,7 @@ def source_row(
     fetched: pd.Timestamp | None,
     run_at: str,
     lineage: Mapping[str, Any] | None = None,
+    causes: Sequence[str] = (),
 ) -> dict[str, object]:
     """The quality row of one source for this run.
 
@@ -137,6 +147,7 @@ def source_row(
         run_at: Time of this run, ISO format.
         lineage: The lineage record of its clean table, None when it has none.
             It gives `downloaded_at` and `updated_by_source`, blank otherwise.
+        causes: Why the source has an alert, joined in the `cause` column.
     """
     lineage = lineage or {}
     ids = set(events["event_id"])
@@ -159,6 +170,7 @@ def source_row(
     row["last_fetch_at"] = None if fetched is None else fetched.isoformat()
     row["downloaded_at"] = lineage.get("downloaded_at")
     row["updated_by_source"] = lineage.get("updated_by_source")
+    row["cause"] = "; ".join(causes) or None
     return row
 
 
@@ -180,30 +192,46 @@ def typed(table: pd.DataFrame) -> pd.DataFrame:
     return table
 
 
-def problems(table: pd.DataFrame, now: pd.Timestamp) -> list[str]:
-    """What fails the run, one message per source and cause.
+def causes(
+    name: str,
+    events: pd.DataFrame | None,
+    fetched: pd.Timestamp | None,
+    failure: Mapping[str, Any] | None,
+    now: pd.Timestamp,
+) -> list[str]:
+    """Why a source has an alert in this run, empty when it has none.
 
     Args:
-        table: The rows of this run.
+        name: Key of `SOURCES`.
+        events: Its clean table, None when it has none.
+        fetched: Time of its last successful fetch.
+        failure: The record of its last refresh error, None when it succeeded.
         now: Time of this run.
     """
     found = []
-    limit = timedelta(days=MAX_FETCH_AGE_DAYS)
-    for row in table.to_dict("records"):
-        name = str(row["source"])
-        fetched = row["last_fetch_at"]
-        if row["rows"] == 0:
-            found.append(f"{name}: no row in the clean table")
-        if SOURCES[name].kind != "live":
-            continue
+    if events is None:
+        found.append("no clean table")
+    elif events.empty:
+        found.append("no row in the clean table")
+    if failure is not None:
+        found.append(f"refresh failed: {failure['error']}")
+    if SOURCES[name].kind == "live":
         if fetched is None:
-            found.append(f"{name}: no successful fetch")
-        elif now - pd.Timestamp(str(fetched)) > limit:
+            found.append("no successful fetch")
+        elif now - fetched > timedelta(days=MAX_FETCH_AGE_DAYS):
             found.append(
-                f"{name}: no successful fetch since {fetched} "
+                f"no successful fetch since {fetched.isoformat()} "
                 f"(more than {MAX_FETCH_AGE_DAYS} days)"
             )
     return found
+
+
+def alerts_summary(alerts: Mapping[str, Sequence[str]]) -> str:
+    """The run summary section that names each source with a cause."""
+    lines = ["### Sources with an alert", ""]
+    for name, found in alerts.items():
+        lines += [f"- `{name}`: {cause}" for cause in found]
+    return "\n".join([*lines, ""])
 
 
 def cell(value: Any) -> str:
@@ -252,32 +280,44 @@ def write_summary(markdown: str, env: Mapping[str, str] | None = None) -> None:
 def run(store: Store, out: Path) -> pd.DataFrame:
     """Compute the rows of this run, write them everywhere, then check them.
 
+    A source with no clean table gets a row with no events and the cause
+    `no clean table`. Every problem of one source goes to the `cause` column and
+    to `<out>/alerts.json`; none of them fails the run.
+
     Args:
-        store: The raw store: clean tables, manifests, and the master copy of
-            the quality table.
+        store: The raw store: clean tables, manifests, failure records, and the
+            master copy of the quality table.
         out: The folder of `tracker build`. Each family folder gets
-            `quality.parquet`, created if needed.
+            `quality.parquet`, created if needed, and the folder gets
+            `alerts.json`.
 
     Returns:
         The rows of this run.
 
     Raises:
-        ValueError: A source has no clean table, or a source has no row, or a
-            live source has no recent successful fetch. The table and the
-            summary are written before the second and third errors.
+        UserError: No source has a clean table. Nothing is written.
     """
     now = clock.utc_now()
     run_at = now.isoformat()
     history = read_table(store, QUALITY_PATH)
     stored_ids = read_table(store, EVENT_IDS_PATH)
     seen = set() if history is None else set(history["source"])
+    tables = {name: read_table(store, clean_path(name)) for name in SOURCES}
+    if all(events is None for events in tables.values()):
+        raise UserError("no source has a clean table, run `tracker ingest`")
 
     rows = []
     all_ids = []
-    for name in SOURCES:
-        events = read_table(store, clean_path(name))
+    alerts = {}
+    for name, events in tables.items():
+        fetched = last_fetch(store, name)
+        found = causes(name, events, fetched, read_failure(name, store), now)
+        if found:
+            alerts[name] = found
         if events is None:
-            raise UserError(f"{name}: no clean table, run `tracker ingest {name}`")
+            events = pd.DataFrame(
+                {column: [] for column in ["event_id", "date", *KEY_COLUMNS]}
+            )
         previous = None
         if name in seen and stored_ids is not None:
             previous = set(stored_ids.loc[stored_ids["source"] == name, "event_id"])
@@ -286,9 +326,10 @@ def run(store: Store, out: Path) -> pd.DataFrame:
                 name,
                 events,
                 previous,
-                last_fetch(store, name),
+                fetched,
                 run_at,
                 read_lineage(name, store),
+                found,
             )
         )
         all_ids.append(pd.DataFrame({"source": name, "event_id": events["event_id"]}))
@@ -306,9 +347,8 @@ def run(store: Store, out: Path) -> pd.DataFrame:
         folder.mkdir(parents=True, exist_ok=True)
         in_family = table["source"].isin(family_sources(family))
         (folder / "quality.parquet").write_bytes(to_parquet(table[in_family]))
-    write_summary(render(current))
-
-    found = problems(current, now)
-    if found:
-        raise UserError("Quality check failed:\n" + "\n".join(found))
+    (out / ALERTS_NAME).write_text(
+        json.dumps(alerts, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    write_summary(render(current) + (alerts_summary(alerts) if alerts else ""))
     return current

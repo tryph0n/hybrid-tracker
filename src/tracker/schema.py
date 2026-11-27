@@ -10,7 +10,7 @@ import pandas as pd
 
 from tracker.errors import UserError
 
-SCHEMA_VERSION = "2.4.0"
+SCHEMA_VERSION = "2.5.0"
 
 # Column order of the clean and published tables.
 COLUMNS = [
@@ -108,6 +108,55 @@ EVENT_STATUSES = ["confirmed", "unconfirmed", "dismissed"]
 # "claimed": a group claimed the act and declares its allegiance.
 # "none": no source attributes the event to a state.
 ATTRIBUTIONS = ["official", "assessed", "claimed", "none"]
+
+# The European states of the data scope: decision record 0002, "European list".
+EUROPEAN_STATES = frozenset(
+    [
+        "AL",
+        "AD",
+        "AT",
+        "BE",
+        "BA",
+        "BG",
+        "HR",
+        "CY",
+        "CZ",
+        "DK",
+        "EE",
+        "FI",
+        "FR",
+        "DE",
+        "GR",
+        "HU",
+        "IS",
+        "IE",
+        "IT",
+        "XK",
+        "LV",
+        "LI",
+        "LT",
+        "LU",
+        "MT",
+        "MD",
+        "MC",
+        "ME",
+        "NL",
+        "MK",
+        "NO",
+        "PL",
+        "PT",
+        "RO",
+        "SM",
+        "RS",
+        "SK",
+        "SI",
+        "ES",
+        "SE",
+        "CH",
+        "GB",
+        "VA",
+    ]
+)
 
 DATE_PRECISIONS = ["day", "approximate", "month", "year"]
 
