@@ -311,18 +311,23 @@ def where_split(lines: pd.DataFrame) -> WhereSplit:
     )
 
 
-def split_line(split: WhereSplit, *, countries_pointer: str = "Countries view") -> str:
+def split_line(
+    split: WhereSplit, *, countries_pointer: str | None = "Countries view"
+) -> str:
     """The line that says where each listed incident is shown.
 
     A part with no incident has no pointer.
 
     Args:
         split: The counts from `where_split`.
-        countries_pointer: Where the incidents of a country only are counted.
+        countries_pointer: Where the incidents of a country only are shown, or
+            None when nothing shows them.
     """
 
-    def part(count: int, text: str, pointer: str) -> str:
-        return f"{count:,} {text} ({pointer})" if count else f"0 {text}"
+    def part(count: int, text: str, pointer: str | None) -> str:
+        if not count:
+            return f"0 {text}"
+        return f"{count:,} {text} ({pointer})" if pointer else f"{count:,} {text}"
 
     unit = "incident" if split.total == 1 else "incidents"
     last = "at sea only" if split.at_sea else "with no country"
@@ -333,6 +338,62 @@ def split_line(split: WhereSplit, *, countries_pointer: str = "Countries view") 
         + part(split.countries_only, "in a country only", countries_pointer)
         + ", "
         + part(split.no_country, last, "listed below")
+    )
+
+
+@dataclass(frozen=True)
+class CountryOnly:
+    """The incidents with a country and no point, by country and domain.
+
+    Attributes:
+        counts: One line for each state of the European list and domain, with
+            `code`, `domain`, `solid` (incidents that name only this country)
+            and `hatched` (incidents that also name other countries).
+        outside: The memberships of the other states that these incidents name.
+        several: The incidents of `counts` that name several countries.
+    """
+
+    counts: pd.DataFrame
+    outside: pd.DataFrame
+    several: int
+
+
+def country_only(
+    rows: pd.DataFrame, lines: pd.DataFrame, selected: Collection[str] = ()
+) -> CountryOnly:
+    """Count the incidents with a country and no coordinates.
+
+    An incident counts once in each country that it names and once in each of
+    its domains. It is hatched when its passing rows name more than one
+    country, on the list and the Countries filter or not.
+
+    Args:
+        rows: The passing rows, with `line_date` and `domain_label`.
+        lines: The lines from `incident_lines`.
+        selected: The codes of the Countries filter. Empty keeps every code.
+    """
+    no_point = lines["lat"].isna() | lines["lon"].isna()
+    shown = set(lines.loc[no_point & lines["has_country"], "cluster_id"])
+    mine = rows[rows["cluster_id"].isin(shown)]
+    named = memberships(mine, "country_codes")
+    several = named.groupby("cluster_id")["value"].nunique() > 1
+    on_list, outside = split_by_scope(named, selected)
+    domains = memberships(mine, "domain_label").rename(columns={"value": "domain"})
+    pairs = on_list.rename(columns={"value": "code"})[["cluster_id", "code"]].merge(
+        domains[["cluster_id", "domain"]], on="cluster_id"
+    )
+    pairs["hatched"] = pairs["cluster_id"].map(several).astype(bool)
+    counts = (
+        pairs.groupby(["code", "domain"])["hatched"]
+        .agg(hatched="sum", total="size")
+        .reset_index()
+    )
+    counts["hatched"] = counts["hatched"].astype(int)
+    counts["solid"] = counts["total"].astype(int) - counts["hatched"]
+    return CountryOnly(
+        counts=counts[["code", "domain", "solid", "hatched"]],
+        outside=outside,
+        several=int(pairs.loc[pairs["hatched"], "cluster_id"].nunique()),
     )
 
 

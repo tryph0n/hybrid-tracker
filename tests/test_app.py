@@ -115,7 +115,7 @@ def test_counts_on_the_samples(sample_data_dir):
     assert kpis["Officially attributed"] == str(
         (shown["attribution"] == "official").sum()
     )
-    assert len(at.get("plotly_chart")) == 3
+    assert len(at.get("plotly_chart")) == 4
 
 
 def test_sources_filter_lists_every_source_all_selected(sample_data_dir):
@@ -264,8 +264,8 @@ def test_source_without_coordinates_keeps_the_other_charts(sample_data_dir):
     at = run_app()
     at.multiselect(key="sources").set_value(["leiden"]).run()
     assert not at.exception
-    assert "Countries view" in at.info[0].value
-    assert len(at.get("plotly_chart")) == 2
+    assert "Countries view" not in at.info[0].value
+    assert len(at.get("plotly_chart")) == 3
 
 
 def test_countries_view(sample_data_dir):
@@ -281,7 +281,7 @@ def test_country_filter_restricts_kpi_and_bar(sample_data_dir):
     at.multiselect(key="countries").set_value(["DE"]).run()
     assert not at.exception
     assert metrics(at)["Countries"] == "1"
-    assert chart(at, 2).data[0].y == ("Germany",)
+    assert chart(at, 3).data[0].y == ("Germany",)
     at.segmented_control[0].set_value("Countries").run()
     assert chart(at, 1).data[0].locations == ("DEU",)
 
@@ -299,8 +299,8 @@ def test_counts_by_country_keep_the_european_list_only(sample_data_dir):
     )
     assert help_text.endswith("not counted here: Ukraine (1), United States (1).")
     assert "decision record" not in help_text
-    assert set(chart(at, 2).data[0].y).isdisjoint({"United States", "Ukraine"})
-    assert len(chart(at, 2).data[0].y) == 20
+    assert set(chart(at, 3).data[0].y).isdisjoint({"United States", "Ukraine"})
+    assert len(chart(at, 3).data[0].y) == 20
     at.segmented_control[0].set_value("Countries").run()
     assert set(chart(at, 1).data[0].locations).isdisjoint({"USA", "UKR"})
     assert "states of the European list only" in captions(at)
@@ -342,7 +342,7 @@ def test_multi_country_events_count_for_each_selected_country(sample_data_dir):
     at.multiselect(key="countries").set_value(["AT", "DE"]).run()
     assert not at.exception
     assert metrics(at)["Countries"] == "2"
-    bars = chart(at, 2).data[0]
+    bars = chart(at, 3).data[0]
     assert dict(zip(bars.y, counts(bars))) == {"Germany": 4, "Austria": 1}
 
 
@@ -445,7 +445,7 @@ def test_country_bar_keeps_the_countries_tied_at_the_cut(sample_data_dir):
         events_path("leiden"), index=False
     )
     at = run_app()
-    bars = chart(at, 2).data[0]
+    bars = chart(at, -1).data[0]
     assert len(bars.y) == 17
     assert sorted(counts(bars)) == [1] * 3 + [2] * 14
     assert "Most affected countries (top 15, ties kept)" in [
@@ -597,7 +597,7 @@ def test_where_caption_names_the_sources_and_says_the_legend_is_not_a_filter(
     assert "it is not the Domain filter" in text
     assert (
         f"{len(shown)} incidents: {located} at a place (map), {countries_only} in a "
-        f"country only (Countries view), {on_no_map} at sea only (listed below)"
+        f"country only (bars below), {on_no_map} at sea only (listed below)"
     ) in text
     assert located + countries_only + on_no_map == len(shown)
     assert sum(len(trace.customdata) for trace in chart(at, 1).data) == located
@@ -615,9 +615,9 @@ def test_where_counts_add_up_with_the_leiden_dataset_alone(sample_data_dir):
     info = at.info[0].value
     assert f"Sources with no coordinates: {LEIDEN_TITLE}." in info
     assert EODI_TITLE not in info
-    assert "Countries view" in info
+    assert "Countries view" not in info
     assert "have a country and no coordinates" not in info
-    assert f"{countries_only} in a country only (Countries view)" in captions(at)
+    assert f"{countries_only} in a country only (bars below)" in captions(at)
 
 
 def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
@@ -630,7 +630,7 @@ def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
     shown = expected_events(read_all_events())
     eodi = shown[shown["source"] == "eodi"]
     countries_only = where_counts(eodi)[1]
-    assert f"{countries_only} in a country only (Countries view)" in text
+    assert f"{countries_only} in a country only (bars below)" in text
     at.multiselect(key="sources").set_value(["eodi", "leiden"]).run()
     at.multiselect(key="domains").set_value(["sabotage"]).run()
     assert not at.exception
@@ -641,9 +641,9 @@ def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
     assert EODI_TITLE not in info
     assert where_counts(sabotage)[1] == 1
     assert "a country and no coordinates" not in info
-    assert "Try the Countries view" in info
+    assert "Try the Countries view" not in info
     assert (
-        "1 incident: 0 at a place, 1 in a country only (Countries view), "
+        "1 incident: 0 at a place, 1 in a country only (bars below), "
         "0 at sea only" in captions(at)
     )
 
@@ -1271,7 +1271,7 @@ def test_a_source_that_keeps_its_last_data_shows_the_dates_of_its_accepted_downl
 def test_the_split_line_and_the_line_under_the_map(sample_data_dir):
     at = run_app()
     assert (
-        "17 incidents: 7 at a place (map), 9 in a country only (Countries view), "
+        "17 incidents: 7 at a place (map), 9 in a country only (bars below), "
         "1 at sea only (listed below)" in captions(at)
     )
     assert "At sea only, no country: North Sea; Baltic Sea (1)." in captions(at)
@@ -1291,7 +1291,7 @@ def test_the_split_line_for_a_domain_and_a_country(sample_data_dir):
     at.multiselect(key="domains").set_value(DOMAINS).run()
     at.multiselect(key="countries").set_value(["DE"]).run()
     assert (
-        "4 incidents: 1 at a place (map), 3 in a country only (Countries view), "
+        "4 incidents: 1 at a place (map), 3 in a country only (bars below), "
         "0 at sea only" in captions(at)
     )
     assert "At sea only" not in captions(at)
@@ -1304,7 +1304,7 @@ def test_the_message_without_a_map_names_the_sources_without_coordinates(
     at.multiselect(key="domains").set_value(["sabotage"]).run()
     info = at.info[0].value
     assert "Russian Operations Against Europe Dataset, 2022-2025" in info
-    assert "Try the Countries view" in info
+    assert "Countries view" not in info
     assert "a country and no coordinates" not in info
 
 
@@ -1326,3 +1326,205 @@ def test_the_hover_says_where_the_point_comes_from(sample_data_dir):
     assert "Town centre (GeoNames) of the place that the source names" in hover_point(
         run_app()
     )
+
+
+HATCH_KEY = "Hatched: also names other countries"
+BARS_TITLE = "incidents in a country only (no point on the map)"
+BARS_LIMIT = (
+    "Incidents with a country and no point on the map, states of the European "
+    "list only. An incident counts once in each country and each domain that "
+    "its sources give it."
+)
+DOMAIN_COLORS = {
+    "light": {
+        "Air": "#0072b2",
+        "Sabotage": "#d55e00",
+        "Violence": "#7a1f5c",
+        "Information": "#c99700",
+    },
+    "dark": {
+        "Air": "#2f7fd0",
+        "Sabotage": "#e8742a",
+        "Violence": "#b0558f",
+        "Information": "#f0c040",
+    },
+}
+
+
+def bars_chart(at: AppTest):
+    for index in range(len(at.get("plotly_chart"))):
+        fig = chart(at, index)
+        if any(trace.name == HATCH_KEY for trace in fig.data):
+            return fig
+    return None
+
+
+def bar_segments(fig) -> dict[tuple[str, str], tuple[int, int]]:
+    """Solid and hatched count of each (country, domain) segment of the bars."""
+    found: dict[tuple[str, str], list[int]] = {}
+    for trace in fig.data:
+        if trace.name not in DOMAIN_COLORS["light"] or not trace.y:
+            continue
+        for country, count in zip(trace.y, trace.x):
+            if count:
+                pair = found.setdefault((country, trace.name), [0, 0])
+                pair[1 if trace.marker.pattern.shape else 0] += int(count)
+    return {key: (solid, hatched) for key, (solid, hatched) in found.items()}
+
+
+def bars_title(at: AppTest) -> list[str]:
+    return [m.value for m in at.markdown if "in a country only (no point" in m.value]
+
+
+def test_the_bars_count_the_incidents_in_a_country_only(sample_data_dir):
+    at = run_app()
+    fig = bars_chart(at)
+    found = bar_segments(fig)
+    countries = {country for country, _ in found}
+    assert len(countries) == 19
+    assert countries.isdisjoint({"United States", "Ukraine"})
+    assert sum(found[key][0] for key in found if key[0] == "Germany") == 0
+    assert found[("Germany", "Information")] == (0, 3)
+    assert {key: found[key] for key in found if key[0] == "Latvia"} == {
+        ("Latvia", "Air"): (0, 1),
+        ("Latvia", "Information"): (0, 1),
+    }
+    assert bars_title(at) == [f"##### 9 {BARS_TITLE}"]
+    text = captions(at)
+    assert BARS_LIMIT in text
+    assert "The bars add up to 24, more than the 9 incidents." in text
+    assert "not counted here: Ukraine (1), United States (1)." in text
+    assert (
+        "17 incidents: 7 at a place (map), 9 in a country only (bars below), "
+        "1 at sea only (listed below)" in text
+    )
+
+
+def test_the_bars_come_under_the_map_at_full_width(sample_data_dir):
+    at = run_app()
+    order = [
+        (
+            "bars"
+            if element.type == "markdown" and element.value == f"##### 9 {BARS_TITLE}"
+            else element.type
+        )
+        for element in at.main
+    ]
+    where = order.index("bars")
+    assert order[where - 2 : where + 5] == [
+        "plotly_chart",
+        "caption",
+        "bars",
+        "plotly_chart",
+        "caption",
+        "caption",
+        "subheader",
+    ]
+    map_figure = chart(at, 1)
+    assert any(len(trace.customdata or []) for trace in map_figure.data)
+    assert all(trace.type != "bar" for trace in map_figure.data)
+
+
+def test_the_hatch_marks_the_incidents_that_name_several_countries(sample_data_dir):
+    at = run_app()
+    fig = bars_chart(at)
+    found = bar_segments(fig)
+    assert found[("Austria", "Information")] == (0, 1)
+    assert found[("Germany", "Information")] == (0, 3)
+    assert found[("Estonia", "Information")] == (1, 0)
+    assert found[("Bulgaria", "Sabotage")] == (1, 0)
+    assert found[("Bulgaria", "Air")] == (0, 1)
+    germany = next(
+        trace.customdata[list(trace.y).index("Germany")]
+        for trace in fig.data
+        if trace.name == "Information" and trace.marker.pattern.shape
+    )
+    assert "3 incidents: 0 name only Germany, 3 also name other countries" in germany
+    assert "4 of these 9 incidents name several countries" in captions(at)
+    assert fig.layout.xaxis.type == "linear"
+    assert fig.layout.xaxis.rangemode == "tozero"
+
+
+def test_the_bars_legend_has_one_entry_for_each_domain_and_one_for_the_hatch(
+    sample_data_dir,
+):
+    fig = bars_chart(run_app())
+    domains = ["Air", "Sabotage", "Violence", "Information"]
+    entries = [trace.name for trace in fig.data if trace.showlegend is not False]
+    assert entries == [*domains, HATCH_KEY]
+    for domain in domains:
+        solid, hatched = [trace for trace in fig.data if trace.name == domain]
+        assert solid.showlegend and not solid.marker.pattern.shape
+        assert hatched.marker.pattern.shape
+        assert hatched.legendgroup == solid.legendgroup == domain
+        assert hatched.showlegend is False
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_each_segment_has_the_colour_of_its_domain_in_the_theme(sample_data_dir, theme):
+    at = AppTest.from_file(str(APP), default_timeout=30)
+    at.context["theme"] = theme
+    at.run()
+    assert not at.exception
+    fig = bars_chart(at)
+    surface = "#0e1117" if theme == "dark" else "#ffffff"
+    traces = [trace for trace in fig.data if trace.name in DOMAIN_COLORS[theme]]
+    assert len(traces) == 8
+    for trace in traces:
+        colour = DOMAIN_COLORS[theme][trace.name]
+        assert trace.marker.color == colour
+        assert trace.marker.line.color == surface
+        if trace.marker.pattern.shape:
+            assert trace.marker.pattern.bgcolor == colour
+            assert trace.marker.pattern.fgcolor == surface
+
+
+def test_the_bars_follow_the_domain_filter(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="domains").set_value(["sabotage"]).run()
+    assert not at.exception
+    assert bar_segments(bars_chart(at)) == {("Bulgaria", "Sabotage"): (1, 0)}
+    assert "Countries view" not in at.info[0].value
+    at.multiselect(key="domains").set_value(["espionage"]).run()
+    assert not at.exception
+    assert not bars_title(at)
+    assert BARS_LIMIT not in captions(at)
+    assert bars_chart(at) is None
+
+
+def test_the_bars_follow_the_countries_filter(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="countries").set_value(["DE"]).run()
+    assert not at.exception
+    assert bar_segments(bars_chart(at)) == {("Germany", "Information"): (0, 3)}
+    assert "The bars add up" not in captions(at)
+    at.multiselect(key="countries").set_value(["US"]).run()
+    assert not at.exception
+    text = captions(at)
+    assert "1 incident: 0 at a place, 1 in a country only, 0 at sea only" in text
+    assert "bars below" not in text
+    assert bars_title(at) == [f"##### 1 {BARS_TITLE.replace('incidents', 'incident')}"]
+    assert bars_chart(at) is None
+    assert BARS_LIMIT in text
+    assert "United States (1)" in text
+    assert "Ukraine" not in text
+    assert "name several countries" not in text
+
+
+def test_the_countries_view_has_no_bars(sample_data_dir):
+    at = run_app()
+    at.segmented_control[0].set_value("Countries").run()
+    assert not at.exception
+    assert len(at.get("plotly_chart")) == 3
+    assert not bars_title(at)
+    assert BARS_LIMIT not in captions(at)
+    assert "bars below" not in captions(at)
+
+
+def test_most_affected_countries_says_that_it_counts_the_incidents_with_no_point(
+    sample_data_dir,
+):
+    assert (
+        "Counts every selected incident that names the country, with or without "
+        "a point on the map."
+    ) in captions(run_app())
