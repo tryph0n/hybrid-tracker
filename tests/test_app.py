@@ -471,7 +471,7 @@ def test_the_table_and_the_hover_show_the_drone_presence(sample_data_dir):
 
 
 def test_the_app_shows_an_empty_drone_presence_when_the_table_has_no_column(
-    sample_data_dir, monkeypatch, tmp_path
+    sample_data_dir, monkeypatch, tmp_path, downloads
 ):
     def fetch_old_table(revision):
         path = tmp_path / "old.parquet"
@@ -482,6 +482,9 @@ def test_the_app_shows_an_empty_drone_presence_when_the_table_has_no_column(
     at = run_app()
     assert set(event_table(at)["drone_presence_label"]) == {""}
     assert set(hover_values(at, "Drone presence")) == {""}
+    rows = csv_of(downloads)
+    assert "drone_presence" in rows.columns
+    assert rows["drone_presence"].isna().all()
 
 
 def test_country_bar_keeps_the_countries_tied_at_the_cut(sample_data_dir):
