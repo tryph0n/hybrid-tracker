@@ -345,12 +345,11 @@ def split_line(
 class CountryOnly:
     """The incidents with a country and no point, by country and domain.
 
-    Attributes:
-        counts: One line for each state of the European list and domain, with
-            `code`, `domain`, `solid` (incidents that name only this country)
-            and `hatched` (incidents that also name other countries).
-        outside: The memberships of the other states that these incidents name.
-        several: The incidents of `counts` that name several countries.
+    `counts` has one line for each state of the European list and domain, with
+    `code`, `domain`, `solid` (incidents that name only this country) and
+    `hatched` (incidents that also name other countries). `outside` holds the
+    memberships of the other states that these incidents name. `several` is the
+    number of incidents of `counts` that name several countries.
     """
 
     counts: pd.DataFrame
