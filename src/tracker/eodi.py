@@ -303,7 +303,7 @@ def updated_by_source(files: Mapping[str, bytes]) -> str | None:
             `UNLOCATED_NAME`.
 
     Returns:
-        The newest date as `YYYY-MM-DDTHH:MM:SSZ` (UTC), or None when no row
+        The newest date in UTC, with seconds, or None when no row
         has one.
 
     Raises:

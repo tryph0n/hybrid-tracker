@@ -34,8 +34,8 @@ def publish_message(schema_version: str, env: Mapping[str, str] | None = None) -
         env: The environment. Default: the process environment.
 
     Returns:
-        A title line, then a `Code:` line and a `Run:` line for each value that
-        the environment gives.
+        A title line, then a line for the code commit and a line for the run link,
+        each only when the environment gives it.
     """
     lines = [f"data: publish schema {schema_version}"]
     commit = code_commit(env)
