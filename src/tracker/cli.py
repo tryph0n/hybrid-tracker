@@ -99,7 +99,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "ingest":
-            ingest.run(args.target, args.if_missing)
+            failures = ingest.run(args.target, args.if_missing)
+            if failures:
+                quality.write_summary(ingest.failure_summary(failures))
         elif args.command == "rebuild":
             ingest.rebuild(args.source, open_store(), args.allow_shrink)
         elif args.command == "build":

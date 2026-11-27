@@ -14,6 +14,14 @@ Run through the `tracker` command, from the repository root after `uv sync`:
   stored payloads, download nothing
 
 Each source step needs a raw store: set `TRACKER_STORE` (see `tracker.store`).
+
+A target that names several sources (`live`, `static`) does not stop at the
+first source that fails, whatever the error (a download error, the shrink
+guard, a mapping error). The source keeps its last clean table, the others are
+refreshed, the error goes to `failures/<name>.json` in the raw store and to the
+run summary, and the command exits with code 0. The next successful refresh of
+the source clears its record. A source named alone fails the command, and so
+does an error of the raw store: it concerns all the sources.
 """
 
 import hashlib
@@ -25,11 +33,11 @@ from typing import Any
 
 import pandas as pd
 
-from tracker import provenance
+from tracker import clock, provenance
 from tracker.errors import UserError
 from tracker.schema import validate
 from tracker.sources import REFERENCES, SOURCES
-from tracker.store import Store, open_store
+from tracker.store import Store, StoreError, open_store
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +105,45 @@ def lineage(
         "updated_by_source": SOURCES[name].updated_by_source(files),
         "payloads": payloads,
     }
+
+
+def failure_path(name: str) -> str:
+    """Path of the record of the last refresh error of one source."""
+    return f"failures/{name}.json"
+
+
+def read_failure(name: str, store: Store) -> dict[str, Any] | None:
+    """The error of the last refresh of one source, or None if it succeeded."""
+    stored = store.backend.read(failure_path(name))
+    if stored is None:
+        return None
+    record = dict(json.loads(stored))
+    return record if record["error"] is not None else None
+
+
+def write_failure(name: str, error: str | None, store: Store) -> None:
+    """Record the result of a refresh: its error, or None when it succeeded.
+
+    A success writes nothing when no error is recorded.
+    """
+    if error is None and read_failure(name, store) is None:
+        return
+    record = {
+        "source": name,
+        "error": error,
+        "failed_at": None if error is None else clock.utc_now().isoformat(),
+    }
+    store.backend.commit(
+        {failure_path(name): encode_lineage(record)},
+        f"failures: {name}",
+    )
+
+
+def failure_summary(failures: Mapping[str, str]) -> str:
+    """The run summary section that names each source whose refresh failed."""
+    lines = ["### Sources whose refresh failed", ""]
+    lines += [f"- `{name}`: {error}" for name, error in failures.items()]
+    return "\n".join([*lines, ""])
 
 
 def encode_lineage(record: Mapping[str, Any]) -> bytes:
@@ -232,7 +279,8 @@ def rebuild(name: str | None, store: Store, allow_shrink: bool = False) -> None:
 
     Nothing is downloaded: with the local store, nothing uses the network. Only
     the latest payload of each file is read, because each fetch is a full
-    snapshot. The run stops at the first source that fails, as `ingest` does.
+    snapshot. The run stops at the first source that fails: unlike `run`, it
+    shows the error at once.
 
     Args:
         name: Key of `SOURCES`, or None for every source. A source with no
@@ -259,10 +307,12 @@ def rebuild(name: str | None, store: Store, allow_shrink: bool = False) -> None:
         write_clean(key, files, store, allow_shrink)
 
 
-def run(target: str, if_missing: bool = False) -> None:
+def run(target: str, if_missing: bool = False) -> dict[str, str]:
     """Run one target: a source or reference name, `live` or `static`.
 
-    `static` runs the static sources and the reference datasets.
+    `static` runs the static sources and the reference datasets. A target with
+    several sources goes on after a source that fails (see the module
+    docstring).
 
     Args:
         target: The target to run.
@@ -270,8 +320,12 @@ def run(target: str, if_missing: bool = False) -> None:
             lineage record, and each reference dataset that already has a
             payload, in the raw store: it is not downloaded again.
 
+    Returns:
+        The error of each source whose refresh failed, by source name.
+
     Raises:
         ValueError: `target` is not a target.
+        StoreError: The raw store cannot be read or written.
     """
     if target in SOURCES or target in REFERENCES:
         names = [target]
@@ -282,6 +336,7 @@ def run(target: str, if_missing: bool = False) -> None:
     else:
         raise UserError(f"Unknown target {target!r}")
     store = open_store()
+    failures: dict[str, str] = {}
     for name in names:
         if name in REFERENCES:
             if if_missing and store.payloads(name):
@@ -294,5 +349,18 @@ def run(target: str, if_missing: bool = False) -> None:
             and read_lineage(name, store) is not None
         ):
             logger.info("%s: clean table and lineage in the store, skipped", name)
-        else:
+        elif len(names) == 1:
             ingest(name, store)
+            write_failure(name, None, store)
+        else:
+            try:
+                ingest(name, store)
+            except StoreError:
+                raise
+            except Exception as error:  # noqa: BLE001 - any error of one source
+                logger.error("%s: refresh failed: %s", name, error)
+                failures[name] = " ".join(f"{type(error).__name__}: {error}".split())
+                write_failure(name, failures[name], store)
+            else:
+                write_failure(name, None, store)
+    return failures
