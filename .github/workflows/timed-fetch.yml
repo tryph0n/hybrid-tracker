@@ -1,0 +1,30 @@
+name: timed-fetch
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  timed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - name: Install
+        run: uv sync --locked
+      - name: Fetch one day and the 7 days before it
+        run: |
+          start=$(date +%s)
+          uv run python -c "
+          import logging
+          from datetime import date, timedelta
+          from tracker import stanford
+          logging.basicConfig(level=logging.INFO, format='%(message)s')
+          days = [date(2026, 11, 24) - timedelta(days=n) for n in range(8)]
+          payloads = stanford.fetch_days(days)
+          print(len(payloads), sum(len(p.content) for p in payloads), sum(len(p.decoded) for p in payloads))
+          "
+          echo "total seconds: $(( $(date +%s) - start ))"
