@@ -2,7 +2,10 @@
 
 import pandas as pd
 import pytest
+from conftest import DATA_DIR
 
+from tracker.schema import ATTRIBUTIONS, CATEGORIES, DOMAINS, read_csv
+from tracker.sources import SOURCES
 from tracker.views import (
     WhereSplit,
     coordinate_coverage,
@@ -14,6 +17,7 @@ from tracker.views import (
     official_by_actor,
     passing_rows,
     per_source_values,
+    published_sources,
     scope_rows,
     source_date,
     split_by_scope,
@@ -409,6 +413,30 @@ def test_the_split_adds_up_to_the_incidents(events):
     assert split_line(split) == (
         "4 incidents: 2 at a place (map), 1 in a country only (Countries view), "
         "1 with no country (listed below)"
+    )
+
+
+def test_the_split_line_of_the_fixture_lines_is_the_text_of_the_first_box():
+    fixtures = [read_csv(path) for path in sorted(DATA_DIR.glob("*.csv"))]
+    events = pd.concat(fixtures, ignore_index=True)
+    events["date"] = pd.to_datetime(events["date"])
+    events = with_code_lists(with_clusters(events))
+    published = published_sources(events, list(SOURCES))
+    scope = scope_rows(events, sources=published, order=published)
+    passing = passing_rows(
+        scope,
+        domains=DOMAINS,
+        categories=CATEGORIES,
+        statuses=["confirmed", "unconfirmed"],
+        attributions=ATTRIBUTIONS,
+    )
+    names = {name: source.short_name for name, source in SOURCES.items()}
+
+    lines = incident_lines(scope, passing, fields=[], names=names)
+
+    assert split_line(where_split(lines)) == (
+        "17 incidents: 7 at a place (map), 9 in a country only (Countries view), "
+        "1 at sea only (listed below)"
     )
 
 
