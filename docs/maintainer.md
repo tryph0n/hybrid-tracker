@@ -97,7 +97,7 @@ store, then run `uv run tracker ingest <name>`.
 whatever the error: the source keeps its last clean table, the others are
 refreshed, and the command exits with code 0. The run summary names each failed
 source with its error, and the raw store keeps the error in
-`failures/<name>.json`, which `tracker quality` reads. The next successful
+`failures/<name>.json`. The next successful
 refresh of the source clears this record, also when you name the source alone. A source that you name alone, and an
 error of the raw store, still fail the command. Until the alert issues exist, a
 failed source shows only in the run summary.

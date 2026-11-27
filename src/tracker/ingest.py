@@ -18,11 +18,10 @@ Each source step needs a raw store: set `TRACKER_STORE` (see `tracker.store`).
 A target that names several sources (`live`, `static`) does not stop at the
 first source that fails, whatever the error (a download error, the shrink
 guard, a mapping error). The source keeps its last clean table, the others are
-refreshed, the error goes to `failures/<name>.json` in the raw store (read by
-`tracker quality`) and to the run summary, and the command exits with code 0.
-The next successful refresh of the source clears its record. A source named
-alone fails the command, and so does an error of the raw store: it concerns all
-the sources.
+refreshed, the error goes to `failures/<name>.json` in the raw store and to the
+run summary, and the command exits with code 0. The next successful refresh of
+the source clears its record. A source named alone fails the command, and so
+does an error of the raw store: it concerns all the sources.
 """
 
 import hashlib
