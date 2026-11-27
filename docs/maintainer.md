@@ -188,10 +188,19 @@ ids of the last run in `quality/event_ids.parquet`. Each run appends its rows.
 The command also writes `quality.parquet` to `build/open/` and `build/nc/` (the
 rows of the sources of that family), and appends the rows of the run to the
 run summary on GitHub, with the number of events with attribution `none` and
-how many are new. It fails, after it writes these, when a source has no row or
-when a live source has no successful fetch for more than three days: the
-three-day rule uses `last_fetch_at`, not `downloaded_at`. A static source skips
-the three-day rule.
+how many are new. It writes `alerts.json` to the build folder too, and lists the
+sources with a cause in the run summary.
+
+A problem of one source does not fail the command. Each source has a list of
+causes, in the `cause` column of its row (joined with `; `) and in `alerts.json`
+(an object from the source name to its list of causes, `{}` when there is none):
+`no clean table` (the source has a row of zeros), `refresh failed: <error>` (the
+last refresh failed after a download, from the record of `tracker ingest`; it
+ends on the first run after a refresh that succeeds), `no row in the clean
+table`, and, for a live source, `no successful fetch` or no successful fetch
+for more than three days. The three-day rule uses `last_fetch_at`, not
+`downloaded_at`, and a static source skips it. The command fails, and writes
+nothing, only when no source has a clean table.
 
 When a new version of a static source is published, follow the docstring of
 its module (`src/tracker/leiden.py`). For the Leiden dataset:

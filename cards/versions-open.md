@@ -12,6 +12,18 @@ The branch `main` holds `events.parquet`, `events.csv`, `sources.parquet` and
 the quality table, and no longer holds `eodi.csv` or `leiden.csv`. To read a
 tag, use the file names of that tag.
 
+### 2.5.0
+
+One new column in the `quality` table: `cause`. It gives why a source needs
+attention in that run: no clean table, a refresh that failed after a download,
+no row in its clean table, or, for a live source, no successful fetch for more
+than three days. Several causes are joined with `; `. It is blank when the
+source has no cause, and in the rows of the runs before this version. A source
+with no clean table is left out of the other tables, and keeps a row in
+`quality` with zero rows and this cause. It changes no column of `events`,
+`sources` or `threat_actors`. The tag `v2.5.0` is on the commit of the first
+upload.
+
 ### 2.4.0
 
 Two new columns in the `quality` table: `downloaded_at` and

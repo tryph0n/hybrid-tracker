@@ -7,6 +7,12 @@ never moved.
 
 This dataset starts with schema 2.1.0. It has no earlier version.
 
+### 2.5.0
+
+One new column in the `quality` table, the same as in the other dataset:
+`cause`. See its "Versions" section. It is blank in the rows of the runs before
+this version. The tag `v2.5.0` is on the commit of the first upload.
+
 ### 2.4.0
 
 Two new columns in the `quality` table, the same as in the other dataset:
