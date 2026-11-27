@@ -17,6 +17,8 @@ from typing import Any
 
 import pandas as pd
 
+from tracker.schema import EUROPEAN_STATES
+
 EMPTY = "—"
 DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -157,7 +159,7 @@ def incident_lines(
     """Build one line for each incident that has a passing row.
 
     The line gets its `date`, `end_date`, `date_precision`, `place`, `lat`,
-    `lon` and `title` from the first row in scope (see `scope_rows`), and
+    `lon`, `geo_precision` and `title` from the first row in scope (see `scope_rows`), and
     `line_source`, the source of that row. Each column of `fields` holds the
     text of `per_source_values`, from all the rows in scope, not only the
     passing ones: the line does not change when a filter other than the source
@@ -171,7 +173,16 @@ def incident_lines(
         names: The name of each source.
     """
     listed = scope[scope["cluster_id"].isin(passing["cluster_id"])]
-    base = ["cluster_id", "date", "end_date", "date_precision", "place", "lat", "lon"]
+    base = [
+        "cluster_id",
+        "date",
+        "end_date",
+        "date_precision",
+        "place",
+        "lat",
+        "lon",
+        "geo_precision",
+    ]
     lines = listed.loc[listed["is_line"], [*base, "title", "source"]].rename(
         columns={"source": "line_source"}
     )
@@ -205,6 +216,25 @@ def memberships(rows: pd.DataFrame, column: str) -> pd.DataFrame:
     return found.drop_duplicates(["cluster_id", "value"])
 
 
+def split_by_scope(
+    in_country: pd.DataFrame, selected: Collection[str] = ()
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split country memberships into the European list and the other states.
+
+    Args:
+        in_country: The memberships of `country_codes`, from `memberships`.
+        selected: The codes of the Countries filter. Empty keeps every code.
+
+    Returns:
+        The memberships of the states on the list, and those of the other
+        states. Both keep only the selected codes when `selected` is set.
+    """
+    if selected:
+        in_country = in_country[in_country["value"].isin(selected)]
+    on_list = in_country["value"].isin(EUROPEAN_STATES)
+    return in_country[on_list], in_country[~on_list]
+
+
 def official_by_actor(rows: pd.DataFrame) -> dict[str, int]:
     """Count the incidents of each state that a passing `official` row names.
 
@@ -221,37 +251,169 @@ def official_by_actor(rows: pd.DataFrame) -> dict[str, int]:
 class CoordinateCoverage:
     """Where the listed incidents can be seen, and which sources give coordinates.
 
-    `located`, `countries_only` and `on_no_map` are disjoint and add up to the
-    number of incidents. A source gives coordinates when at least one of its
-    rows in scope has them.
+    A source gives coordinates when at least one of its rows in scope has them.
     """
 
     sources_with: list[str]
     sources_without: list[str]
+
+
+@dataclass(frozen=True)
+class WhereSplit:
+    """The listed incidents by the view that shows them.
+
+    `located`, `countries_only` and `no_country` are disjoint and add up to
+    `total`, so that no incident is left out. `at_sea` is true when every
+    incident of `no_country` has `geo_precision` `sea`.
+    """
+
+    total: int
     located: int
     countries_only: int
-    on_no_map: int
+    no_country: int
+    at_sea: bool
 
 
-def coordinate_coverage(lines: pd.DataFrame, scope: pd.DataFrame) -> CoordinateCoverage:
-    """Count the lines by the view that shows them, and split sources by coordinates.
+NO_PLACE = "no place in the source"
 
-    Args:
-        lines: The lines from `incident_lines`.
-        scope: The rows in scope of the listed incidents.
-    """
-    has_coordinates = lines["lat"].notna() & lines["lon"].notna()
-    has_country = lines["has_country"]
+
+def coordinate_coverage(scope: pd.DataFrame) -> CoordinateCoverage:
+    """Split the sources of the rows in scope by whether they give coordinates."""
     row_coordinates = scope["lat"].notna() & scope["lon"].notna()
     with_coordinates = set(scope.loc[row_coordinates, "source"])
     sources = list(dict.fromkeys(scope["source"]))
     return CoordinateCoverage(
         sources_with=[name for name in sources if name in with_coordinates],
         sources_without=[name for name in sources if name not in with_coordinates],
-        located=int(has_coordinates.sum()),
-        countries_only=int((~has_coordinates & has_country).sum()),
-        on_no_map=int((~has_coordinates & ~has_country).sum()),
     )
+
+
+def _without_place(lines: pd.DataFrame) -> pd.DataFrame:
+    """The lines with no coordinates and no country."""
+    has_coordinates = lines["lat"].notna() & lines["lon"].notna()
+    return lines[~has_coordinates & ~lines["has_country"]]
+
+
+def where_split(lines: pd.DataFrame) -> WhereSplit:
+    """Count the lines by the view that shows them.
+
+    Args:
+        lines: The lines from `incident_lines`.
+    """
+    has_coordinates = lines["lat"].notna() & lines["lon"].notna()
+    nowhere = _without_place(lines)
+    return WhereSplit(
+        total=len(lines),
+        located=int(has_coordinates.sum()),
+        countries_only=int((~has_coordinates & lines["has_country"]).sum()),
+        no_country=len(nowhere),
+        at_sea=bool((nowhere["geo_precision"] == "sea").all()),
+    )
+
+
+def split_line(
+    split: WhereSplit, *, countries_pointer: str | None = "Countries view"
+) -> str:
+    """The line that says where each listed incident is shown.
+
+    A part with no incident has no pointer.
+
+    Args:
+        split: The counts from `where_split`.
+        countries_pointer: Where the incidents of a country only are shown, or
+            None when nothing shows them.
+    """
+
+    def part(count: int, text: str, pointer: str | None) -> str:
+        if not count:
+            return f"0 {text}"
+        return f"{count:,} {text} ({pointer})" if pointer else f"{count:,} {text}"
+
+    unit = "incident" if split.total == 1 else "incidents"
+    last = "at sea only" if split.at_sea else "with no country"
+    return (
+        f"{split.total:,} {unit}: "
+        + part(split.located, "at a place", "map")
+        + ", "
+        + part(split.countries_only, "in a country only", countries_pointer)
+        + ", "
+        + part(split.no_country, last, "listed below")
+    )
+
+
+@dataclass(frozen=True)
+class CountryOnly:
+    """The incidents with a country and no point, by country and domain.
+
+    `counts` has one line for each state of the European list and domain, with
+    `code`, `domain`, `solid` (incidents that name only this country) and
+    `hatched` (incidents that also name other countries). `outside` holds the
+    memberships of the other states that these incidents name. `several` is the
+    number of incidents of `counts` that name several countries.
+    """
+
+    counts: pd.DataFrame
+    outside: pd.DataFrame
+    several: int
+
+
+def country_only(
+    rows: pd.DataFrame, lines: pd.DataFrame, selected: Collection[str] = ()
+) -> CountryOnly:
+    """Count the incidents with a country and no coordinates.
+
+    An incident counts once in each country that it names and once in each of
+    its domains. It is hatched when its passing rows name more than one
+    country, on the list and the Countries filter or not.
+
+    Args:
+        rows: The passing rows, with `line_date` and `domain_label`.
+        lines: The lines from `incident_lines`.
+        selected: The codes of the Countries filter. Empty keeps every code.
+    """
+    no_point = lines["lat"].isna() | lines["lon"].isna()
+    shown = set(lines.loc[no_point & lines["has_country"], "cluster_id"])
+    mine = rows[rows["cluster_id"].isin(shown)]
+    named = memberships(mine, "country_codes")
+    several = named.groupby("cluster_id")["value"].nunique() > 1
+    on_list, outside = split_by_scope(named, selected)
+    domains = memberships(mine, "domain_label").rename(columns={"value": "domain"})
+    pairs = on_list.rename(columns={"value": "code"})[["cluster_id", "code"]].merge(
+        domains[["cluster_id", "domain"]], on="cluster_id"
+    )
+    pairs["hatched"] = pairs["cluster_id"].map(several).astype(bool)
+    counts = (
+        pairs.groupby(["code", "domain"])["hatched"]
+        .agg(hatched="sum", total="size")
+        .reset_index()
+    )
+    counts["hatched"] = counts["hatched"].astype(int)
+    counts["solid"] = counts["total"].astype(int) - counts["hatched"]
+    return CountryOnly(
+        counts=counts[["code", "domain", "solid", "hatched"]],
+        outside=outside,
+        several=int(pairs.loc[pairs["hatched"], "cluster_id"].nunique()),
+    )
+
+
+def no_country_places(lines: pd.DataFrame) -> list[tuple[str, int]]:
+    """The places, as the source writes them, of the lines with no country or point.
+
+    Returns:
+        Each place with its number of incidents, the largest count first, then
+        by place from A to Z. An empty place reads `NO_PLACE`.
+    """
+    places = _without_place(lines)["place"].fillna("").replace("", NO_PLACE)
+    counts = places.value_counts()
+    return sorted(
+        ((str(p), int(n)) for p, n in counts.items()), key=lambda x: (-x[1], x[0])
+    )
+
+
+def no_country_line(split: WhereSplit, places: Sequence[tuple[str, int]]) -> str:
+    """The line that lists the places of the incidents with no country."""
+    start = "At sea only, no country" if split.at_sea else "With no country"
+    return f"{start}: " + ", ".join(f"{place} ({n:,})" for place, n in places) + "."
 
 
 def source_date(value: Any) -> str:
@@ -290,3 +452,14 @@ def latest_dates(quality: pd.DataFrame | None) -> dict[str, tuple[str, str]]:
         )
         for row in newest.itertuples()
     }
+
+
+def published_sources(events: pd.DataFrame, order: Sequence[str]) -> list[str]:
+    """The sources that have rows in the published events, in the source order.
+
+    Args:
+        events: The published events.
+        order: Every source of the registry, first in the source order first.
+    """
+    present = set(events["source"])
+    return [name for name in order if name in present]

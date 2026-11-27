@@ -3,6 +3,8 @@
 Run from the repository root: streamlit run src/streamlit_app.py
 """
 
+from collections.abc import Collection
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -27,13 +29,21 @@ from tracker.schema import (
 )
 from tracker.sources import SOURCES
 from tracker.views import (
+    CountryOnly,
     coordinate_coverage,
+    country_only,
     incident_lines,
     latest_dates,
     memberships,
+    no_country_line,
+    no_country_places,
     official_by_actor,
     passing_rows,
+    published_sources,
     scope_rows,
+    split_by_scope,
+    split_line,
+    where_split,
     with_clusters,
     with_code_lists,
 )
@@ -122,6 +132,11 @@ BLUE_RAMP = [
 
 EUROPE_CENTER = {"lat": 53, "lon": 14}
 
+POINT_SOURCES = {
+    "exact": "Coordinates from the source",
+    "place": "Town centre (GeoNames) of the place that the source names",
+}
+
 SOURCE_NAMES = {name: source.short_name for name, source in SOURCES.items()}
 # The fields of one source: a line shows each of them for each source.
 LINE_FIELDS = [
@@ -175,6 +190,12 @@ def load_events(
         published.failure,
         published.quality,
     )
+
+
+COUNTRIES_HELP = (
+    "States of the European list of the data scope (43 states) that the "
+    "selected incidents name."
+)
 
 
 def country_name(code: str) -> str:
@@ -242,6 +263,7 @@ def points_map(
     located = located.assign(
         day=located["date"].dt.strftime("%Y-%m-%d"),
         here=located.groupby(["lat", "lon"])["lat"].transform("size"),
+        point=located["geo_precision"].map(POINT_SOURCES).fillna(""),
     ).merge(
         in_domain[["cluster_id", "value"]].rename(columns={"value": "marker_domain"}),
         on="cluster_id",
@@ -260,6 +282,7 @@ def points_map(
             "attributed_by_label": True,
             "actor_names": True,
             "here": True,
+            "point": True,
             "lat": False,
             "lon": False,
             "marker_domain": False,
@@ -275,6 +298,7 @@ def points_map(
             "attributed_by_label": "Attributed by",
             "actor_names": "Actors",
             "here": "Events here",
+            "point": "Point",
         },
         opacity=0.75,
         zoom=2.7,
@@ -338,10 +362,150 @@ def countries_bar(counts: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def sources_table(events: pd.DataFrame, quality: pd.DataFrame | None) -> pd.DataFrame:
+def outside_note(
+    outside: pd.DataFrame, selected: Collection[str], on_list_empty: bool
+) -> str:
+    """The sentence that names the states outside the list that incidents name.
+
+    Args:
+        outside: The memberships of the states outside the list.
+        selected: The codes of the Countries filter.
+        on_list_empty: True when no state of the list is counted.
+
+    Returns:
+        The sentence, or "" when the incidents name no such state.
+    """
+    counts = count_by_country(outside).sort_values(
+        ["events", "country"], ascending=[False, True], kind="stable"
+    )
+    if counts.empty:
+        return ""
+    named = ", ".join(
+        f"{name} ({n:,})" for name, n in zip(counts["country"], counts["events"])
+    )
+    start = (
+        "The Countries filter selects states outside the list"
+        if selected and on_list_empty
+        else "The incidents also name states outside the list"
+    )
+    return f"{start}, not counted here: {named}."
+
+
+def country_only_caption(
+    total: int, bars: CountryOnly, selected: Collection[str]
+) -> str:
+    """The caption of the bars: its limit, then the sentences that apply.
+
+    Args:
+        total: The incidents with a country and no point.
+        bars: The counts from `country_only`.
+        selected: The codes of the Countries filter.
+    """
+    text = (
+        "Incidents with a country and no point on the map, states of the European "
+        "list only. An incident counts once in each country and each domain that "
+        "its sources give it."
+    )
+    added = int((bars.counts["solid"] + bars.counts["hatched"]).sum())
+    if added > total:
+        text += f" The bars add up to {added:,}, more than the {total:,} incidents."
+    if bars.several:
+        text += (
+            f" {bars.several:,} of these {total:,} incidents name several "
+            "countries: their parts are hatched."
+        )
+    note = outside_note(bars.outside, selected, bars.counts.empty)
+    return f"{text} {note}".strip()
+
+
+def country_only_chart(
+    counts: pd.DataFrame, colors: dict[str, str], surface: str
+) -> go.Figure:
+    """Stacked bars by domain for each country, hatched where several countries.
+
+    Args:
+        counts: `CountryOnly.counts`, with at least one line.
+        colors: The colour of each domain label.
+        surface: The page colour, for the edges and the hatch.
+    """
+    counts = counts.assign(
+        country=counts["code"].map(country_name),
+        total=counts["solid"] + counts["hatched"],
+    )
+    order = (
+        counts.groupby("country")["total"]
+        .sum()
+        .reset_index()
+        .sort_values(["total", "country"], ascending=[False, True], kind="stable")
+    )
+    fig = go.Figure()
+    for domain in [d for d in colors if d in set(counts["domain"])]:
+        own = counts[counts["domain"] == domain].set_index("country")
+        own = own[["solid", "hatched", "total"]].reindex(order["country"]).fillna(0)
+        texts = [
+            f"{domain}<br>{int(row.total):,} "
+            f"{'incident' if row.total == 1 else 'incidents'}: "
+            f"{int(row.solid):,} name only {country}, "
+            f"{int(row.hatched):,} also name other countries"
+            for country, row in own.iterrows()
+        ]
+        for part, hatched in (("solid", False), ("hatched", True)):
+            marker = {
+                "color": colors[domain],
+                "line": {"color": surface, "width": 1},
+            }
+            if hatched:
+                marker["pattern"] = {
+                    "shape": "/",
+                    "bgcolor": colors[domain],
+                    "fgcolor": surface,
+                }
+            fig.add_bar(
+                x=own[part].astype(int).tolist(),
+                y=list(own.index),
+                orientation="h",
+                name=domain,
+                legendgroup=domain,
+                showlegend=not hatched,
+                marker=marker,
+                customdata=texts,
+                hovertemplate="%{customdata}<extra></extra>",
+            )
+    fig.add_bar(
+        x=[None],
+        y=[None],
+        orientation="h",
+        name="Hatched: also names other countries",
+        legendgroup="hatch",
+        marker={
+            "color": "#898781",
+            "pattern": {"shape": "/", "bgcolor": "#898781", "fgcolor": surface},
+        },
+    )
+    fig.update_layout(
+        barmode="stack",
+        barcornerradius=3,
+        xaxis={"type": "linear", "rangemode": "tozero", "title": "Incidents"},
+        yaxis={
+            "categoryorder": "array",
+            "categoryarray": list(order["country"]),
+            "autorange": "reversed",
+            "title": "",
+        },
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+        margin={"l": 0, "r": 30, "t": 10, "b": 0},
+        height=30 * len(order) + 100,
+    )
+    return fig
+
+
+def sources_table(
+    events: pd.DataFrame, quality: pd.DataFrame | None, published: list[str]
+) -> pd.DataFrame:
     dates = latest_dates(quality)
     rows = []
-    for name, source in SOURCES.items():
+    for name in published:
+        source = SOURCES[name]
         own = events[events["source"] == name]
         rows.append(
             {
@@ -370,6 +534,7 @@ colors = dict(zip(DOMAIN_LABELS.values(), DARK_COLORS if dark else LIGHT_COLORS)
 all_events, data_revision, data_date, hub_failure, quality = load_events(
     configured_revision()
 )
+published = published_sources(all_events, list(SOURCES))
 
 st.title("Europe Hybrid Incidents Tracker")
 st.caption(
@@ -393,8 +558,8 @@ with st.sidebar:
     period_note = st.container()
     source_names = st.multiselect(
         "Sources",
-        list(SOURCES),
-        default=list(SOURCES),
+        published,
+        default=published,
         format_func=lambda name: SOURCES[name].title,
         key="sources",
     )
@@ -456,7 +621,7 @@ with st.sidebar:
         key="countries",
     )
 
-scope = scope_rows(all_events, sources=source_names, order=list(SOURCES))
+scope = scope_rows(all_events, sources=source_names, order=published)
 # Every filter except the period: used for the "last 30 days" figure.
 passing = passing_rows(
     scope,
@@ -498,15 +663,17 @@ lines = incident_lines(scope, rows, fields=LINE_FIELDS, names=SOURCE_NAMES).sort
     "date", ascending=False, kind="stable"
 )
 listed = scope[scope["cluster_id"].isin(lines["cluster_id"])]
-link_sources = [name for name in SOURCES if name in source_names]
+link_sources = [name for name in published if name in source_names]
 for name in link_sources:
     own = listed[listed["source"] == name].drop_duplicates("cluster_id")
     links = own.set_index("cluster_id")["url"].to_dict()
     lines[f"link_{name}"] = [links.get(cluster, "") for cluster in lines["cluster_id"]]
 in_domain = memberships(rows, "domain_label")
-by_country = count_by_country(memberships(rows, "country_codes"))
-if countries:
-    by_country = by_country[by_country["code"].isin(countries)]
+in_list, outside = split_by_scope(memberships(rows, "country_codes"), countries)
+by_country = count_by_country(in_list)
+countries_help = (
+    f"{COUNTRIES_HELP} {outside_note(outside, countries, by_country.empty)}".strip()
+)
 last_30 = (line_dates > today - pd.Timedelta(days=30)).sum()
 previous_30 = (
     (line_dates > today - pd.Timedelta(days=60))
@@ -519,7 +686,7 @@ kpi_events.metric(
     f"{len(lines):,}",
     help="Events that more than one source reports count once.",
 )
-kpi_countries.metric("Countries", len(by_country))
+kpi_countries.metric("Countries", len(by_country), help=countries_help)
 kpi_recent.metric(
     "Last 30 days",
     int(last_30),
@@ -558,74 +725,68 @@ map_view = st.segmented_control(
     label_visibility="collapsed",
 )
 located = lines.dropna(subset=["lat", "lon"])
-coverage = coordinate_coverage(lines, listed)
-on_no_map = coverage.on_no_map
-if on_no_map == 1:
-    no_map_note = " 1 event has no country (open sea) and is on no map."
-elif on_no_map:
-    no_map_note = f" {on_no_map:,} events have no country (open sea) and are on no map."
-else:
-    no_map_note = ""
+coverage = coordinate_coverage(listed)
+split = where_split(lines)
 without_titles = ", ".join(SOURCES[name].title for name in coverage.sources_without)
-if coverage.countries_only == 1:
-    countries_only_note = (
-        " 1 event has a country and no coordinates: it is in the Countries view only."
-    )
-elif coverage.countries_only:
-    countries_only_note = (
-        f" {coverage.countries_only:,} events have a country and no coordinates: "
-        "they are in the Countries view only."
-    )
-else:
-    countries_only_note = ""
 if map_view == "Countries":
     st.plotly_chart(countries_map(by_country, dark))
     st.caption(
-        "Incidents per country, Europe only. An incident counts once in each "
-        "country that one of its sources gives it." + no_map_note
-    )
-elif located.empty:
-    st.info(
-        "None of the selected events has coordinates. Sources with no coordinates: "
-        f"{without_titles}."
-        + countries_only_note
-        + " Try the Countries view."
-        + no_map_note
+        "Incidents per country, states of the European list only. An incident "
+        "counts once in each country that one of its sources gives it."
     )
 else:
-    stacked = int(located.duplicated(["lat", "lon"], keep=False).sum())
-    if stacked:
-        stacked_note = (
-            f" {stacked:,} of them share their place with other events: "
-            "hover over a marker to see how many are there. "
-            "The Events table lists them all."
-        )
-    else:
-        stacked_note = ""
-    if len(located) == 1:
-        located_note = f"1 of {len(lines):,} selected events has coordinates."
-    else:
-        located_note = (
-            f"{len(located):,} of {len(lines):,} selected events have coordinates."
-        )
-    with_titles = ", ".join(SOURCES[name].title for name in coverage.sources_with)
-    sources_note = f" Sources with coordinates: {with_titles}."
-    if without_titles:
-        sources_note += f" Sources with no coordinates: {without_titles}."
-    st.plotly_chart(points_map(located, in_domain, colors, dark))
+    bars = country_only(rows, lines, countries)
     st.caption(
-        located_note
-        + stacked_note
-        + sources_note
-        + " An event has one marker for each domain that one of its sources "
-        "gives it, at the same place. The legend lists only the domains of the "
-        "events that have coordinates: it is not the Domain filter."
-        + countries_only_note
-        + no_map_note
+        split_line(
+            split, countries_pointer="bars below" if not bars.counts.empty else None
+        )
     )
+    if located.empty:
+        st.info(
+            "None of the selected events has coordinates. Sources with no "
+            f"coordinates: {without_titles}."
+        )
+    else:
+        stacked = int(located.duplicated(["lat", "lon"], keep=False).sum())
+        if stacked:
+            stacked_note = (
+                f" {stacked:,} of the incidents on the map share their place with "
+                "other events: hover over a marker to see how many are there. "
+                "The Events table lists them all."
+            )
+        else:
+            stacked_note = ""
+        with_titles = ", ".join(SOURCES[name].title for name in coverage.sources_with)
+        sources_note = f" Sources with coordinates: {with_titles}."
+        if without_titles:
+            sources_note += f" Sources with no coordinates: {without_titles}."
+        st.plotly_chart(points_map(located, in_domain, colors, dark))
+        st.caption(
+            stacked_note.strip()
+            + sources_note
+            + " An event has one marker for each domain that one of its sources "
+            "gives it, at the same place. The legend lists only the domains of the "
+            "events that have coordinates: it is not the Domain filter."
+        )
+    if split.countries_only:
+        bars_title = (
+            f"{split.countries_only:,} "
+            f"{'incident' if split.countries_only == 1 else 'incidents'} "
+            "in a country only (no point on the map)"
+        )
+        st.markdown(f"##### {bars_title}")
+        if not bars.counts.empty:
+            st.plotly_chart(country_only_chart(bars.counts, colors, surface))
+        st.caption(country_only_caption(split.countries_only, bars, countries))
+    if split.no_country:
+        st.caption(no_country_line(split, no_country_places(lines)))
 
 st.subheader("Most affected countries (top 15, ties kept)")
 st.plotly_chart(countries_bar(by_country))
+st.caption(
+    "Counts every selected incident that names the country, with or without a "
+    "point on the map."
+)
 
 st.subheader("Events")
 st.caption(
@@ -681,7 +842,7 @@ st.download_button(
 
 st.subheader("Sources")
 st.dataframe(
-    sources_table(all_events, quality),
+    sources_table(all_events, quality, published),
     hide_index=True,
     column_config={
         "Downloaded": st.column_config.TextColumn(
@@ -699,7 +860,7 @@ st.dataframe(
     },
 )
 st.caption(
-    " ".join(f"{source.citation} {source.licence}." for source in SOURCES.values())
+    " ".join(f"{SOURCES[name].citation} {SOURCES[name].licence}." for name in published)
 )
 revision_note = f"revision {data_revision[:7]}" + (
     f" of {data_date}" if data_date else ""
