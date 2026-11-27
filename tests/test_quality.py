@@ -3,7 +3,7 @@ import io
 
 import pandas as pd
 import pytest
-from conftest import FIXTURES
+from conftest import FIXTURES, recorded_payloads
 
 from tracker import cli, clock, ingest, quality, sources
 from tracker.schema import read_csv
@@ -278,3 +278,182 @@ def test_cli_runs_quality(store, out, tmp_path, monkeypatch):
     cli.main(["quality", "--out", str(out)])
 
     assert (out / "open" / "quality.parquet").exists()
+
+
+T1, T2, T3 = (pd.Timestamp(days_after(d), tz="UTC").isoformat() for d in (0, 1, 2))
+
+
+def serve_files(monkeypatch, name: str, files: dict[str, bytes], **changes) -> None:
+    """Make source `name` download `files`, with the given fields replaced."""
+    monkeypatch.setitem(
+        sources.SOURCES,
+        name,
+        dataclasses.replace(
+            sources.SOURCES[name],
+            extract=lambda: [
+                Payload(name, file, content, f"https://e/{file}", 200)
+                for file, content in files.items()
+            ],
+            **changes,
+        ),
+    )
+
+
+def ingest_at(monkeypatch, store: Store, name: str, day: int, files, **changes):
+    set_clock(monkeypatch, days_after(day))
+    if "all.bin" in files:
+        changes.setdefault("normalize", fixture_normalize())
+        changes.setdefault("updated_by_source", sources.no_date)
+    serve_files(monkeypatch, name, files, **changes)
+    ingest.ingest(name, store)
+
+
+def quality_row(store: Store, out, name: str) -> pd.Series:
+    return quality.run(store, out).set_index("source").loc[name]
+
+
+def fixture_normalize():
+    """A `normalize` that maps `good` and rejects the other contents."""
+    events = fixture_events("eodi")
+    invalid = events.copy()
+    invalid["date_precision"] = "never"
+    results = {b"good": events, b"short": events.head(1), b"invalid": invalid}
+
+    def normalize(files):
+        content = files["all.bin"]
+        if content == b"malformed":
+            raise ValueError("malformed file")
+        return results[content]
+
+    return normalize
+
+
+@pytest.fixture
+def ingested(tmp_path, monkeypatch) -> Store:
+    """A store where each source was ingested from its recorded files at T1."""
+    store = Store(LocalBackend(tmp_path / "ingested"))
+    ingest_at(monkeypatch, store, "leiden", 0, leiden_files())
+    ingest_at(monkeypatch, store, "eodi", 0, recorded_payloads("eodi"))
+    return store
+
+
+def leiden_files() -> dict[str, bytes]:
+    files = recorded_payloads("leiden")
+    files["version.json"] = (FIXTURES / "leiden_dataverse_version.json").read_bytes()
+    return files
+
+
+@pytest.mark.parametrize("rejected", [b"malformed", b"invalid", b"short"])
+def test_a_rejected_download_does_not_move_downloaded_at(
+    store, out, monkeypatch, rejected
+):
+    good = {"all.bin": b"good"}
+    ingest_at(monkeypatch, store, "eodi", 0, good, normalize=fixture_normalize())
+    with pytest.raises(ValueError):
+        ingest_at(
+            monkeypatch,
+            store,
+            "eodi",
+            1,
+            {"all.bin": rejected},
+            normalize=fixture_normalize(),
+        )
+    set_clock(monkeypatch, days_after(2))
+    row = quality_row(store, out, "eodi")
+
+    assert row["downloaded_at"] == T1
+    assert row["last_fetch_at"] == T2
+
+
+def test_an_accepted_download_with_the_same_file_moves_downloaded_at(
+    store, out, monkeypatch
+):
+    for day in (0, 2):
+        ingest_at(
+            monkeypatch,
+            store,
+            "eodi",
+            day,
+            {"all.bin": b"good"},
+            normalize=fixture_normalize(),
+        )
+    row = quality_row(store, out, "eodi")
+
+    assert row["downloaded_at"] == T3
+    assert [line["stored"] for line in store.manifest("eodi")][-2:] == [True, False]
+
+
+def test_a_rebuild_with_no_network_gives_the_same_two_dates(ingested, out, monkeypatch):
+    before = quality.run(ingested, out).set_index("source")
+
+    set_clock(monkeypatch, days_after(2))
+    ingest.rebuild(None, ingested)
+    after = quality.run(ingested, out).set_index("source")
+
+    for name in ("eodi", "leiden"):
+        assert before.loc[name, "downloaded_at"] == after.loc[name, "downloaded_at"]
+        assert (
+            before.loc[name, "updated_by_source"]
+            == after.loc[name, "updated_by_source"]
+        )
+    assert after.loc["leiden", "downloaded_at"] == T1
+    assert after.loc["leiden", "updated_by_source"] == "2026-01-13T14:22:43Z"
+
+
+def test_the_rows_of_eodi_and_leiden_give_the_date_of_the_last_change(ingested, out):
+    current = quality.run(ingested, out).set_index("source")
+
+    assert current.loc["leiden", "updated_by_source"] == "2026-01-13T14:22:43Z"
+    assert current.loc["eodi", "updated_by_source"] == "2026-11-12T14:17:00Z"
+
+
+def test_a_source_that_gives_no_date_has_a_blank_updated_by_source(
+    store, out, monkeypatch
+):
+    ingest_at(
+        monkeypatch,
+        store,
+        "eodi",
+        0,
+        {"all.bin": b"good"},
+        normalize=fixture_normalize(),
+        updated_by_source=sources.no_date,
+    )
+    row = quality_row(store, out, "eodi")
+
+    assert row["updated_by_source"] is None
+    assert row["downloaded_at"] == T1
+
+
+def test_a_clean_table_with_no_lineage_gives_blank_dates(store, out):
+    assert ingest.read_lineage("eodi", store) is None
+    row = quality_row(store, out, "eodi")
+
+    assert row["downloaded_at"] is None
+    assert row["updated_by_source"] is None
+
+
+def test_the_rows_of_an_older_history_get_blank_values_in_the_new_columns(
+    store, out, monkeypatch
+):
+    quality.run(store, out)
+    new = ["downloaded_at", "updated_by_source"]
+    old = master(store).drop(columns=new)
+    store.backend.commit({quality.QUALITY_PATH: quality.to_parquet(old)}, "test")
+    ingest_at(
+        monkeypatch,
+        store,
+        "eodi",
+        1,
+        {"all.bin": b"good"},
+        normalize=fixture_normalize(),
+    )
+    quality.run(store, out)
+    table = master(store)
+
+    assert list(table.columns) == quality.COLUMNS
+    older = table[table["run_at"] == pd.Timestamp(START, tz="UTC").isoformat()]
+    assert len(older) == len(sources.SOURCES)
+    assert older[new].isna().all().all()
+    newest = table[table["run_at"] == table["run_at"].max()].set_index("source")
+    assert newest.loc["eodi", "downloaded_at"] == T2

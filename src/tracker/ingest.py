@@ -64,15 +64,17 @@ def lineage(
 
     Returns:
         A record with `source`, `rows`, `code_commit` (None outside a workflow
-        run), `updated_by_source` (the date of the last change that the source
-        gives, or None) and `payloads`: the file name, the path in the raw
-        store and the SHA-256 of each payload.
+        run), `downloaded_at` (the time of the newest download of these
+        payloads, from the manifest), `updated_by_source` (the date of the last
+        change that the source gives, or None) and `payloads`: the file name,
+        the path in the raw store and the SHA-256 of each payload.
 
     Raises:
         UserError: A payload is not in the manifest of the store.
     """
     manifest = store.manifest(name)
     payloads = []
+    downloads = []
     for file in sorted(files):
         digest = hashlib.sha256(files[file]).hexdigest()
         line = next(
@@ -86,10 +88,12 @@ def lineage(
         if line is None:
             raise UserError(f"{name}: {file} is not in the manifest of the store")
         payloads.append({"name": file, "path": line["path"], "sha256": digest})
+        downloads.append(pd.Timestamp(line["fetched_at"]))
     return {
         "source": name,
         "rows": rows,
         "code_commit": provenance.code_commit(),
+        "downloaded_at": max(downloads).isoformat() if downloads else None,
         "updated_by_source": SOURCES[name].updated_by_source(files),
         "payloads": payloads,
     }

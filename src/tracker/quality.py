@@ -32,7 +32,7 @@ import pandas as pd
 from tracker import clock
 from tracker.build import family_sources
 from tracker.errors import UserError
-from tracker.ingest import clean_path
+from tracker.ingest import clean_path, read_lineage
 from tracker.schema import REQUIRED
 from tracker.sources import FAMILIES, SOURCES
 from tracker.store import Store
@@ -58,7 +58,14 @@ COUNT_COLUMNS = [
     "none_added",
 ]
 EMPTY_COLUMNS = [f"empty_{column}" for column in KEY_COLUMNS]
-TEXT_COLUMNS = ["run_at", "source", "latest_event_date", "last_fetch_at"]
+TEXT_COLUMNS = [
+    "run_at",
+    "source",
+    "latest_event_date",
+    "last_fetch_at",
+    "downloaded_at",
+    "updated_by_source",
+]
 COLUMNS = [
     "run_at",
     "source",
@@ -66,6 +73,8 @@ COLUMNS = [
     *EMPTY_COLUMNS,
     "latest_event_date",
     "last_fetch_at",
+    "downloaded_at",
+    "updated_by_source",
 ]
 
 
@@ -116,6 +125,7 @@ def source_row(
     previous_ids: set[str] | None,
     fetched: pd.Timestamp | None,
     run_at: str,
+    lineage: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     """The quality row of one source for this run.
 
@@ -125,7 +135,10 @@ def source_row(
         previous_ids: Event ids of the previous run, None for a first run.
         fetched: Time of its last successful fetch.
         run_at: Time of this run, ISO format.
+        lineage: The lineage record of its clean table, None when it has none.
+            It gives `downloaded_at` and `updated_by_source`, blank otherwise.
     """
+    lineage = lineage or {}
     ids = set(events["event_id"])
     is_none = events["attribution"] == "none"
     new = ids if previous_ids is None else ids - previous_ids
@@ -144,18 +157,26 @@ def source_row(
         row[f"empty_{column}"] = empty_share(events[column], counted)
     row["latest_event_date"] = None if events.empty else str(events["date"].max())
     row["last_fetch_at"] = None if fetched is None else fetched.isoformat()
+    row["downloaded_at"] = lineage.get("downloaded_at")
+    row["updated_by_source"] = lineage.get("updated_by_source")
     return row
 
 
 def typed(table: pd.DataFrame) -> pd.DataFrame:
-    """The table with the column order and types of `COLUMNS`."""
-    table = table[COLUMNS].copy()
+    """The table with the column order and types of `COLUMNS`.
+
+    A column that the table lacks, as in the rows of the runs before it existed,
+    is added with blank values.
+    """
+    table = table.reindex(columns=COLUMNS).copy()
     for column in COUNT_COLUMNS:
         table[column] = table[column].astype("int64")
     for column in EMPTY_COLUMNS:
         table[column] = table[column].astype("float64")
     for column in TEXT_COLUMNS:
-        table[column] = table[column].astype("object")
+        table[column] = (
+            table[column].astype("object").where(table[column].notna(), None)
+        )
     return table
 
 
@@ -260,7 +281,16 @@ def run(store: Store, out: Path) -> pd.DataFrame:
         previous = None
         if name in seen and stored_ids is not None:
             previous = set(stored_ids.loc[stored_ids["source"] == name, "event_id"])
-        rows.append(source_row(name, events, previous, last_fetch(store, name), run_at))
+        rows.append(
+            source_row(
+                name,
+                events,
+                previous,
+                last_fetch(store, name),
+                run_at,
+                read_lineage(name, store),
+            )
+        )
         all_ids.append(pd.DataFrame({"source": name, "event_id": events["event_id"]}))
     current = typed(pd.DataFrame(rows))
     table = current if history is None else pd.concat([typed(history), current])

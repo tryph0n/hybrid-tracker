@@ -7,6 +7,13 @@ never moved.
 
 This dataset starts with schema 2.1.0. It has no earlier version.
 
+### 2.4.0
+
+Two new columns in the `quality` table, the same as in the other dataset:
+`downloaded_at` and `updated_by_source`. See its "Versions" section. They are
+blank in the rows of the runs before this version. The tag `v2.4.0` is on the
+commit of the first upload.
+
 ### 2.3.0
 
 The same data as 2.2.0. The version follows the other dataset, which gets a new
