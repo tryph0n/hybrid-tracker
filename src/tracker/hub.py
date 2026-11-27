@@ -1,7 +1,8 @@
 """Read the published tables from the public Hugging Face dataset.
 
 The dashboard reads `events.parquet` of the NonCommercial dataset, which holds
-the rows of both licence families. When the Hub cannot be reached, it reads a
+the rows of both licence families, and its `quality.parquet` for the dates of
+each source (blank when that file cannot be read). When the Hub cannot be reached, it reads a
 snapshot of the same file that the image build bundles in a folder, with the
 revision and the date of that snapshot in `snapshot.json`.
 
@@ -24,6 +25,7 @@ REPO_ID = DATASETS["nc"]
 """Dataset that the dashboard reads."""
 
 EVENTS_FILE = "events.parquet"
+QUALITY_FILE = "quality.parquet"
 SNAPSHOT_INFO = "snapshot.json"
 DEFAULT_REVISION = "main"
 REVISION_VARIABLE = "HYBRID_TRACKER_REVISION"
@@ -69,6 +71,10 @@ class Published:
     """Why the Hub was not used: `UNREACHABLE` when it gave no answer,
     `UNREADABLE` when it answered but the data could not be read at the revision
     (unknown revision, unreadable file). Empty when `from_snapshot` is False."""
+
+    quality: pd.DataFrame | None = None
+    """The quality table at the same revision, or None when it cannot be read
+    (the snapshot, a revision before the table had the date columns)."""
 
 
 def configured_revision() -> str:
@@ -118,6 +124,32 @@ def fetch(revision: str) -> tuple[Path, str, str]:
     return Path(path), commit.commit_id, commit.created_at.date().isoformat()
 
 
+def fetch_quality(commit: str) -> pd.DataFrame:
+    """Download `quality.parquet` at a commit hash and read it."""
+    from huggingface_hub import hf_hub_download
+
+    path = hf_hub_download(REPO_ID, QUALITY_FILE, repo_type="dataset", revision=commit)
+    return pd.read_parquet(path)
+
+
+def read_quality(commit: str) -> pd.DataFrame | None:
+    """The quality table at a commit, or None when it cannot be read.
+
+    The table is optional for the dashboard, so any error is logged and
+    the dates of the sources stay empty.
+    """
+    try:
+        return fetch_quality(commit)
+    except Exception:
+        logger.warning(
+            "Could not read %s at %s, the dates of the sources stay empty",
+            QUALITY_FILE,
+            commit,
+            exc_info=True,
+        )
+        return None
+
+
 def read_snapshot(folder: Path) -> Published:
     """Read the bundled snapshot.
 
@@ -165,4 +197,6 @@ def load_published(revision: str, fallback: Path) -> Published:
             exc_info=True,
         )
         return replace(read_snapshot(fallback), failure=failure)
-    return Published(events, commit, committed, from_snapshot=False)
+    return Published(
+        events, commit, committed, from_snapshot=False, quality=read_quality(commit)
+    )

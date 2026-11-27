@@ -10,6 +10,9 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Added
 
+- The Sources table of the dashboard has the columns "Downloaded" (minute, UTC) and
+  "Updated by source" (day or minute, UTC), read from `quality.parquet`. A source
+  with no date, or a missing quality table, shows an empty cell.
 - Threat-group lookup (schema 2.3.0): the open dataset has a `threat_actors` table (group,
   aliases, country of origin, suspected state sponsor), reduced from the MISP
   galaxy threat-actor cluster at a pinned commit. `curation/actors.csv` adds the

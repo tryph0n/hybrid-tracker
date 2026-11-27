@@ -150,5 +150,9 @@ def hub_fetches(tmp_path, monkeypatch):
         read_all_events().to_parquet(path)
         return path, REVISION, REVISION_DATE
 
+    def no_quality(commit):
+        raise FileNotFoundError("quality.parquet")
+
     monkeypatch.setattr(hub, "fetch", fake_fetch)
+    monkeypatch.setattr(hub, "fetch_quality", no_quality)
     return fetches

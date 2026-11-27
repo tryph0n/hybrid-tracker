@@ -10,12 +10,14 @@ what each source records. The steps are:
 4. `memberships`: the incidents that each value counts, from the passing rows.
 """
 
+import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 import pandas as pd
 
 EMPTY = "—"
+DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def split_codes(cells: pd.Series) -> pd.Series:
@@ -249,3 +251,38 @@ def coordinate_coverage(lines: pd.DataFrame, scope: pd.DataFrame) -> CoordinateC
         countries_only=int((~has_coordinates & has_country).sum()),
         on_no_map=int((~has_coordinates & ~has_country).sum()),
     )
+
+
+def source_date(value: object) -> str:
+    """A date of the quality table as shown: a day, a minute in UTC, or "".
+
+    A value of one day stays a day, because the source gives no time. A value
+    with a time shows to the minute in UTC. A missing value gives an empty text.
+    """
+    if value is None or pd.isna(value) or value == "":
+        return ""
+    text = str(value)
+    if DAY.fullmatch(text):
+        return text
+    try:
+        moment = pd.Timestamp(text)
+    except ValueError:
+        return text
+    moment = moment.tz_localize("UTC") if moment.tzinfo is None else moment
+    return moment.tz_convert("UTC").strftime("%Y-%m-%d %H:%M UTC")
+
+
+def latest_dates(quality: pd.DataFrame | None) -> dict[str, tuple[str, str]]:
+    """The shown `downloaded_at` and `updated_by_source` of each source.
+
+    Takes the newest row of each source (by `run_at`). Gives no entry when the
+    table is missing or lacks the date columns.
+    """
+    wanted = {"source", "run_at", "downloaded_at", "updated_by_source"}
+    if quality is None or not wanted <= set(quality.columns):
+        return {}
+    newest = quality.sort_values("run_at").groupby("source").tail(1)
+    return {
+        row.source: (source_date(row.downloaded_at), source_date(row.updated_by_source))
+        for row in newest.itertuples()
+    }
