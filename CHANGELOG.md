@@ -10,6 +10,13 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Added
 
+- Under the map of the Incidents view, a bar chart shows the incidents with a country and
+  no point on the map: one bar for each state of the European list, stacked by domain.
+  The part of a bar that comes from incidents that name several countries is hatched.
+  The split line points to the bars ("bars below") only when the chart shows, and the
+  message for a selection with no point no longer sends the reader to the Countries view.
+  A caption under "Most affected countries" says that it counts the incidents with or
+  without a point.
 - The Sources table of the dashboard has the columns "Downloaded" (minute, UTC) and
   "Updated by source" (day or minute, UTC), read from `quality.parquet`. A source
   with no date, or a missing quality table, shows an empty cell.

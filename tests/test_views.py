@@ -9,6 +9,7 @@ from tracker.sources import SOURCES
 from tracker.views import (
     WhereSplit,
     coordinate_coverage,
+    country_only,
     incident_lines,
     latest_dates,
     memberships,
@@ -553,3 +554,69 @@ def test_split_by_scope_separates_the_list_and_applies_the_filter():
     on_list, outside = split_by_scope(in_country, ["US", "DE"])
     assert on_list["value"].tolist() == ["DE"]
     assert outside["value"].tolist() == ["US", "US"]
+
+
+def fixture_rows_and_lines(**filters):
+    fixtures = [read_csv(path) for path in sorted(DATA_DIR.glob("*.csv"))]
+    events = pd.concat(fixtures, ignore_index=True)
+    events["date"] = pd.to_datetime(events["date"])
+    events = with_code_lists(with_clusters(events))
+    events["domain_label"] = events["domain"].str.capitalize()
+    published = published_sources(events, list(SOURCES))
+    scope = scope_rows(events, sources=published, order=published)
+    passing = passing_rows(
+        scope,
+        domains=DOMAINS,
+        categories=CATEGORIES,
+        statuses=["confirmed", "unconfirmed"],
+        attributions=ATTRIBUTIONS,
+        **filters,
+    )
+    names = {name: source.short_name for name, source in SOURCES.items()}
+    return passing, incident_lines(scope, passing, fields=[], names=names)
+
+
+def segments(bars):
+    return {
+        (row.code, row.domain): (row.solid, row.hatched)
+        for row in bars.counts.itertuples()
+    }
+
+
+def test_country_only_counts_solid_and_hatched_parts_by_country_and_domain():
+    rows, lines = fixture_rows_and_lines()
+
+    bars = country_only(rows, lines)
+    found = segments(bars)
+
+    assert {code for code, _ in found}.isdisjoint({"US", "UA"})
+    assert len({code for code, _ in found}) == 19
+    assert found[("DE", "Information")] == (0, 3)
+    assert found[("AT", "Information")] == (0, 1)
+    assert found[("EE", "Information")] == (1, 0)
+    assert found[("BG", "Sabotage")] == (1, 0)
+    assert found[("BG", "Air")] == (0, 1)
+    assert bars.counts[["solid", "hatched"]].to_numpy().sum() == 24
+    assert bars.several == 4
+    assert sorted(bars.outside["value"]) == ["UA", "US"]
+
+
+def test_country_only_with_a_countries_filter_keeps_the_selected_states():
+    rows, lines = fixture_rows_and_lines(countries=["DE"])
+    germany = country_only(rows, lines, ["DE"])
+    rows, lines = fixture_rows_and_lines(countries=["US"])
+    states = country_only(rows, lines, ["US"])
+
+    assert segments(germany) == {("DE", "Information"): (0, 3)}
+    assert germany.several == 3
+    assert states.counts.empty
+    assert states.several == 0
+    assert list(states.outside["value"]) == ["US"]
+
+
+def test_the_split_line_has_no_pointer_when_nothing_shows_the_country_part():
+    split = where_split_of(total=1, located=0, countries_only=1, no_country=0)
+
+    assert split_line(split, countries_pointer=None) == (
+        "1 incident: 0 at a place, 1 in a country only, 0 at sea only"
+    )
