@@ -13,6 +13,7 @@ from tracker.views import (
     per_source_values,
     scope_rows,
     source_date,
+    split_by_scope,
     with_clusters,
     with_code_lists,
 )
@@ -415,3 +416,13 @@ def test_the_latest_dates_come_from_the_newest_run_of_each_source():
     }
     assert latest_dates(quality.drop(columns="downloaded_at")) == {}
     assert latest_dates(None) == {}
+
+
+def test_split_by_scope_separates_the_list_and_applies_the_filter():
+    in_country = pd.DataFrame({"value": ["DE", "US", "UA", "FR", "US"]})
+    on_list, outside = split_by_scope(in_country)
+    assert on_list["value"].tolist() == ["DE", "FR"]
+    assert outside["value"].tolist() == ["US", "UA", "US"]
+    on_list, outside = split_by_scope(in_country, ["US", "DE"])
+    assert on_list["value"].tolist() == ["DE"]
+    assert outside["value"].tolist() == ["US", "US"]

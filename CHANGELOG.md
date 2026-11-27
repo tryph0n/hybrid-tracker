@@ -29,6 +29,9 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Changed
 
+- The KPI "Countries", the Countries view and "Most affected countries" count only
+  the 43 states of the European list of decision record 0002. The help of the KPI
+  names the other states that the incidents name, with their counts.
 - The dashboard shows one line for each incident, with the value of each source
   for its domain, category, status, attribution, actors, countries and link.
   The source filter sets the scope, a filter on one source's fields keeps an
