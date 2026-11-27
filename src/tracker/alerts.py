@@ -25,13 +25,9 @@ Gh = Callable[[Sequence[str]], str]
 
 @dataclass(frozen=True)
 class Action:
-    """One step on the alert issues.
-
-    Attributes:
-        kind: `open` a new issue, `comment` on an open one, or `close` one.
-        source: Key of the source.
-        causes: The causes of the source in this run, empty for `close`.
-        number: Number of the open issue, None for `open`.
+    """One step on the alert issues: `open` a new one, `comment` on an open one, or
+    `close` one, for a source, with its causes in this run (empty for `close`) and
+    the number of the open issue (None for `open`).
     """
 
     kind: Literal["open", "comment", "close"]
