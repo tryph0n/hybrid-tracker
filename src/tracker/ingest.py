@@ -352,6 +352,7 @@ def run(target: str, if_missing: bool = False) -> dict[str, str]:
             logger.info("%s: clean table and lineage in the store, skipped", name)
         elif len(names) == 1:
             ingest(name, store)
+            write_failure(name, None, store)
         else:
             try:
                 ingest(name, store)

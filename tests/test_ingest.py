@@ -706,6 +706,19 @@ def test_a_later_success_clears_the_failure_record(tmp_path, monkeypatch):
     assert ingest.read_failure("eodi", store) is None
 
 
+def test_a_success_of_a_source_named_alone_clears_its_failure_record(
+    tmp_path, monkeypatch
+):
+    store = two_live_sources(tmp_path, monkeypatch)
+    serve_failing(monkeypatch, "eodi", RuntimeError("HTTP 500"))
+    cli.main(["ingest", "live"])
+    assert ingest.read_failure("eodi", store) is not None
+
+    serve_recorded(monkeypatch, "eodi")
+    cli.main(["ingest", "eodi"])
+    assert ingest.read_failure("eodi", store) is None
+
+
 def test_a_source_named_alone_still_fails_the_command(tmp_path, monkeypatch):
     two_live_sources(tmp_path, monkeypatch)
     serve_failing(monkeypatch, "eodi", RuntimeError("HTTP 500"))
