@@ -206,8 +206,8 @@ def map_frame(raw: pd.DataFrame) -> pd.DataFrame:
     Returns:
         The rows with exactly the columns of `tracker.schema.COLUMNS`. An
         unknown `tipo` or `estado` leaves `category` or `event_status` empty,
-        which `validate` rejects. An unknown `presencia_dron` leaves
-        `drone_presence` empty.
+        which `validate` rejects. An unknown `presencia_dron` keeps its raw
+        value, which `validate` rejects too; an empty one stays empty.
 
     Raises:
         KeyError: A column of `raw` is missing.
@@ -236,7 +236,9 @@ def map_frame(raw: pd.DataFrame) -> pd.DataFrame:
             "subcategory": raw["tipo"],
             "title": raw["titulo_en"],
             "event_status": raw["estado"].map(EVENT_STATUS),
-            "drone_presence": raw["presencia_dron"].map(DRONE_PRESENCE),
+            "drone_presence": raw["presencia_dron"]
+            .map(DRONE_PRESENCE)
+            .fillna(raw["presencia_dron"]),
             "actors": actors,
             "actor_name": pd.NA,
             "attribution": attributed.map({True: "official", False: "none"}),

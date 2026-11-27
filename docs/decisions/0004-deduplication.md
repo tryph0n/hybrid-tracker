@@ -320,7 +320,8 @@ Reasons:
   what each source records and picks no value.
 - A cluster stays in the default view when one of its rows is not
   `dismissed`. Before schema 2.6.0, EODI marked `eodi:EODI-2025-00112` (Vilnius)
-  `dismissed` because of its drone presence, and Leiden records the same incident
+  `dismissed`: EODI published its drone presence as `descartada`, and the
+  tracker mapped that to `dismissed`. Leiden records the same incident
   (`leiden:55e3134992fd`): the line showed both statuses, and a status filter did
   not change the line. EODI now gives that row `confirmed`, from its `estado`.
 

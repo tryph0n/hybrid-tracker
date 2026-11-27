@@ -216,6 +216,7 @@ def test_the_status_comes_from_estado_and_the_drone_presence_from_presencia_dron
     ("column", "value", "message"),
     [
         ("tipo", "globo", "without category"),
+        ("presencia_dron", "probable", "Unknown drone_presence values"),
         ("estado", "negado", "without event_status"),
     ],
 )

@@ -661,3 +661,10 @@ def test_a_build_on_tables_that_all_lack_drone_presence_gives_an_empty_column(
 
     assert list(events.reset_index().columns) == PUBLISHED_COLUMNS
     assert events["drone_presence"].isna().all()
+
+
+def test_a_stored_table_without_a_required_column_fails_the_build(store, tmp_path):
+    put_clean(store, "leiden", fixture_events("leiden").drop(columns="title"))
+
+    with pytest.raises(ValueError, match="without title"):
+        build_events(store, tmp_path)

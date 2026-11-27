@@ -32,7 +32,7 @@ publishes the two datasets, then updates the dashboard. See the
 ## Reading the data
 
 A reported incident is not a confirmed one, and a confirmed one is not an
-attribution. Three fields keep these questions apart:
+attribution. Four fields keep these questions apart:
 
 - `event_status`: is the event itself established (`confirmed`, `unconfirmed`,
   `dismissed`)? For EODI it comes from the field `estado`.
