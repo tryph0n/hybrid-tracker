@@ -5,6 +5,7 @@ description = "Open data on events of the hybrid war against Europe since 2022, 
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "brotli==1.2.1",
     "duckdb==2.0.1",
     "huggingface_hub==2.4.0",
     "openpyxl==3.1.5",
@@ -69,7 +70,7 @@ strict_equality = true
 extra_checks = true
 
 [[tool.mypy.overrides]]
-module = ["openpyxl", "openpyxl.*", "plotly", "plotly.*", "pyarrow", "pyarrow.*"]
+module = ["brotli", "openpyxl", "openpyxl.*", "plotly", "plotly.*", "pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
