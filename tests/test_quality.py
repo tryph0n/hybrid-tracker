@@ -1,5 +1,6 @@
 import dataclasses
 import io
+import json
 
 import pandas as pd
 import pytest
@@ -208,17 +209,64 @@ def test_summary_is_logged_without_a_summary_file(store, out, caplog):
     assert "Events with attribution none: 9" in caplog.text
 
 
-def test_live_source_with_no_row_fails_and_names_it(store, out):
+def read_alerts(out) -> dict[str, list[str]]:
+    return json.loads((out / quality.ALERTS_NAME).read_text(encoding="utf-8"))
+
+
+def test_a_run_with_no_problem_writes_empty_alerts_and_blank_causes(store, out):
+    current = quality.run(store, out)
+
+    assert read_alerts(out) == {}
+    assert current["cause"].isna().all()
+
+
+def test_live_source_with_no_row_is_reported_and_the_run_passes(store, out):
     empty = fixture_events("eodi").iloc[0:0]
     put_clean(store, "eodi", empty)
 
-    with pytest.raises(ValueError, match="eodi: no row"):
-        quality.run(store, out)
+    current = quality.run(store, out).set_index("source")
+
+    assert read_alerts(out) == {"eodi": ["no row in the clean table"]}
+    assert current.loc["eodi", "cause"] == "no row in the clean table"
     assert (out / "open" / "quality.parquet").exists()
     assert master(store).set_index("source").loc["eodi", "rows"] == 0
 
 
-def test_live_source_fetched_four_days_ago_fails_and_static_passes(
+def test_a_source_with_no_clean_table_keeps_a_row_with_its_cause(
+    store, out, tmp_path, monkeypatch
+):
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv(quality.SUMMARY_VAR, str(summary))
+    (tmp_path / "store" / ingest.clean_path("eodi")).unlink()
+
+    current = quality.run(store, out).set_index("source")
+
+    assert read_alerts(out) == {"eodi": ["no clean table"]}
+    assert current.loc["eodi", "cause"] == "no clean table"
+    assert current.loc["eodi", "rows"] == 0
+    assert current.loc["leiden", "rows"] > 0
+    assert pd.isna(current.loc["leiden", "cause"])
+    published = pd.read_parquet(out / "open" / "quality.parquet")
+    assert set(published["source"]) == set(sources.SOURCES)
+    assert "`eodi`: no clean table" in summary.read_text()
+
+
+def test_a_source_that_is_back_has_no_cause_at_the_next_run(
+    store, out, tmp_path, monkeypatch
+):
+    (tmp_path / "store" / ingest.clean_path("eodi")).unlink()
+    quality.run(store, out)
+
+    set_clock(monkeypatch, days_after(1))
+    put_clean(store, "eodi", fixture_events("eodi"))
+    current = quality.run(store, out).set_index("source")
+
+    assert read_alerts(out) == {}
+    assert pd.isna(current.loc["eodi", "cause"])
+    assert current.loc["eodi", "rows_added"] == len(fixture_events("eodi"))
+
+
+def test_live_source_fetched_four_days_ago_is_reported_and_static_is_not(
     tmp_path, out, monkeypatch
 ):
     store = Store(LocalBackend(tmp_path / "store"))
@@ -227,14 +275,18 @@ def test_live_source_fetched_four_days_ago_fails_and_static_passes(
     fetch(store, "eodi")
     fetch(store, "leiden")
     set_clock(monkeypatch, days_after(4))
-    with pytest.raises(ValueError) as error:
-        quality.run(store, out)
+    current = quality.run(store, out)
 
-    assert "eodi: no successful fetch since" in str(error.value)
-    assert "leiden" not in str(error.value)
+    alerts = read_alerts(out)
+    assert list(alerts) == ["eodi"]
+    assert alerts["eodi"][0].startswith("no successful fetch since")
+    assert master(store)["run_at"].nunique() == 1
+    assert len(current) == len(sources.SOURCES)
+    assert (out / "open" / "quality.parquet").exists()
 
     fetch(store, "eodi")
     quality.run(store, out)
+    assert read_alerts(out) == {}
 
 
 def test_live_source_fetched_three_days_ago_passes(store, out, monkeypatch):
@@ -255,21 +307,66 @@ def test_identical_payload_checked_again_counts_as_a_fetch(store, out, monkeypat
     )
 
 
-def test_live_source_without_a_successful_fetch_fails(tmp_path, out):
+def test_live_source_without_a_successful_fetch_is_reported(tmp_path, out, monkeypatch):
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv(quality.SUMMARY_VAR, str(summary))
     store = Store(LocalBackend(tmp_path / "store"))
     for name in sources.SOURCES:
         put_clean(store, name, fixture_events(name))
     fetch(store, "eodi", status=503)
 
-    with pytest.raises(ValueError, match="eodi: no successful fetch"):
-        quality.run(store, out)
+    quality.run(store, out)
+
+    assert read_alerts(out) == {"eodi": ["no successful fetch"]}
+    assert "`eodi`: no successful fetch" in summary.read_text()
 
 
-def test_source_without_a_clean_table_fails(tmp_path, out):
+def test_a_refresh_that_failed_after_a_download_is_reported_until_it_succeeds(
+    store, out, monkeypatch
+):
+    ingest.write_failure("eodi", "ValueError: Unknown category 'balloon'", store)
+    first = quality.run(store, out).set_index("source")
+
+    assert read_alerts(out) == {
+        "eodi": ["refresh failed: ValueError: Unknown category 'balloon'"]
+    }
+    assert first.loc["eodi", "cause"] == (
+        "refresh failed: ValueError: Unknown category 'balloon'"
+    )
+
+    ingest.write_failure("eodi", None, store)
+    set_clock(monkeypatch, days_after(1))
+    second = quality.run(store, out).set_index("source")
+
+    assert read_alerts(out) == {}
+    assert pd.isna(second.loc["eodi", "cause"])
+
+
+def test_the_causes_of_one_source_are_joined_in_its_row(store, out, tmp_path):
+    (tmp_path / "store" / ingest.clean_path("eodi")).unlink()
+    ingest.write_failure("eodi", "RuntimeError: HTTP 500", store)
+
+    current = quality.run(store, out).set_index("source")
+
+    assert (
+        current.loc["eodi", "cause"]
+        == "no clean table; refresh failed: RuntimeError: HTTP 500"
+    )
+    assert read_alerts(out)["eodi"] == [
+        "no clean table",
+        "refresh failed: RuntimeError: HTTP 500",
+    ]
+
+
+def test_the_run_fails_and_writes_nothing_when_no_source_has_a_clean_table(
+    tmp_path, out
+):
     store = Store(LocalBackend(tmp_path / "store"))
 
-    with pytest.raises(ValueError, match="no clean table"):
+    with pytest.raises(ValueError, match="no source has a clean table"):
         quality.run(store, out)
+    assert not out.exists()
+    assert quality.read_table(store, quality.QUALITY_PATH) is None
 
 
 def test_cli_runs_quality(store, out, tmp_path, monkeypatch):
