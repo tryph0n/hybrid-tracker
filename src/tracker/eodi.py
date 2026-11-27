@@ -287,3 +287,35 @@ def actor_code(actor: str | float) -> str | float:
     if actor not in ACTOR_CODES:
         raise UserError(f"Unknown actor {actor!r}: add it to ACTOR_CODES")
     return ACTOR_CODES[actor]
+
+
+def updated_by_source(files: Mapping[str, bytes]) -> str | None:
+    """The newest `ultima_actualizacion` of the rows of the two files.
+
+    The CSV file has it as a column, the JSON file in
+    `incidentes[].control.ultima_actualizacion.valor`. The values have the
+    minute and a `Z`, with no seconds. The HTTP `Last-Modified` header is not
+    read: it is the time when the server cache took the file, not a change of
+    the data. A change that only removes rows moves no date.
+
+    Args:
+        files: The bytes of the payloads, by name: `LOCATED_NAME` and
+            `UNLOCATED_NAME`.
+
+    Returns:
+        The newest date as `YYYY-MM-DDTHH:MM:SSZ` (UTC), or None when no row
+        has one.
+
+    Raises:
+        KeyError: A payload is missing.
+    """
+    located = read_csv(io.BytesIO(files[LOCATED_NAME]))
+    dates = list(located.get("ultima_actualizacion", []))
+    for incident in json.loads(files[UNLOCATED_NAME])["incidentes"]:
+        dates.append(
+            incident.get("control", {}).get("ultima_actualizacion", {}).get("valor")
+        )
+    newest = pd.to_datetime(pd.Series(dates, dtype="object"), utc=True).max()
+    if pd.isna(newest):
+        return None
+    return str(newest.strftime("%Y-%m-%dT%H:%M:%SZ"))

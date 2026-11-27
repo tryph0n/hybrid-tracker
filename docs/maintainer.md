@@ -56,7 +56,15 @@ Each source goes through two steps. `extract()` downloads the files and saves
 them, as served, in the raw store with a manifest line each. `normalize()` maps
 the stored payloads to the unified schema and uses no network, so a mapping fix
 can be replayed on the stored payloads. The clean table is written to the raw
-store as `clean/<name>.parquet` (private). No data file is committed to the
+store as `clean/<name>.parquet` (private), with a record `clean/<name>.json` in
+the same commit: the path and SHA-256 of each payload that made the table, the
+row count, the code commit (from `GITHUB_SHA`, empty outside a workflow run) and
+`updated_by_source`, the date of the last change that the source gives (EODI:
+newest `ultima_actualizacion` of its rows; Leiden: `releaseTime` of the stored
+`version.json`; none when the source gives none). Run `uv run tracker ingest
+leiden` once to store `version.json`: a store filled before that has no Leiden
+date. Each dataset commit of a publish names the code commit and the workflow
+run in its message. No data file is committed to the
 repository: the raw store and the two public datasets hold the data.
 
 The commands need a raw store. Set `TRACKER_STORE=local` and

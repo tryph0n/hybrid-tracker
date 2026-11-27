@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from tracker import actors
+from tracker import actors, provenance
 from tracker.build import CURATION_DIR, family_sources
 from tracker.errors import UserError
 from tracker.quality import write_summary
@@ -351,7 +351,7 @@ def publish_family(api: Any, family: str, folder: Path) -> list[str]:
         repo_id=repo_id,
         repo_type="dataset",
         operations=operations,
-        commit_message=f"data: publish schema {SCHEMA_VERSION}",
+        commit_message=provenance.publish_message(SCHEMA_VERSION),
     )
     read_back(api, repo_id, info.oid, sent, legacy)
     logger.info("%s: read-back passed at %s", repo_id, info.oid)
