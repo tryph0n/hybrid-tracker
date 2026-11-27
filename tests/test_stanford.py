@@ -53,12 +53,20 @@ def tls_server(tmp_path):
         capture_output=True,
     )  # fmt: skip
     seen: list[str] = []
+    connections: list[str] = []
+    answer = {"status": 200}
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def setup(self):
+            connections.append(self.client_address[0])
+            super().setup()
+
         def do_GET(self):
             seen.append(self.headers["Accept-Encoding"])
             body = brotli.compress(FIXTURE)
-            self.send_response(200)
+            self.send_response(answer["status"])
             self.send_header("Content-Encoding", "br")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -74,7 +82,7 @@ def tls_server(tmp_path):
     server.socket = context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    yield server.server_address[1], cert, seen
+    yield server.server_address[1], cert, seen, connections, answer
     server.shutdown()
     thread.join()
     server.server_close()
@@ -143,7 +151,7 @@ def test_the_repository_holds_the_intermediate_certificate():
 
 @pytest.mark.enable_socket
 def test_the_fetch_fails_against_a_server_whose_certificate_is_not_trusted(tls_server):
-    port, _, _ = tls_server
+    port, *_ = tls_server
     with pytest.raises(ssl.SSLCertVerificationError):
         stanford.fetch_days([DAY], stanford.tls_context(), "localhost", port)
 
@@ -152,7 +160,7 @@ def test_the_fetch_fails_against_a_server_whose_certificate_is_not_trusted(tls_s
 def test_the_fetch_asks_for_brotli_and_returns_the_decoded_file_once_trusted(
     tls_server,
 ):
-    port, cert, seen = tls_server
+    port, cert, seen, *_ = tls_server
     context = stanford.tls_context(cert)
     (payload,) = stanford.fetch_days([DAY], context, "localhost", port)
     assert seen == ["br"]
@@ -161,3 +169,24 @@ def test_the_fetch_asks_for_brotli_and_returns_the_decoded_file_once_trusted(
     assert payload.decoded == FIXTURE
     assert brotli.decompress(payload.content) == FIXTURE
     assert payload.name == "heatmap-2026-11-22.json.br"
+
+
+@pytest.mark.enable_socket
+def test_the_fetch_of_two_days_uses_one_connection(tls_server):
+    port, cert, seen, connections, _ = tls_server
+    days = [DAY, date(2026, 11, 23)]
+    payloads = stanford.fetch_days(days, stanford.tls_context(cert), "localhost", port)
+    assert [p.name for p in payloads] == [
+        "heatmap-2026-11-22.json.br",
+        "heatmap-2026-11-23.json.br",
+    ]
+    assert len(seen) == 2
+    assert len(connections) == 1
+
+
+@pytest.mark.enable_socket
+def test_the_fetch_raises_oserror_when_the_server_answers_404(tls_server):
+    port, cert, _, _, answer = tls_server
+    answer["status"] = 404
+    with pytest.raises(OSError, match="HTTP 404"):
+        stanford.fetch_days([DAY], stanford.tls_context(cert), "localhost", port)
