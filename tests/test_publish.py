@@ -3,11 +3,13 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete
 from huggingface_hub.errors import HfHubHTTPError
 
-from tracker import publish
+from tracker import publish, sources
+from tracker.build import family_sources
 from tracker.errors import UserError
 
 pytestmark = pytest.mark.disable_socket
@@ -99,8 +101,11 @@ def build(tmp_path):
     folder = tmp_path / "build"
     for family in ("open", "nc"):
         (folder / family).mkdir(parents=True)
-        for name in ("events.parquet", "events.csv", "sources.parquet"):
+        for name in ("events.parquet", "events.csv"):
             (folder / family / name).write_bytes(f"{family} {name}".encode())
+        pd.DataFrame({"source": family_sources(family)}).to_parquet(
+            folder / family / "sources.parquet"
+        )
     return folder
 
 
@@ -118,6 +123,19 @@ def test_a_new_schema_version_creates_one_tag_per_dataset(api, build):
     ]
     for repo in (OPEN, NC):
         assert api.tags[repo][VERSION] in api.snapshots
+
+
+def test_the_card_credits_only_the_sources_of_the_sources_table(api, build):
+    left_out = sources.SOURCES["leiden"]
+    kept = sources.SOURCES["eodi"]
+    pd.DataFrame({"source": ["eodi"]}).to_parquet(build / "open" / "sources.parquet")
+
+    publish.run("open", build, api)
+
+    card = api.main[OPEN]["README.md"].decode("utf-8")
+    assert kept.citation in card
+    assert left_out.citation not in card
+    assert left_out.homepage not in card
 
 
 def test_a_tag_is_on_the_commit_of_the_upload(api, build):

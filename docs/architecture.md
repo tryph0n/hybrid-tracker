@@ -248,7 +248,7 @@ flowchart TB
 | `tracker.ingest` | `src/tracker/ingest.py` | Download sources, keep their payloads in the raw store and write clean tables. | pandas |
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | openpyxl, pandas, pycountry |
 | `tracker.provenance` | `src/tracker/provenance.py` | Code commit and workflow run of a pipeline step, read from the GitHub variables. |  |
-| `tracker.publish` | `src/tracker/publish.py` | Publish the tables of \`tracker build\` to the two public Hugging Face datasets. | huggingface_hub |
+| `tracker.publish` | `src/tracker/publish.py` | Publish the tables of \`tracker build\` to the two public Hugging Face datasets. | huggingface_hub, pandas |
 | `tracker.quality` | `src/tracker/quality.py` | Quality table and run summary: one row per source and per run. | pandas |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
 | `tracker.sources` | `src/tracker/sources.py` | Registry of data sources. | pandas |

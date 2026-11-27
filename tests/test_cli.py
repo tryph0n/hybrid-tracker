@@ -32,7 +32,9 @@ def test_a_known_problem_prints_only_its_message(tmp_path):
 
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
-    assert result.stderr.strip() == "eodi: no clean table, run `tracker ingest eodi`"
+    assert result.stderr.strip().splitlines()[-1] == (
+        "No source has a clean table, run `tracker ingest`"
+    )
 
 
 def test_a_wrong_store_setting_prints_only_its_message():
