@@ -8,20 +8,24 @@ Run through the `tracker` command, from the repository root after `uv sync`:
 - `uv run tracker ingest eodi`: a single source or reference dataset
   (`geonames`: payloads only, no clean table)
 - `uv run tracker ingest static --if-missing`: only what is not in the raw store:
-  a source with no clean table, a reference dataset with no payload (scheduled
-  pipeline)
+  a source with no clean table or no lineage record, a reference dataset with
+  no payload (scheduled pipeline)
 - `uv run tracker rebuild [source]`: write the clean tables again from the
   stored payloads, download nothing
 
 Each source step needs a raw store: set `TRACKER_STORE` (see `tracker.store`).
 """
 
+import hashlib
 import io
+import json
 import logging
 from collections.abc import Mapping
+from typing import Any
 
 import pandas as pd
 
+from tracker import provenance
 from tracker.errors import UserError
 from tracker.schema import validate
 from tracker.sources import REFERENCES, SOURCES
@@ -40,6 +44,73 @@ TARGETS = ("live", "static")
 def clean_path(name: str) -> str:
     """Path of the clean table of one source in the raw store."""
     return f"clean/{name}.parquet"
+
+
+def lineage_path(name: str) -> str:
+    """Path of the lineage record of the clean table of one source."""
+    return f"clean/{name}.json"
+
+
+def lineage(
+    name: str, files: Mapping[str, bytes], store: Store, rows: int
+) -> dict[str, Any]:
+    """Describe where the clean table of one source comes from.
+
+    Args:
+        name: Key of `SOURCES`.
+        files: Payload file name to bytes, the ones that make the table.
+        store: The raw store, whose manifest gives the path of each payload.
+        rows: Number of rows of the table.
+
+    Returns:
+        A record with `source`, `rows`, `code_commit` (None outside a workflow
+        run), `updated_by_source` (the date of the last change that the source
+        gives, or None) and `payloads`: the file name, the path in the raw
+        store and the SHA-256 of each payload.
+
+    Raises:
+        UserError: A payload is not in the manifest of the store.
+    """
+    manifest = store.manifest(name)
+    payloads = []
+    for file in sorted(files):
+        digest = hashlib.sha256(files[file]).hexdigest()
+        line = next(
+            (
+                entry
+                for entry in reversed(manifest)
+                if entry["name"] == file and entry["sha256"] == digest
+            ),
+            None,
+        )
+        if line is None:
+            raise UserError(f"{name}: {file} is not in the manifest of the store")
+        payloads.append({"name": file, "path": line["path"], "sha256": digest})
+    return {
+        "source": name,
+        "rows": rows,
+        "code_commit": provenance.code_commit(),
+        "updated_by_source": SOURCES[name].updated_by_source(files),
+        "payloads": payloads,
+    }
+
+
+def encode_lineage(record: Mapping[str, Any]) -> bytes:
+    """The bytes of a lineage record: sorted keys, one trailing newline."""
+    return (json.dumps(record, indent=2, sort_keys=True) + "\n").encode()
+
+
+def read_lineage(name: str, store: Store) -> dict[str, Any] | None:
+    """The lineage record of one source in the store, or None if it has none."""
+    stored = store.backend.read(lineage_path(name))
+    return None if stored is None else dict(json.loads(stored))
+
+
+def without_commit(record: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """A record without its code commit, which changes at each run."""
+    if record is None:
+        return None
+    return {key: value for key, value in record.items() if key != "code_commit"}
 
 
 def previous_count(name: str, stored: bytes | None) -> int | None:
@@ -89,9 +160,17 @@ def write_clean(
 
     table = io.BytesIO()
     events.to_parquet(table, index=False)
-    if stored != table.getvalue():
+    record = lineage(name, files, store, len(events))
+    previous_record = read_lineage(name, store)
+    if stored != table.getvalue() or without_commit(previous_record) != without_commit(
+        record
+    ):
         store.backend.commit(
-            {clean_path(name): table.getvalue()}, f"clean: {name} table"
+            {
+                clean_path(name): table.getvalue(),
+                lineage_path(name): encode_lineage(record),
+            },
+            f"clean: {name} table",
         )
 
     logger.info("%s: %d events", name, len(events))
@@ -183,9 +262,9 @@ def run(target: str, if_missing: bool = False) -> None:
 
     Args:
         target: The target to run.
-        if_missing: Skip each source that already has a clean table, and each
-            reference dataset that already has a payload, in the raw store:
-            it is not downloaded again.
+        if_missing: Skip each source that already has a clean table and a
+            lineage record, and each reference dataset that already has a
+            payload, in the raw store: it is not downloaded again.
 
     Raises:
         ValueError: `target` is not a target.
@@ -205,7 +284,11 @@ def run(target: str, if_missing: bool = False) -> None:
                 logger.info("%s: payload in the store, skipped", name)
                 continue
             ingest_reference(name, store)
-        elif if_missing and store.backend.read(clean_path(name)) is not None:
-            logger.info("%s: clean table in the store, skipped", name)
+        elif (
+            if_missing
+            and store.backend.read(clean_path(name)) is not None
+            and read_lineage(name, store) is not None
+        ):
+            logger.info("%s: clean table and lineage in the store, skipped", name)
         else:
             ingest(name, store)

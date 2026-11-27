@@ -2,6 +2,7 @@
 
 import io
 import json
+from typing import ClassVar
 
 import pandas as pd
 import pytest
@@ -265,3 +266,54 @@ def test_extract_keeps_both_downloads_as_served(monkeypatch):
         ("eodi", eodi.UNLOCATED_NAME, eodi.UNLOCATED_URL, 200),
     ]
     assert [p.content for p in payloads] == list(served.values())
+
+
+class AnswerWithHeaders(Answer):
+    headers: ClassVar[dict[str, str]] = {
+        "Last-Modified": "Fri, 27 Nov 2026 08:54:51 GMT"
+    }
+
+
+def unlocated_with_dates(*dates: str | None) -> bytes:
+    document = json.loads(UNLOCATED.read_bytes())
+    for incident, date in zip(document["incidentes"], dates, strict=False):
+        if date:
+            incident["control"] = {
+                "ultima_actualizacion": {"valor": date, "precision": "minuto"}
+            }
+    return json.dumps(document).encode()
+
+
+def test_the_date_of_the_last_change_is_the_newest_row_date_not_the_header(
+    monkeypatch,
+):
+    served = {
+        eodi.LOCATED_URL: LOCATED.read_bytes(),
+        eodi.UNLOCATED_URL: unlocated_with_dates(
+            "2026-11-12T14:00Z", "2026-11-14T09:05Z"
+        ),
+    }
+    monkeypatch.setattr(
+        eodi.urllib.request,
+        "urlopen",
+        lambda request, timeout: AnswerWithHeaders(served[request.full_url]),
+    )
+    files = {p.name: p.content for p in eodi.extract()}
+    assert eodi.updated_by_source(files) == "2026-11-14T09:05:00Z"
+
+
+def test_the_newest_date_can_come_from_the_csv_file():
+    files = {
+        eodi.LOCATED_NAME: LOCATED.read_bytes(),
+        eodi.UNLOCATED_NAME: unlocated_with_dates("2026-11-01T00:00Z"),
+    }
+    assert eodi.updated_by_source(files) == "2026-11-12T14:17:00Z"
+
+
+def test_a_file_set_without_a_row_date_gives_no_date():
+    header_only = LOCATED.read_bytes().split(b"\n")[0] + b"\n"
+    files = {
+        eodi.LOCATED_NAME: header_only,
+        eodi.UNLOCATED_NAME: UNLOCATED.read_bytes(),
+    }
+    assert eodi.updated_by_source(files) is None

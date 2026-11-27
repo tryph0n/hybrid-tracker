@@ -36,6 +36,7 @@ FILES_URL = (
 FILE_URL = f"{API}/access/datafile/{{id}}"
 HEADERS = {"User-Agent": "hybrid-tracker (open-data dashboard)"}
 WORKBOOK_NAME = "eventdata.xlsx"
+VERSION_NAME = "version.json"
 PINNED_VERSION = "4.0"
 LICENCE = "CC BY 4.0"
 ATTRIBUTED_BY = "Leiden University dataset (B. Schuurman)"
@@ -69,11 +70,17 @@ COUNTRY_ALIASES = {"The Netherlands": "Netherlands"}
 NO_END_DATE = {"DNA", "July", "May"}
 
 
-def get_json(url: str) -> dict[str, Any]:
-    """Read a JSON answer of the Dataverse API (60 s timeout)."""
+def get_bytes(url: str) -> bytes:
+    """Read an answer of the Dataverse API, as it is served (60 s timeout)."""
     request = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(request, timeout=60) as response:
-        answer: dict[str, Any] = json.load(response)
+        content: bytes = response.read()
+    return content
+
+
+def get_json(url: str) -> dict[str, Any]:
+    """Read a JSON answer of the Dataverse API (60 s timeout)."""
+    answer: dict[str, Any] = json.loads(get_bytes(url))
     return answer
 
 
@@ -121,13 +128,14 @@ def spreadsheet_id(answer: dict[str, Any]) -> int:
 
 
 def extract() -> list[Payload]:
-    """Download the latest spreadsheet, as it is served.
+    """Download the latest spreadsheet and the version answer, as they are served.
 
     The version and the licence are checked first, so the payload of a new
-    version is never stored without a review.
+    version is never stored without a review. The version answer is kept as a
+    second payload: it holds the release time (see `updated_by_source`).
 
     Returns:
-        One payload, named `WORKBOOK_NAME`.
+        Two payloads, named `WORKBOOK_NAME` and `VERSION_NAME`.
 
     Raises:
         OSError: A request failed.
@@ -135,12 +143,33 @@ def extract() -> list[Payload]:
         ValueError: The licence or the version is not the expected one, or the
             version has not exactly one .xlsx file.
     """
-    check_version(get_json(VERSION_URL))
+    version = get_bytes(VERSION_URL)
+    check_version(json.loads(version))
     file_id = spreadsheet_id(get_json(FILES_URL))
     url = FILE_URL.format(id=file_id)
     request = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(request, timeout=60) as response:
-        return [Payload("leiden", WORKBOOK_NAME, response.read(), url, response.status)]
+        workbook = Payload(
+            "leiden", WORKBOOK_NAME, response.read(), url, response.status
+        )
+    return [workbook, Payload("leiden", VERSION_NAME, version, VERSION_URL, 200)]
+
+
+def updated_by_source(files: Mapping[str, bytes]) -> str | None:
+    """The `releaseTime` of the stored version answer.
+
+    Args:
+        files: The bytes of the payloads, by name.
+
+    Returns:
+        The release time as the API gives it (UTC, for example
+        `2026-01-13T14:22:43Z`), or None when the answer is not stored (a
+        store filled before this payload existed) or has no release time.
+    """
+    if VERSION_NAME not in files:
+        return None
+    release: str | None = json.loads(files[VERSION_NAME])["data"].get("releaseTime")
+    return release
 
 
 def normalize(files: Mapping[str, bytes]) -> pd.DataFrame:

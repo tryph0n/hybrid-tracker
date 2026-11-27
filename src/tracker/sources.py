@@ -9,6 +9,11 @@ from tracker import actors, eodi, geonames, leiden
 from tracker.store import Payload
 
 
+def no_date(files: Mapping[str, bytes]) -> str | None:
+    """The date of the last change of a source that gives none."""
+    return None
+
+
 @dataclass(frozen=True)
 class Source:
     """A data source: its metadata and the two steps that turn it into events."""
@@ -51,6 +56,13 @@ class Source:
     """Maps the stored payloads (file name to bytes) to events in the unified
     schema, with no network access. Define it in the adapter module of the
     source."""
+
+    updated_by_source: Callable[[Mapping[str, bytes]], str | None] = no_date
+    """Reads the date of the last change that the source gives, as a UTC ISO 8601
+    text, from the stored payloads (file name to bytes), with no network access.
+    Returns None when the source gives no date. It never reads an HTTP header
+    that only tells when a server cache took the file. Define it in the adapter
+    module of the source."""
 
 
 @dataclass(frozen=True)
@@ -108,6 +120,7 @@ SOURCES = {
         ),
         extract=eodi.extract,
         normalize=eodi.normalize,
+        updated_by_source=eodi.updated_by_source,
     ),
     "leiden": Source(
         title="Russian Operations Against Europe Dataset, 2022-2025",
@@ -123,6 +136,7 @@ SOURCES = {
         ),
         extract=leiden.extract,
         normalize=leiden.normalize,
+        updated_by_source=leiden.updated_by_source,
     ),
 }
 

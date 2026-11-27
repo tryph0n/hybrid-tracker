@@ -1,6 +1,7 @@
 import dataclasses
 import hashlib
 import io
+import json
 
 import pandas as pd
 import pytest
@@ -30,6 +31,7 @@ def serve(monkeypatch, name: str, events: pd.DataFrame) -> None:
         sources.SOURCES[name],
         extract=lambda: [Payload(name, "all.bin", b"payload", "https://e/all", 200)],
         normalize=lambda files: events,
+        updated_by_source=sources.no_date,
     )
     monkeypatch.setitem(sources.SOURCES, name, source)
 
@@ -399,6 +401,34 @@ def test_if_missing_downloads_again_when_the_clean_table_is_gone(tmp_path, monke
     assert len(clean_table(store, "leiden")) > 0
 
 
+def test_if_missing_gives_a_clean_table_with_no_lineage_its_version_and_record(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    serve_recorded(monkeypatch, "leiden")
+    serve_geonames(monkeypatch)
+    cli.main(["ingest", "static"])
+    store = open_store()
+    (tmp_path / "store" / ingest.lineage_path("leiden")).unlink()
+    assert ingest.read_lineage("leiden", store) is None
+    files = recorded_payloads("leiden")
+    files["version.json"] = (FIXTURES / "leiden_dataverse_version.json").read_bytes()
+    monkeypatch.setitem(
+        sources.SOURCES,
+        "leiden",
+        dataclasses.replace(
+            sources.SOURCES["leiden"],
+            extract=lambda: [
+                Payload("leiden", n, c, f"https://e/{n}", 200) for n, c in files.items()
+            ],
+        ),
+    )
+
+    cli.main(["ingest", "static", "--if-missing"])
+    assert lineage_of(store, "leiden")["updated_by_source"] == "2026-01-13T14:22:43Z"
+
+
 def test_geonames_is_kept_in_the_store_with_its_digest_and_has_no_clean_table(
     tmp_path, monkeypatch
 ):
@@ -484,3 +514,94 @@ def test_the_live_target_does_not_download_geonames(tmp_path, monkeypatch):
     cli.main(["ingest", "live"])
 
     assert calls == []
+
+
+def lineage_of(store: Store, name: str) -> dict:
+    stored = store.backend.read(ingest.lineage_path(name))
+    assert stored is not None
+    return json.loads(stored)
+
+
+def test_the_lineage_lists_each_payload_with_its_path_and_sha256(store, monkeypatch):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+
+    record = lineage_of(store, "eodi")
+    manifest = {line["name"]: line for line in store.manifest("eodi")}
+    assert record["source"] == "eodi"
+    assert record["rows"] == len(clean_table(store, "eodi"))
+    assert [p["name"] for p in record["payloads"]] == sorted(manifest)
+    for payload in record["payloads"]:
+        line = manifest[payload["name"]]
+        assert (payload["path"], payload["sha256"]) == (line["path"], line["sha256"])
+        content = store.backend.read(payload["path"])
+        assert hashlib.sha256(content).hexdigest() == payload["sha256"]
+
+
+def test_the_lineage_points_to_the_earlier_file_of_an_unchanged_payload(
+    store, monkeypatch
+):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    first = lineage_of(store, "eodi")
+    ingest.ingest("eodi", store)
+
+    assert lineage_of(store, "eodi") == first
+    assert [line["stored"] for line in store.manifest("eodi")] == [True] * 2 + [
+        False
+    ] * 2
+
+
+def test_the_lineage_records_the_code_commit_without_a_new_commit_for_it(
+    store, monkeypatch
+):
+    serve_recorded(monkeypatch, "eodi")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    ingest.ingest("eodi", store)
+    assert lineage_of(store, "eodi")["code_commit"] == "a" * 40
+
+    monkeypatch.setenv("GITHUB_SHA", "b" * 40)
+    ingest.ingest("eodi", store)
+    assert lineage_of(store, "eodi")["code_commit"] == "a" * 40
+
+
+def test_the_lineage_is_written_again_when_a_payload_changes(store, monkeypatch):
+    serve_recorded(monkeypatch, "eodi")
+    ingest.ingest("eodi", store)
+    first = lineage_of(store, "eodi")
+
+    files = recorded_payloads("eodi")
+    files["incidentes.csv"] += b"\n"
+    source = dataclasses.replace(
+        sources.SOURCES["eodi"],
+        extract=lambda: [
+            Payload("eodi", file, content, f"https://e/{file}", 200)
+            for file, content in files.items()
+        ],
+    )
+    monkeypatch.setitem(sources.SOURCES, "eodi", source)
+    ingest.ingest("eodi", store)
+
+    second = lineage_of(store, "eodi")
+    assert second["payloads"][0]["sha256"] != first["payloads"][0]["sha256"]
+    assert second["payloads"][1] == first["payloads"][1]
+
+
+def test_a_rebuild_with_no_network_gives_the_leiden_release_time(store):
+    version = (FIXTURES / "leiden_dataverse_version.json").read_bytes()
+    files = recorded_payloads("leiden")
+    files["version.json"] = version
+    store.save_many(
+        [Payload("leiden", n, c, f"https://e/{n}", 200) for n, c in files.items()]
+    )
+    ingest.rebuild("leiden", store)
+
+    record = lineage_of(store, "leiden")
+    assert record["updated_by_source"] == "2026-01-13T14:22:43Z"
+    assert [p["name"] for p in record["payloads"]] == ["eventdata.xlsx", "version.json"]
+
+
+def test_a_source_without_a_date_records_none(store, monkeypatch, eodi_events):
+    serve(monkeypatch, "eodi", eodi_events)
+    ingest.ingest("eodi", store)
+    assert lineage_of(store, "eodi")["updated_by_source"] is None

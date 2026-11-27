@@ -293,31 +293,40 @@ def test_normalize_reads_the_stored_spreadsheet():
     assert len(events) == 7
 
 
-def test_extract_checks_the_version_then_keeps_the_download_as_served(monkeypatch):
+def test_extract_checks_the_version_then_keeps_the_downloads_as_served(monkeypatch):
     class Answer(io.BytesIO):
         status = 200
 
-    answers = {
-        leiden.VERSION_URL: load("leiden_dataverse_version.json"),
-        leiden.FILES_URL: load("leiden_dataverse_files.json"),
-    }
-    file_id = leiden.spreadsheet_id(answers[leiden.FILES_URL])
-    file_url = leiden.FILE_URL.format(id=file_id)
-    monkeypatch.setattr(leiden, "get_json", answers.__getitem__)
+    version = (FIXTURES / "leiden_dataverse_version.json").read_bytes()
+    files = load("leiden_dataverse_files.json")
+    file_url = leiden.FILE_URL.format(id=leiden.spreadsheet_id(files))
+    served = {leiden.VERSION_URL: version, file_url: b"xlsx bytes"}
+    monkeypatch.setattr(leiden, "get_json", {leiden.FILES_URL: files}.__getitem__)
     monkeypatch.setattr(
         leiden.urllib.request,
         "urlopen",
-        lambda request, timeout: (
-            Answer(b"xlsx bytes")
-            if request.full_url == file_url
-            else pytest.fail(request.full_url)
-        ),
+        lambda request, timeout: Answer(served[request.full_url]),
     )
-    (payload,) = leiden.extract()
-    assert (payload.source, payload.name, payload.url, payload.status) == (
+    workbook, answer = leiden.extract()
+    assert (workbook.source, workbook.name, workbook.url, workbook.status) == (
         "leiden",
         leiden.WORKBOOK_NAME,
         file_url,
         200,
     )
-    assert payload.content == b"xlsx bytes"
+    assert workbook.content == b"xlsx bytes"
+    assert (answer.name, answer.url, answer.content) == (
+        leiden.VERSION_NAME,
+        leiden.VERSION_URL,
+        version,
+    )
+
+
+def test_the_date_of_the_last_change_is_the_release_time_of_the_stored_answer():
+    version = (FIXTURES / "leiden_dataverse_version.json").read_bytes()
+    files = {leiden.WORKBOOK_NAME: b"x", leiden.VERSION_NAME: version}
+    assert leiden.updated_by_source(files) == "2026-01-13T14:22:43Z"
+
+
+def test_a_store_without_the_version_answer_gives_no_date():
+    assert leiden.updated_by_source({leiden.WORKBOOK_NAME: b"x"}) is None

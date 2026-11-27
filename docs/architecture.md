@@ -162,6 +162,7 @@ flowchart TB
   module_tracker_hub["tracker.hub"]
   module_tracker_ingest["tracker.ingest"]
   module_tracker_leiden["tracker.leiden"]
+  module_tracker_provenance["tracker.provenance"]
   module_tracker_publish["tracker.publish"]
   module_tracker_quality["tracker.quality"]
   module_tracker_schema["tracker.schema"]
@@ -199,6 +200,7 @@ flowchart TB
   module_tracker_geonames --> module_tracker_store
   module_tracker_hub --> module_tracker_publish
   module_tracker_ingest --> module_tracker_errors
+  module_tracker_ingest --> module_tracker_provenance
   module_tracker_ingest --> module_tracker_schema
   module_tracker_ingest --> module_tracker_sources
   module_tracker_ingest --> module_tracker_store
@@ -208,6 +210,7 @@ flowchart TB
   module_tracker_publish --> module_tracker_actors
   module_tracker_publish --> module_tracker_build
   module_tracker_publish --> module_tracker_errors
+  module_tracker_publish --> module_tracker_provenance
   module_tracker_publish --> module_tracker_quality
   module_tracker_publish --> module_tracker_schema
   module_tracker_publish --> module_tracker_sources
@@ -243,6 +246,7 @@ flowchart TB
 | `tracker.hub` | `src/tracker/hub.py` | Read the published tables from the public Hugging Face dataset. | huggingface_hub, pandas |
 | `tracker.ingest` | `src/tracker/ingest.py` | Download sources, keep their payloads in the raw store and write clean tables. | pandas |
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | openpyxl, pandas, pycountry |
+| `tracker.provenance` | `src/tracker/provenance.py` | Code commit and workflow run of a pipeline step, read from the GitHub variables. |  |
 | `tracker.publish` | `src/tracker/publish.py` | Publish the tables of \`tracker build\` to the two public Hugging Face datasets. | huggingface_hub |
 | `tracker.quality` | `src/tracker/quality.py` | Quality table and run summary: one row per source and per run. | pandas |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |

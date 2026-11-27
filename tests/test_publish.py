@@ -38,6 +38,7 @@ class FakeHfApi:
         self.corrupt: str | None = None
         self.skip: str | None = None
         self.keep: str | None = None
+        self.messages: list[str] = []
 
     def list_repo_files(self, repo_id, *, repo_type, revision=None):
         assert repo_type == "dataset"
@@ -46,6 +47,7 @@ class FakeHfApi:
 
     def create_commit(self, *, repo_id, repo_type, operations, commit_message):
         assert repo_type == "dataset"
+        self.messages.append(commit_message)
         files = dict(self.main.get(repo_id, {}))
         for op in operations:
             if isinstance(op, CommitOperationAdd):
@@ -271,3 +273,34 @@ def test_a_missing_build_folder_stops_with_the_build_hint(api, tmp_path):
         publish.run("open", tmp_path / "nonexistent", api)
 
     assert api.main == {}
+
+
+def test_the_commit_message_gives_the_code_commit_and_the_run_link(
+    api, build, monkeypatch
+):
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+
+    publish_both(api, build)
+
+    message = (
+        f"data: publish schema {publish.SCHEMA_VERSION}\n\nCode: {'a' * 40}\n"
+        "Run: https://github.com/owner/repo/actions/runs/123"
+    )
+    assert api.messages == [message, message]
+
+
+def test_outside_a_run_the_commit_message_is_the_schema_line(api, build, monkeypatch):
+    for variable in (
+        "GITHUB_SHA",
+        "GITHUB_SERVER_URL",
+        "GITHUB_REPOSITORY",
+        "GITHUB_RUN_ID",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+    publish.run("open", build, api)
+
+    assert api.messages == [f"data: publish schema {publish.SCHEMA_VERSION}"]
