@@ -22,7 +22,8 @@ Nothing is written to `<out>` if a check fails.
 
 A source with no clean table is left out: `build` returns its name, and the
 registry, the clusters, the row-count check and the `sources` table all use
-the other sources only. The build fails when no source has a clean table.
+the other sources only. The build fails when no source has a clean table. A
+family that no built source feeds is written with no row and the schema types.
 """
 
 import hashlib
@@ -60,6 +61,13 @@ CURATION_DIR = Path(__file__).resolve().parents[2] / "curation"
 NUMERIC_COLUMNS = ("lat", "lon")
 
 CLUSTER_TYPES = {"cluster_id": "string", "n_sources": "int64", "is_canonical": "bool"}
+
+CLUSTER_SQL_TYPES = {
+    "cluster_id": "VARCHAR",
+    "n_sources": "BIGINT",
+    "is_canonical": "BOOLEAN",
+}
+"""SQL type of each cluster column: a family with no row must still write them."""
 
 ACTORS_FILE = "threat_actors.parquet"
 ACTORS_FAMILY = "open"
@@ -129,10 +137,20 @@ def load_clean(store: Store, work: Path) -> dict[str, int]:
     return counts
 
 
+def empty_families(left_out: Sequence[str]) -> list[str]:
+    """The families that no built source feeds, given the sources left out."""
+    built = [name for name in SOURCES if name not in left_out]
+    return [family for family in FAMILIES if not family_sources(family, built)]
+
+
 def left_out_summary(names: Sequence[str]) -> str:
-    """The run summary section that names each source left out of the build."""
+    """The run summary section that names each source and each family left empty."""
     lines = ["### Sources left out of the build (no clean table)", ""]
     lines += [f"- `{name}`: run `tracker ingest {name}`" for name in names]
+    empty = empty_families(names)
+    if empty:
+        lines += ["", "Families with no source, written with no row:"]
+        lines += [f"- `{family}`" for family in empty]
     return "\n".join([*lines, ""])
 
 
@@ -298,6 +316,10 @@ def add_clusters(
     known = {row[0] for row in con.execute("SELECT event_id FROM events").fetchall()}
     dedup.check_ids(merges, known, "merges")
     dedup.check_ids(splits, known, "splits")
+    cluster_select = ", ".join(
+        f"CAST(clusters_frame.{column} AS {CLUSTER_SQL_TYPES[column]}) AS {column}"
+        for column in CLUSTER_COLUMNS
+    )
     for family in FAMILIES:
         table = f"events_{family}"
         frame = con.execute(f"SELECT * FROM {table}").df()
@@ -311,7 +333,7 @@ def add_clusters(
         con.register("clusters_frame", clustered[["event_id", *CLUSTER_COLUMNS]])
         con.execute(
             f"CREATE OR REPLACE TABLE {table} AS "
-            f"SELECT {table}.*, clusters_frame.* EXCLUDE (event_id) "
+            f"SELECT {table}.*, {cluster_select} "
             f"FROM {table} JOIN clusters_frame USING (event_id) "
             "ORDER BY source, event_id"
         )
@@ -361,9 +383,11 @@ def check(family: str, folder: Path, counts: dict[str, int]) -> None:
         raise UserError(f"{family}: events.parquet breaks the schema: {found}")
 
     events = pd.read_parquet(events_file)
-    validate_published(events)
+    if not events.empty:
+        validate_published(events)
     csv_events = read_csv(folder / "events.csv")
-    validate_published(csv_events)
+    if not csv_events.empty:
+        validate_published(csv_events)
     if len(csv_events) != len(events):
         raise UserError(
             f"{family}: events.csv has {len(csv_events)} rows, "

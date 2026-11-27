@@ -121,6 +121,11 @@ of `sql/` in name order with DuckDB (in memory), and writes `events.parquet`,
 `open` family holds the rows of `open` sources. The `nc` family holds the rows
 of both families, because a NonCommercial source cannot be merged into a CC BY
 table. The SQL files must create `events_<family>` and `sources_<family>`.
+A source with no clean table in the raw store is left out: the build logs it,
+the tables and the clusters use the other sources only, and the run summary
+names it with the command to run. A family that no built source feeds is
+written with no row and the schema types, and the run summary names it. The
+build fails with "No source has a clean table" when no source has one.
 Before it writes anything, the command fails if a published table has another
 row count for a source than its clean table (the message names the source),
 or if an output breaks the schema (column types, then `validate`). The output
