@@ -1,4 +1,5 @@
 import io
+import time
 import zipfile
 
 import pytest
@@ -124,3 +125,12 @@ def test_an_archive_without_one_text_file_is_rejected():
         archive.writestr("b.txt", "")
     with pytest.raises(ValueError, match="one .txt file"):
         geonames.read_places(buffer.getvalue())
+
+
+def test_the_test_archive_has_the_same_bytes_at_any_clock_time(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
+    first = geonames_archive()
+    monkeypatch.setattr(time, "time", lambda: now + 3600)
+
+    assert geonames_archive() == first
