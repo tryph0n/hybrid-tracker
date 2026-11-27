@@ -5,7 +5,7 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from tracker import build, ingest, publish, quality
+from tracker import alerts, build, ingest, publish, quality
 from tracker.errors import UserError
 from tracker.sources import FAMILIES, REFERENCES, SOURCES
 from tracker.store import StoreError, open_store
@@ -68,6 +68,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("build"),
         help="folder of `tracker build` that gets quality.parquet (default: build)",
     )
+    alerts_cmd = commands.add_parser(
+        "alerts",
+        help="open, comment on or close the alert issue of each source with `gh`",
+    )
+    alerts_cmd.add_argument(
+        "--alerts",
+        type=Path,
+        default=Path("build") / quality.ALERTS_NAME,
+        help="the alerts file of `tracker quality` (default: build/alerts.json)",
+    )
+    alerts_cmd.add_argument(
+        "--run-url", required=True, help="link of the run, written in each issue"
+    )
     publish_cmd = commands.add_parser(
         "publish",
         help="publish one licence family to its public dataset, read it back and tag the version",
@@ -110,6 +123,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 quality.write_summary(build.left_out_summary(left_out))
         elif args.command == "quality":
             quality.run(open_store(), args.out)
+        elif args.command == "alerts":
+            alerts.sync(args.alerts, args.run_url, alerts.run_gh)
         elif args.command == "publish":
             publish.run(args.family, args.build)
     except (UserError, StoreError) as error:

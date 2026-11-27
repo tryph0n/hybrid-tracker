@@ -66,6 +66,7 @@ flowchart LR
   job_deploy["Deploy to Render"]:::conditional
   job_publish["Hugging Face publish"]:::conditional
   job_report_failure["Report failure"]:::conditional
+  job_source_alerts["Source alerts"]:::conditional
   job_close_failure["Close failure issue"]:::conditional
   job_heartbeat["Heartbeat"]:::conditional
   job_lint --> job_data
@@ -80,18 +81,22 @@ flowchart LR
   job_image --> job_report_failure
   job_deploy --> job_report_failure
   job_publish --> job_report_failure
+  job_source_alerts --> job_report_failure
+  job_data --> job_source_alerts
   job_lint --> job_close_failure
   job_data --> job_close_failure
   job_docs --> job_close_failure
   job_image --> job_close_failure
   job_deploy --> job_close_failure
   job_publish --> job_close_failure
+  job_source_alerts --> job_close_failure
   job_lint --> job_heartbeat
   job_data --> job_heartbeat
   job_docs --> job_heartbeat
   job_image --> job_heartbeat
   job_deploy --> job_heartbeat
   job_publish --> job_heartbeat
+  job_source_alerts --> job_heartbeat
 ```
 
 | Job | Runs if | Secrets and variables |
@@ -104,6 +109,7 @@ flowchart LR
 | Deploy to Render | `needs.image.outputs.image != ''` | `RENDER_DEPLOY_HOOK_URL` (secret) |
 | Hugging Face publish | `github.ref == 'refs/heads/main' && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
 | Report failure | `failure() && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
+| Source alerts | `github.ref == 'refs/heads/main' && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
 | Close failure issue | `${{ !failure() && !cancelled() && github.event_name == 'schedule' }}` |  |
 | Heartbeat | `${{ !failure() && !cancelled() && github.event_name == 'schedule' }}` | `HEARTBEAT_URL` (secret) |
 
@@ -141,6 +147,9 @@ flowchart LR
 | Hugging Face publish | Publish the open dataset |  | `uv run tracker publish open` |
 | Hugging Face publish | Publish the NonCommercial dataset |  | `uv run tracker publish nc` |
 | Report failure | Open an issue, or comment on the open one |  | a script |
+| Source alerts | Install |  | `uv sync --locked` |
+| Source alerts | Get the alerts of the quality check |  | `actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333` |
+| Source alerts | Open, comment on or close the alert issues |  | `uv run tracker alerts --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"` |
 | Close failure issue | Close the open failure issues |  | a script |
 | Heartbeat | Ping the heartbeat monitor |  | a script |
 
@@ -152,6 +161,7 @@ Python files and their imports: an arrow points to the imported module.
 flowchart TB
   module_streamlit_app_py["streamlit_app.py"]
   module_tracker_actors["tracker.actors"]
+  module_tracker_alerts["tracker.alerts"]
   module_tracker_build["tracker.build"]
   module_tracker_cli["tracker.cli"]
   module_tracker_clock["tracker.clock"]
@@ -177,6 +187,7 @@ flowchart TB
   module_streamlit_app_py --> module_tracker_views
   module_tracker_actors --> module_tracker_errors
   module_tracker_actors --> module_tracker_store
+  module_tracker_alerts --> module_tracker_errors
   module_tracker_build --> module_tracker_actors
   module_tracker_build --> module_tracker_dedup
   module_tracker_build --> module_tracker_errors
@@ -185,6 +196,7 @@ flowchart TB
   module_tracker_build --> module_tracker_schema
   module_tracker_build --> module_tracker_sources
   module_tracker_build --> module_tracker_store
+  module_tracker_cli --> module_tracker_alerts
   module_tracker_cli --> module_tracker_build
   module_tracker_cli --> module_tracker_errors
   module_tracker_cli --> module_tracker_ingest
@@ -238,6 +250,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | `streamlit_app.py` | `src/streamlit_app.py` | Dashboard: maps and charts of the unified hybrid-incident dataset. | pandas, plotly, pycountry, streamlit |
 | `tracker.actors` | `src/tracker/actors.py` | Threat-group lookup from the MISP galaxy threat-actor cluster. | pandas, pycountry |
+| `tracker.alerts` | `src/tracker/alerts.py` | One alert issue per source, kept open while the source has a cause. |  |
 | `tracker.build` | `src/tracker/build.py` | Build the published tables from the clean tables of the raw store. | duckdb, pandas, pyarrow |
 | `tracker.cli` | `src/tracker/cli.py` | The \`tracker\` command: one subcommand per action. |  |
 | `tracker.clock` | `src/tracker/clock.py` | The current day, in UTC like the stored event dates. | pandas |
