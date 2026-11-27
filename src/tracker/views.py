@@ -13,6 +13,7 @@ what each source records. The steps are:
 import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import pandas as pd
 
@@ -253,7 +254,7 @@ def coordinate_coverage(lines: pd.DataFrame, scope: pd.DataFrame) -> CoordinateC
     )
 
 
-def source_date(value: object) -> str:
+def source_date(value: Any) -> str:
     """A date of the quality table as shown: a day, a minute in UTC, or "".
 
     A value of one day stays a day, because the source gives no time. A value
@@ -283,6 +284,9 @@ def latest_dates(quality: pd.DataFrame | None) -> dict[str, tuple[str, str]]:
         return {}
     newest = quality.sort_values("run_at").groupby("source").tail(1)
     return {
-        row.source: (source_date(row.downloaded_at), source_date(row.updated_by_source))
+        str(row.source): (
+            source_date(row.downloaded_at),
+            source_date(row.updated_by_source),
+        )
         for row in newest.itertuples()
     }
