@@ -1,11 +1,13 @@
 """The dashboard run headless with AppTest, on samples."""
 
 import base64
+import dataclasses
 import importlib
 import io
 import json
 import logging
 import re
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -14,17 +16,20 @@ import pytest
 import streamlit as st
 from conftest import (
     APP,
+    FIXTURES,
     REVISION,
     REVISION_DATE,
     events_path,
+    geonames_archive,
     read_all_events,
     read_events,
+    recorded_payloads,
 )
 from streamlit.elements.lib import policies
 from streamlit.runtime.caching import cache_utils
 from streamlit.testing.v1 import AppTest
 
-from tracker import hub
+from tracker import actors, build, clock, geonames, hub, ingest, quality
 from tracker.clock import utc_today
 from tracker.schema import (
     ATTRIBUTIONS,
@@ -34,6 +39,7 @@ from tracker.schema import (
     read_csv,
 )
 from tracker.sources import SOURCES
+from tracker.store import LocalBackend, Payload, Store
 
 
 @pytest.fixture(autouse=True)
@@ -1102,3 +1108,90 @@ def test_sources_with_no_quality_table_show_empty_cells(sample_data_dir):
     assert (table["Downloaded"] == "").all()
     assert (table["Updated by source"] == "").all()
     assert len(table) == len(SOURCES)
+
+
+def drop_source(name: str) -> None:
+    """Publish no row of source `name`."""
+    read_events(name).iloc[0:0].to_csv(events_path(name), index=False)
+
+
+def test_a_source_with_no_published_row_is_not_named(sample_data_dir):
+    drop_source("leiden")
+    at = run_app()
+    assert at.multiselect(key="sources").options == [SOURCES["eodi"].title]
+    assert at.multiselect(key="sources").value == ["eodi"]
+    assert list(at.dataframe[-1].value["Source"]) == [SOURCES["eodi"].title]
+    assert SOURCES["eodi"].citation in captions(at)
+    assert SOURCES["leiden"].citation not in captions(at)
+
+
+def test_the_events_table_has_no_link_column_for_a_source_with_no_published_row(
+    sample_data_dir,
+):
+    drop_source("leiden")
+    assert link_columns(run_app()) == {"link_eodi": "EODI"}
+
+
+def serve_at(monkeypatch, name: str, day: int, files: dict[str, bytes]) -> None:
+    """Make source `name` download `files` on day `day` of the test run."""
+    now = pd.Timestamp("2026-03-05 10:00:00", tz="UTC") + pd.Timedelta(days=day)
+    monkeypatch.setattr(clock, "utc_now", lambda: now)
+    monkeypatch.setitem(
+        SOURCES,
+        name,
+        dataclasses.replace(
+            SOURCES[name],
+            extract=lambda: [
+                Payload(name, file, content, f"https://e/{file}", 200)
+                for file, content in files.items()
+            ],
+        ),
+    )
+
+
+def test_a_source_that_keeps_its_last_data_shows_the_dates_of_its_accepted_download(
+    tmp_path, monkeypatch
+):
+    store = Store(LocalBackend(tmp_path / "store"))
+    store.save(
+        Payload("geonames", geonames.FILE_NAME, geonames_archive(), geonames.URL, 200)
+    )
+    actors_file = (FIXTURES / "misp_threat_actor.json").read_bytes()
+    store.save(Payload(actors.SOURCE, actors.FILE_NAME, actors_file, actors.URL, 200))
+    curation = tmp_path / "curation"
+    curation.mkdir()
+    for name in ("merges.csv", "splits.csv"):
+        (curation / name).write_text("event_id_a,event_id_b,reason\n")
+    (curation / "actors.csv").write_text(",".join(actors.CURATION_COLUMNS) + "\n")
+    good = recorded_payloads("leiden")
+    good["version.json"] = (FIXTURES / "leiden_dataverse_version.json").read_bytes()
+    version = json.loads(good["version.json"])
+    version["data"]["releaseTime"] = "2026-03-06T08:00:00Z"
+    malformed = {
+        "eventdata.xlsx": b"malformed",
+        "version.json": json.dumps(version).encode(),
+    }
+    for name, files in (("leiden", good), ("eodi", recorded_payloads("eodi"))):
+        serve_at(monkeypatch, name, 0, files)
+        ingest.ingest(name, store)
+    serve_at(monkeypatch, "leiden", 1, malformed)
+    with pytest.raises(zipfile.BadZipFile):
+        ingest.ingest("leiden", store)
+    serve_at(monkeypatch, "eodi", 1, recorded_payloads("eodi"))
+    ingest.ingest("eodi", store)
+    build.build(store, tmp_path / "out", curation_dir=curation)
+    quality.run(store, tmp_path / "out")
+    family = tmp_path / "out" / "open"
+    published = pd.read_parquet(family / "events.parquet")
+    monkeypatch.setattr(
+        hub, "fetch", lambda revision: (family / "events.parquet", REVISION, "")
+    )
+    monkeypatch.setattr(
+        hub, "fetch_quality", lambda commit: pd.read_parquet(family / "quality.parquet")
+    )
+    table = run_app().dataframe[-1].value.set_index("Source")
+    leiden = table.loc[SOURCES["leiden"].title]
+    assert leiden["Events"] == (published["source"] == "leiden").sum() > 0
+    assert leiden["Downloaded"] == "2026-03-05 10:00 UTC"
+    assert leiden["Updated by source"] == "2026-01-13 14:22 UTC"
+    assert table.loc[SOURCES["eodi"].title, "Downloaded"] == "2026-03-06 10:00 UTC"
