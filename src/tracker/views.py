@@ -159,7 +159,7 @@ def incident_lines(
     """Build one line for each incident that has a passing row.
 
     The line gets its `date`, `end_date`, `date_precision`, `place`, `lat`,
-    `lon` and `title` from the first row in scope (see `scope_rows`), and
+    `lon`, `geo_precision` and `title` from the first row in scope (see `scope_rows`), and
     `line_source`, the source of that row. Each column of `fields` holds the
     text of `per_source_values`, from all the rows in scope, not only the
     passing ones: the line does not change when a filter other than the source
@@ -173,7 +173,16 @@ def incident_lines(
         names: The name of each source.
     """
     listed = scope[scope["cluster_id"].isin(passing["cluster_id"])]
-    base = ["cluster_id", "date", "end_date", "date_precision", "place", "lat", "lon"]
+    base = [
+        "cluster_id",
+        "date",
+        "end_date",
+        "date_precision",
+        "place",
+        "lat",
+        "lon",
+        "geo_precision",
+    ]
     lines = listed.loc[listed["is_line"], [*base, "title", "source"]].rename(
         columns={"source": "line_source"}
     )
@@ -242,37 +251,109 @@ def official_by_actor(rows: pd.DataFrame) -> dict[str, int]:
 class CoordinateCoverage:
     """Where the listed incidents can be seen, and which sources give coordinates.
 
-    `located`, `countries_only` and `on_no_map` are disjoint and add up to the
-    number of incidents. A source gives coordinates when at least one of its
-    rows in scope has them.
+    A source gives coordinates when at least one of its rows in scope has them.
     """
 
     sources_with: list[str]
     sources_without: list[str]
+
+
+@dataclass(frozen=True)
+class WhereSplit:
+    """The listed incidents by the view that shows them.
+
+    `located`, `countries_only` and `no_country` are disjoint and add up to
+    `total`, so that no incident is left out. `at_sea` is true when every
+    incident of `no_country` has `geo_precision` `sea`.
+    """
+
+    total: int
     located: int
     countries_only: int
-    on_no_map: int
+    no_country: int
+    at_sea: bool
 
 
-def coordinate_coverage(lines: pd.DataFrame, scope: pd.DataFrame) -> CoordinateCoverage:
-    """Count the lines by the view that shows them, and split sources by coordinates.
+NO_PLACE = "no place in the source"
 
-    Args:
-        lines: The lines from `incident_lines`.
-        scope: The rows in scope of the listed incidents.
-    """
-    has_coordinates = lines["lat"].notna() & lines["lon"].notna()
-    has_country = lines["has_country"]
+
+def coordinate_coverage(scope: pd.DataFrame) -> CoordinateCoverage:
+    """Split the sources of the rows in scope by whether they give coordinates."""
     row_coordinates = scope["lat"].notna() & scope["lon"].notna()
     with_coordinates = set(scope.loc[row_coordinates, "source"])
     sources = list(dict.fromkeys(scope["source"]))
     return CoordinateCoverage(
         sources_with=[name for name in sources if name in with_coordinates],
         sources_without=[name for name in sources if name not in with_coordinates],
-        located=int(has_coordinates.sum()),
-        countries_only=int((~has_coordinates & has_country).sum()),
-        on_no_map=int((~has_coordinates & ~has_country).sum()),
     )
+
+
+def _without_place(lines: pd.DataFrame) -> pd.DataFrame:
+    """The lines with no coordinates and no country."""
+    has_coordinates = lines["lat"].notna() & lines["lon"].notna()
+    return lines[~has_coordinates & ~lines["has_country"]]
+
+
+def where_split(lines: pd.DataFrame) -> WhereSplit:
+    """Count the lines by the view that shows them.
+
+    Args:
+        lines: The lines from `incident_lines`.
+    """
+    has_coordinates = lines["lat"].notna() & lines["lon"].notna()
+    nowhere = _without_place(lines)
+    return WhereSplit(
+        total=len(lines),
+        located=int(has_coordinates.sum()),
+        countries_only=int((~has_coordinates & lines["has_country"]).sum()),
+        no_country=len(nowhere),
+        at_sea=bool((nowhere["geo_precision"] == "sea").all()),
+    )
+
+
+def split_line(split: WhereSplit, *, countries_pointer: str = "Countries view") -> str:
+    """The line that says where each listed incident is shown.
+
+    A part with no incident has no pointer.
+
+    Args:
+        split: The counts from `where_split`.
+        countries_pointer: Where the incidents of a country only are counted.
+    """
+
+    def part(count: int, text: str, pointer: str) -> str:
+        return f"{count:,} {text} ({pointer})" if count else f"0 {text}"
+
+    unit = "incident" if split.total == 1 else "incidents"
+    last = "at sea only" if split.at_sea else "with no country"
+    return (
+        f"{split.total:,} {unit}: "
+        + part(split.located, "at a place", "map")
+        + ", "
+        + part(split.countries_only, "in a country only", countries_pointer)
+        + ", "
+        + part(split.no_country, last, "listed below")
+    )
+
+
+def no_country_places(lines: pd.DataFrame) -> list[tuple[str, int]]:
+    """The places, as the source writes them, of the lines with no country or point.
+
+    Returns:
+        Each place with its number of incidents, the largest count first, then
+        by place from A to Z. An empty place reads `NO_PLACE`.
+    """
+    places = _without_place(lines)["place"].fillna("").replace("", NO_PLACE)
+    counts = places.value_counts()
+    return sorted(
+        ((str(p), int(n)) for p, n in counts.items()), key=lambda x: (-x[1], x[0])
+    )
+
+
+def no_country_line(split: WhereSplit, places: Sequence[tuple[str, int]]) -> str:
+    """The line that lists the places of the incidents with no country."""
+    start = "At sea only, no country" if split.at_sea else "With no country"
+    return f"{start}: " + ", ".join(f"{place} ({n:,})" for place, n in places) + "."
 
 
 def source_date(value: Any) -> str:
