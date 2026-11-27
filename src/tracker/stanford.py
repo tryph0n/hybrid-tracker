@@ -280,7 +280,8 @@ def reduce_day(day: date, decoded: bytes) -> pd.DataFrame:
 
     Args:
         day: The day of the file.
-        decoded: The file as the source gives it.
+        decoded: The file as the source gives it: an object with the licence
+            fields and the rows in its `data` list.
 
     Returns:
         The columns `COLUMNS`: the cells whose centre is in `LAT_RANGE` and
@@ -288,11 +289,14 @@ def reduce_day(day: date, decoded: bytes) -> pd.DataFrame:
         the percentage of aircraft with low quality.
 
     Raises:
-        UserError: A row has no aircraft, or more low quality aircraft than
-            aircraft.
+        UserError: The file is not an object with a `data` list, or a row has
+            no aircraft, or more low quality aircraft than aircraft.
     """
+    document = json.load(io.BytesIO(decoded))
+    if not isinstance(document, dict) or not isinstance(document.get("data"), list):
+        raise UserError(f"stanford: {day} file is not an object with a data list")
     frame = pd.DataFrame(
-        json.load(io.BytesIO(decoded)),
+        document["data"],
         columns=["h3Index", "lowQualityCount", "totalAircraftCount"],
     )
     for reason, bad in (
