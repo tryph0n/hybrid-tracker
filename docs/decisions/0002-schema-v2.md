@@ -159,7 +159,9 @@ RS SK SI ES SE CH GB VA.
 ### Versioning
 
 The dataset follows semantic versioning. A removed or renamed column is a major
-version. Reason: outside users read the columns by name. Schema v2 is 2.0.0.
+version, and an added column is a minor version. Reason: outside users read
+the columns by name, and an added column breaks none of those reads. Schema v2
+is 2.0.0.
 
 ### Mapping from v1
 

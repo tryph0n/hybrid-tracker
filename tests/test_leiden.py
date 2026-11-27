@@ -40,6 +40,7 @@ def test_normalize_follows_schema(events):
     assert (events.loc[unknown_month, "date_precision"] == "year").all()
     assert (events.loc[~unknown_month, "date_precision"] == "month").all()
     assert (events["event_status"] == "confirmed").all()
+    assert events["drone_presence"].isna().all()
     assert (events["actors"] == "RU").all()
     assert (events["attribution"] == "assessed").all()
     assert (events["attributed_by"] == "Leiden University dataset (B. Schuurman)").all()

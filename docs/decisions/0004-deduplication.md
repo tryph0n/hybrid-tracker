@@ -319,9 +319,10 @@ Reasons:
   Picking the domain of the canonical row hides the Leiden view. The app shows
   what each source records and picks no value.
 - A cluster stays in the default view when one of its rows is not
-  `dismissed`. EODI marks `eodi:EODI-2025-00112` (Vilnius) `dismissed`, and
-  Leiden records the same incident (`leiden:55e3134992fd`). The line shows both
-  statuses, and a status filter does not change the line.
+  `dismissed`. Before schema 2.6.0, EODI marked `eodi:EODI-2025-00112` (Vilnius)
+  `dismissed` because of its drone presence, and Leiden records the same incident
+  (`leiden:55e3134992fd`): the line showed both statuses, and a status filter did
+  not change the line. EODI now gives that row `confirmed`, from its `estado`.
 
 Numbers on the data at commit `cbad1cd`, with the curation: the 577 rows make
 566 clusters. The default view shows 560 incidents. The timeline counts 17

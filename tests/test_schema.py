@@ -9,7 +9,9 @@ from conftest import ROOT, read_all_events
 from tracker.schema import (
     CATEGORIES,
     CATEGORY_DOMAINS,
+    COLUMNS,
     DOMAINS,
+    DRONE_PRESENCES,
     EUROPEAN_STATES,
     make_event_id,
     validate,
@@ -124,6 +126,10 @@ def set_cells(**cells):
             set_cells(actors="RU", attribution="none"),
             "attribution none needs empty actors",
         ),
+        (
+            set_cells(drone_presence="probable"),
+            r"Unknown drone_presence values: \['probable'\]",
+        ),
         (set_cells(end_date="2025/01/01"), "doesn't match format"),
         (set_cells(date="2025-02-10", end_date="2025-02-09"), "end_date before date"),
     ],
@@ -131,6 +137,21 @@ def set_cells(**cells):
 def test_validate_rejects(events, change, message):
     with pytest.raises(ValueError, match=message):
         validate(change(events.copy()))
+
+
+def test_drone_presence_has_the_four_values_of_eodi():
+    assert DRONE_PRESENCES == [
+        "confirmed",
+        "not_confirmed",
+        "not_substantiated",
+        "ruled_out",
+    ]
+    assert "drone_presence" in COLUMNS
+
+
+@pytest.mark.parametrize("value", [*DRONE_PRESENCES, "", None])
+def test_validate_accepts_each_drone_presence_and_an_empty_cell(events, value):
+    validate(set_cells(drone_presence=value)(events))
 
 
 def test_validate_accepts_several_country_codes(events):

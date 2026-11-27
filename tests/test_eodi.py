@@ -73,16 +73,23 @@ def test_normalize_follows_schema(events):
                 "category": "airspace_incursion",
             },
         ),
-        ("EODI-2026-00148", {"event_status": "unconfirmed", "date": "2026-09-26"}),
+        ("EODI-2026-00148", {"event_status": "confirmed", "date": "2026-09-26"}),
         (
             "EODI-2025-00042",
             {
-                "event_status": "unconfirmed",
+                "event_status": "confirmed",
                 "date": "2025-09-22",
                 "date_precision": "day",
             },
         ),
-        ("EODI-2025-00112", {"event_status": "dismissed", "date": "2025-10-04"}),
+        (
+            "EODI-2025-00112",
+            {
+                "event_status": "confirmed",
+                "drone_presence": "ruled_out",
+                "date": "2025-10-04",
+            },
+        ),
         (
             "EODI-2025-00140",
             {
@@ -186,10 +193,30 @@ def test_attributed_unlocated_incident_stops_the_ingestion():
 
 
 @pytest.mark.parametrize(
+    ("native_id", "status", "presence"),
+    [
+        ("EODI-2024-00003", "confirmed", "confirmed"),
+        ("EODI-2025-00010", "confirmed", "not_confirmed"),
+        ("EODI-2025-00042", "confirmed", "not_substantiated"),
+        ("EODI-2025-00112", "confirmed", "ruled_out"),
+        ("EODI-2025-00233", "confirmed", "confirmed"),
+        ("EODI-2026-00140", "confirmed", "confirmed"),
+        ("EODI-2025-00140", "unconfirmed", "not_confirmed"),
+        ("EODI-2025-00212", "confirmed", "confirmed"),
+    ],
+)
+def test_the_status_comes_from_estado_and_the_drone_presence_from_presencia_dron(
+    events, native_id, status, presence
+):
+    row = events.set_index("event_id").loc[f"eodi:{native_id}"]
+    assert (row["event_status"], row["drone_presence"]) == (status, presence)
+
+
+@pytest.mark.parametrize(
     ("column", "value", "message"),
     [
         ("tipo", "globo", "without category"),
-        ("presencia_dron", "probable", "without event_status"),
+        ("estado", "negado", "without event_status"),
     ],
 )
 def test_unknown_upstream_label_fails_validation(column, value, message):

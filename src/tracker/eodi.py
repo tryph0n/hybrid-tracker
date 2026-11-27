@@ -29,12 +29,21 @@ CATEGORY = {
     "incursion": "airspace_incursion",
 }
 
-# EODI "presencia_dron": was a drone actually established?
+# EODI "estado": does an authority say that the incident happened? The code
+# of "Denied" is in neither file yet and is not guessed: an unknown code gives
+# an empty event_status, which `validate` rejects.
 EVENT_STATUS = {
+    "confirmado": "confirmed",
+    "atribuido": "confirmed",
+    "notificado": "unconfirmed",
+}
+
+# EODI "presencia_dron": does an authority attribute the incident to a drone?
+DRONE_PRESENCE = {
     "confirmada": "confirmed",
-    "no_confirmada": "unconfirmed",
-    "no_acreditada": "unconfirmed",
-    "descartada": "dismissed",
+    "no_confirmada": "not_confirmed",
+    "no_acreditada": "not_substantiated",
+    "descartada": "ruled_out",
 }
 
 # EODI "inicio_precision", as its incident pages label it: "dia" day only,
@@ -169,6 +178,7 @@ def reshape_unlocated(payload: bytes) -> pd.DataFrame:
             {
                 "id": incident["id"],
                 "tipo": incident["tipo"],
+                "estado": incident["estado"]["actual"],
                 "presencia_dron": incident["presencia_dron"],
                 "titulo_en": incident["titulo"]["en"],
                 "inicio": incident["tiempo"]["inicio"]["valor"],
@@ -189,14 +199,15 @@ def map_frame(raw: pd.DataFrame) -> pd.DataFrame:
     Args:
         raw: EODI rows with the columns `id`, `inicio`, `inicio_precision`,
             `fin`, `pais`, `lugar_en`, `latitud`, `longitud`, `tipo`,
-            `titulo_en`, `presencia_dron`, `atribucion_actor`,
+            `titulo_en`, `estado`, `presencia_dron`, `atribucion_actor`,
             `atribucion_autoridad` and `enlace`. The column `nivel` is needed
             only for a row without coordinates.
 
     Returns:
         The rows with exactly the columns of `tracker.schema.COLUMNS`. An
-        unknown `tipo` or `presencia_dron` leaves `category` or `event_status`
-        empty, which `validate` rejects.
+        unknown `tipo` or `estado` leaves `category` or `event_status` empty,
+        which `validate` rejects. An unknown `presencia_dron` leaves
+        `drone_presence` empty.
 
     Raises:
         KeyError: A column of `raw` is missing.
@@ -224,7 +235,8 @@ def map_frame(raw: pd.DataFrame) -> pd.DataFrame:
             "category": raw["tipo"].map(CATEGORY),
             "subcategory": raw["tipo"],
             "title": raw["titulo_en"],
-            "event_status": raw["presencia_dron"].map(EVENT_STATUS),
+            "event_status": raw["estado"].map(EVENT_STATUS),
+            "drone_presence": raw["presencia_dron"].map(DRONE_PRESENCE),
             "actors": actors,
             "actor_name": pd.NA,
             "attribution": attributed.map({True: "official", False: "none"}),

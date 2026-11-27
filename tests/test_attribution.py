@@ -248,10 +248,17 @@ def test_the_newest_versions_section_of_each_card_is_the_schema_version(family):
 
 
 @pytest.mark.parametrize("family", FAMILIES)
-def test_the_version_section_of_each_card_names_the_new_quality_column(family):
-    section = version_section(family, SCHEMA_VERSION)
+def test_the_2_5_0_section_of_each_card_names_the_new_quality_column(family):
+    section = version_section(family, "2.5.0")
 
     assert "`cause`" in section
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_the_version_section_of_each_card_names_the_drone_presence(family):
+    section = version_section(family, SCHEMA_VERSION)
+
+    assert "`drone_presence`" in section
 
 
 @pytest.mark.parametrize("family", FAMILIES)

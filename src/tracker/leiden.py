@@ -277,6 +277,7 @@ def map_frame(raw: pd.DataFrame) -> pd.DataFrame:
             "title": raw["What"].str.strip(),
             # Every listed event is documented and judged Russian by the author.
             "event_status": "confirmed",
+            "drone_presence": None,
             "actors": "RU",
             "actor_name": None,
             "attribution": "assessed",
