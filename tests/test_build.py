@@ -255,6 +255,27 @@ def test_a_build_with_every_clean_table_leaves_out_nothing(store, tmp_path):
     assert build.build(store, tmp_path / "out") == []
 
 
+def test_a_family_with_no_built_source_is_written_empty_and_named(
+    store, tmp_path, monkeypatch
+):
+    add_nc_source(monkeypatch, store)
+    for name in ("eodi", "leiden"):
+        (store.backend.root / ingest.clean_path(name)).unlink()
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(store.backend.root))
+    out = tmp_path / "out"
+
+    cli.main(["build", "--out", str(out)])
+
+    assert len(pd.read_parquet(out / "open" / "events.parquet")) == 0
+    assert len(pd.read_parquet(out / "nc" / "events.parquet")) == 2
+    text = summary.read_text(encoding="utf-8")
+    assert "- `open`" in text
+    assert "- `nc`" not in text
+
+
 def test_a_build_with_no_clean_table_fails(store, tmp_path):
     for name in sources.SOURCES:
         (store.backend.root / ingest.clean_path(name)).unlink()
