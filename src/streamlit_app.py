@@ -31,11 +31,15 @@ from tracker.views import (
     incident_lines,
     latest_dates,
     memberships,
+    no_country_line,
+    no_country_places,
     official_by_actor,
     passing_rows,
     published_sources,
     scope_rows,
     split_by_scope,
+    split_line,
+    where_split,
     with_clusters,
     with_code_lists,
 )
@@ -123,6 +127,11 @@ BLUE_RAMP = [
 ]
 
 EUROPE_CENTER = {"lat": 53, "lon": 14}
+
+POINT_SOURCES = {
+    "exact": "Coordinates from the source",
+    "place": "Town centre (GeoNames) of the place that the source names",
+}
 
 SOURCE_NAMES = {name: source.short_name for name, source in SOURCES.items()}
 # The fields of one source: a line shows each of them for each source.
@@ -250,6 +259,7 @@ def points_map(
     located = located.assign(
         day=located["date"].dt.strftime("%Y-%m-%d"),
         here=located.groupby(["lat", "lon"])["lat"].transform("size"),
+        point=located["geo_precision"].map(POINT_SOURCES).fillna(""),
     ).merge(
         in_domain[["cluster_id", "value"]].rename(columns={"value": "marker_domain"}),
         on="cluster_id",
@@ -268,6 +278,7 @@ def points_map(
             "attributed_by_label": True,
             "actor_names": True,
             "here": True,
+            "point": True,
             "lat": False,
             "lon": False,
             "marker_domain": False,
@@ -283,6 +294,7 @@ def points_map(
             "attributed_by_label": "Attributed by",
             "actor_names": "Actors",
             "here": "Events here",
+            "point": "Point",
         },
         opacity=0.75,
         zoom=2.7,
@@ -583,71 +595,46 @@ map_view = st.segmented_control(
     label_visibility="collapsed",
 )
 located = lines.dropna(subset=["lat", "lon"])
-coverage = coordinate_coverage(lines, listed)
-on_no_map = coverage.on_no_map
-if on_no_map == 1:
-    no_map_note = " 1 event has no country (open sea) and is on no map."
-elif on_no_map:
-    no_map_note = f" {on_no_map:,} events have no country (open sea) and are on no map."
-else:
-    no_map_note = ""
+coverage = coordinate_coverage(listed)
+split = where_split(lines)
 without_titles = ", ".join(SOURCES[name].title for name in coverage.sources_without)
-if coverage.countries_only == 1:
-    countries_only_note = (
-        " 1 event has a country and no coordinates: it is in the Countries view only."
-    )
-elif coverage.countries_only:
-    countries_only_note = (
-        f" {coverage.countries_only:,} events have a country and no coordinates: "
-        "they are in the Countries view only."
-    )
-else:
-    countries_only_note = ""
 if map_view == "Countries":
     st.plotly_chart(countries_map(by_country, dark))
     st.caption(
         "Incidents per country, states of the European list only. An incident "
-        "counts once in each country that one of its sources gives it." + no_map_note
-    )
-elif located.empty:
-    st.info(
-        "None of the selected events has coordinates. Sources with no coordinates: "
-        f"{without_titles}."
-        + countries_only_note
-        + " Try the Countries view."
-        + no_map_note
+        "counts once in each country that one of its sources gives it."
     )
 else:
-    stacked = int(located.duplicated(["lat", "lon"], keep=False).sum())
-    if stacked:
-        stacked_note = (
-            f" {stacked:,} of them share their place with other events: "
-            "hover over a marker to see how many are there. "
-            "The Events table lists them all."
+    st.caption(split_line(split))
+    if located.empty:
+        st.info(
+            "None of the selected events has coordinates. Sources with no "
+            f"coordinates: {without_titles}. Try the Countries view."
         )
     else:
-        stacked_note = ""
-    if len(located) == 1:
-        located_note = f"1 of {len(lines):,} selected events has coordinates."
-    else:
-        located_note = (
-            f"{len(located):,} of {len(lines):,} selected events have coordinates."
+        stacked = int(located.duplicated(["lat", "lon"], keep=False).sum())
+        if stacked:
+            stacked_note = (
+                f" {stacked:,} of the incidents on the map share their place with "
+                "other events: hover over a marker to see how many are there. "
+                "The Events table lists them all."
+            )
+        else:
+            stacked_note = ""
+        with_titles = ", ".join(SOURCES[name].title for name in coverage.sources_with)
+        sources_note = f" Sources with coordinates: {with_titles}."
+        if without_titles:
+            sources_note += f" Sources with no coordinates: {without_titles}."
+        st.plotly_chart(points_map(located, in_domain, colors, dark))
+        st.caption(
+            stacked_note.strip()
+            + sources_note
+            + " An event has one marker for each domain that one of its sources "
+            "gives it, at the same place. The legend lists only the domains of the "
+            "events that have coordinates: it is not the Domain filter."
         )
-    with_titles = ", ".join(SOURCES[name].title for name in coverage.sources_with)
-    sources_note = f" Sources with coordinates: {with_titles}."
-    if without_titles:
-        sources_note += f" Sources with no coordinates: {without_titles}."
-    st.plotly_chart(points_map(located, in_domain, colors, dark))
-    st.caption(
-        located_note
-        + stacked_note
-        + sources_note
-        + " An event has one marker for each domain that one of its sources "
-        "gives it, at the same place. The legend lists only the domains of the "
-        "events that have coordinates: it is not the Domain filter."
-        + countries_only_note
-        + no_map_note
-    )
+    if split.no_country:
+        st.caption(no_country_line(split, no_country_places(lines)))
 
 st.subheader("Most affected countries (top 15, ties kept)")
 st.plotly_chart(countries_bar(by_country))

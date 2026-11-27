@@ -2,18 +2,27 @@
 
 import pandas as pd
 import pytest
+from conftest import DATA_DIR
 
+from tracker.schema import ATTRIBUTIONS, CATEGORIES, DOMAINS, read_csv
+from tracker.sources import SOURCES
 from tracker.views import (
+    WhereSplit,
     coordinate_coverage,
     incident_lines,
     latest_dates,
     memberships,
+    no_country_line,
+    no_country_places,
     official_by_actor,
     passing_rows,
     per_source_values,
+    published_sources,
     scope_rows,
     source_date,
     split_by_scope,
+    split_line,
+    where_split,
     with_clusters,
     with_code_lists,
 )
@@ -64,6 +73,9 @@ def frame(rows):
     table["date"] = pd.to_datetime(table["date"])
     table["lon"] = table["lat"]
     table["place"] = "place"
+    table["geo_precision"] = table["lat"].map(
+        lambda lat: "country" if pd.isna(lat) else "exact"
+    )
     table["end_date"] = pd.NaT
     table["date_precision"] = "day"
     return with_code_lists(table)
@@ -371,16 +383,131 @@ def test_the_official_count_by_state_uses_the_official_rows_only(events):
     assert official_by_actor(rows[rows["attribution"] == "none"]) == {}
 
 
-def test_coordinate_coverage_splits_lines_and_sources(events):
+def lines_of(events):
     scope = scope_of(events)
     passing = passing_rows(scope, **ALL)
-    lines = incident_lines(scope, passing, fields=[], names=NAMES)
+    return incident_lines(scope, passing, fields=[], names=NAMES), scope
 
-    coverage = coordinate_coverage(lines, scope)
+
+def test_coordinate_coverage_splits_the_sources(events):
+    _, scope = lines_of(events)
+
+    coverage = coordinate_coverage(scope)
 
     assert coverage.sources_with == ["eodi"]
     assert coverage.sources_without == ["leiden"]
-    assert (coverage.located, coverage.countries_only, coverage.on_no_map) == (2, 1, 1)
+
+
+def test_the_split_adds_up_to_the_incidents(events):
+    lines, _ = lines_of(events)
+
+    split = where_split(lines)
+
+    assert (split.total, split.located, split.countries_only, split.no_country) == (
+        4,
+        2,
+        1,
+        1,
+    )
+    assert not split.at_sea
+    assert split_line(split) == (
+        "4 incidents: 2 at a place (map), 1 in a country only (Countries view), "
+        "1 with no country (listed below)"
+    )
+
+
+def test_the_split_line_of_the_fixture_lines_is_the_text_of_the_first_box():
+    fixtures = [read_csv(path) for path in sorted(DATA_DIR.glob("*.csv"))]
+    events = pd.concat(fixtures, ignore_index=True)
+    events["date"] = pd.to_datetime(events["date"])
+    events = with_code_lists(with_clusters(events))
+    published = published_sources(events, list(SOURCES))
+    scope = scope_rows(events, sources=published, order=published)
+    passing = passing_rows(
+        scope,
+        domains=DOMAINS,
+        categories=CATEGORIES,
+        statuses=["confirmed", "unconfirmed"],
+        attributions=ATTRIBUTIONS,
+    )
+    names = {name: source.short_name for name, source in SOURCES.items()}
+
+    lines = incident_lines(scope, passing, fields=[], names=names)
+
+    assert split_line(where_split(lines)) == (
+        "17 incidents: 7 at a place (map), 9 in a country only (Countries view), "
+        "1 at sea only (listed below)"
+    )
+
+
+def test_the_split_line_has_no_pointer_for_an_empty_part_and_a_singular():
+    split = where_split_of(total=1, located=0, countries_only=1, no_country=0)
+
+    assert split_line(split) == (
+        "1 incident: 0 at a place, 1 in a country only (Countries view), 0 at sea only"
+    )
+    assert split_line(split, countries_pointer="Map page").endswith(
+        "1 in a country only (Map page), 0 at sea only"
+    )
+
+
+def where_split_of(**counts):
+    return WhereSplit(at_sea=True, **counts)
+
+
+def test_the_line_takes_geo_precision_from_the_first_row_in_the_source_order(events):
+    events.loc[events["event_id"] == "e1", "geo_precision"] = "place"
+    events.loc[events["event_id"] == "l1", "geo_precision"] = "exact"
+    lines, _ = lines_of(events)
+
+    precision = lines.set_index("cluster_id")["geo_precision"]
+
+    assert precision["e1"] == "place"
+
+
+def test_an_empty_place_counts_under_no_place_in_the_source(events):
+    events.loc[events["event_id"] == "l3", "place"] = ""
+    lines, _ = lines_of(events)
+
+    assert no_country_places(lines) == [("no place in the source", 1)]
+
+
+def test_a_region_row_with_no_country_counts_as_with_no_country(events):
+    events.loc[events["event_id"] == "l3", "geo_precision"] = "region"
+    lines, _ = lines_of(events)
+
+    split = where_split(lines)
+
+    assert split.no_country == 1
+    assert not split.at_sea
+    assert split_line(split).endswith("1 with no country (listed below)")
+    assert no_country_line(split, no_country_places(lines)).startswith(
+        "With no country: "
+    )
+
+
+def test_the_places_of_the_incidents_at_sea_are_counted_in_a_fixed_order():
+    places = ["Baltic Sea", "North Sea", "Adriatic Sea", "North Sea"]
+    rows = [
+        (f"s{n}", "leiden", "2025-01-01", "espionage", "reconnaissance", "confirmed")
+        + ("none", "", "", f"s{n}")
+        for n in range(len(places))
+    ]
+    table = frame(rows).assign(lat=None, lon=None, geo_precision="sea", place=places)
+    lines, _ = lines_of(table)
+    split = where_split(lines)
+
+    found = no_country_places(lines)
+
+    assert found == [
+        ("North Sea", 2),
+        ("Adriatic Sea", 1),
+        ("Baltic Sea", 1),
+    ]
+    assert split.at_sea
+    assert no_country_line(split, found) == (
+        "At sea only, no country: North Sea (2), Adriatic Sea (1), Baltic Sea (1)."
+    )
 
 
 def test_a_table_without_cluster_columns_counts_each_row_once():

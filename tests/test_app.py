@@ -349,28 +349,33 @@ def test_multi_country_events_count_for_each_selected_country(sample_data_dir):
 @pytest.mark.parametrize(
     "copies, note",
     [
-        (1, "1 event has no country (open sea) and is on no map."),
-        (3, "3 events have no country (open sea) and are on no map."),
+        (
+            1,
+            "1 incident: 0 at a place, 0 in a country only, 1 at sea only (listed below)",
+        ),
+        (
+            3,
+            "3 incidents: 0 at a place, 0 in a country only, 3 at sea only (listed below)",
+        ),
     ],
 )
 def test_events_on_no_map_are_counted(sample_data_dir, copies, note):
     open_sea_rows(copies)
     at = run_app()
-    assert note in captions(at)
-    at.segmented_control[0].set_value("Countries").run()
-    assert note in captions(at)
     at.multiselect(key="sources").set_value(["leiden"]).run()
     assert not at.exception
-    at.segmented_control[0].set_value("Incidents").run()
-    assert note in at.info[0].value
+    assert note in captions(at)
+    assert "on no map" not in at.info[0].value
+    assert "At sea only, no country: " in captions(at)
 
 
-def test_one_located_event_gets_a_singular_caption(sample_data_dir):
+def test_one_located_event_gets_a_singular_split_line(sample_data_dir):
     eodi = read_events("eodi")
     eodi[eodi["lat"].notna()].head(1).to_csv(events_path("eodi"), index=False)
     at = run_app()
     at.multiselect(key="sources").set_value(["eodi"]).run()
-    assert "1 of 1 selected events has coordinates." in captions(at)
+    assert "1 incident: 1 at a place (map), 0 in a country only" in captions(at)
+    assert "selected events has coordinates" not in captions(at)
 
 
 def test_no_map_note_is_absent_without_open_sea_events(sample_data_dir):
@@ -398,13 +403,18 @@ def test_caption_counts_events_sharing_their_place(sample_data_dir):
     share_places(3)
     st.cache_data.clear()
     at = run_app()
-    assert "3 of them share their place with other events" in captions(at)
+    assert "3 of the incidents on the map share their place with other events" in (
+        captions(at)
+    )
+    for gone in ("selected events have coordinates", "in the Countries view only"):
+        assert gone not in captions(at)
+    assert "on no map" not in captions(at)
     at.multiselect(key="statuses").set_value(
         ["confirmed", "unconfirmed", "dismissed"]
     ).run()
-    assert "4 of them share their place with other events" in captions(at)
+    assert "4 of the incidents on the map share their place" in captions(at)
     at.multiselect(key="categories").set_value(["airspace_incursion"]).run()
-    assert "selected events have coordinates" in captions(at)
+    assert "at a place (map)" in captions(at)
     assert "share their place" not in captions(at)
 
 
@@ -585,8 +595,10 @@ def test_where_caption_names_the_sources_and_says_the_legend_is_not_a_filter(
     assert f"Sources with coordinates: {EODI_TITLE}." in text
     assert f"Sources with no coordinates: {LEIDEN_TITLE}." in text
     assert "it is not the Domain filter" in text
-    assert f"{countries_only} events have a country and no coordinates" in text
-    assert "in the Countries view only" in text
+    assert (
+        f"{len(shown)} incidents: {located} at a place (map), {countries_only} in a "
+        f"country only (Countries view), {on_no_map} at sea only (listed below)"
+    ) in text
     assert located + countries_only + on_no_map == len(shown)
     assert sum(len(trace.customdata) for trace in chart(at, 1).data) == located
 
@@ -603,8 +615,9 @@ def test_where_counts_add_up_with_the_leiden_dataset_alone(sample_data_dir):
     info = at.info[0].value
     assert f"Sources with no coordinates: {LEIDEN_TITLE}." in info
     assert EODI_TITLE not in info
-    assert f"{countries_only} events have a country and no coordinates" in info
     assert "Countries view" in info
+    assert "have a country and no coordinates" not in info
+    assert f"{countries_only} in a country only (Countries view)" in captions(at)
 
 
 def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
@@ -617,7 +630,7 @@ def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
     shown = expected_events(read_all_events())
     eodi = shown[shown["source"] == "eodi"]
     countries_only = where_counts(eodi)[1]
-    assert f"{countries_only} events have a country and no coordinates" in text
+    assert f"{countries_only} in a country only (Countries view)" in text
     at.multiselect(key="sources").set_value(["eodi", "leiden"]).run()
     at.multiselect(key="domains").set_value(["sabotage"]).run()
     assert not at.exception
@@ -627,7 +640,12 @@ def test_where_text_follows_the_sources_and_domain_filters(sample_data_dir):
     assert f"Sources with no coordinates: {LEIDEN_TITLE}." in info
     assert EODI_TITLE not in info
     assert where_counts(sabotage)[1] == 1
-    assert "1 event has a country and no coordinates" in info
+    assert "a country and no coordinates" not in info
+    assert "Try the Countries view" in info
+    assert (
+        "1 incident: 0 at a place, 1 in a country only (Countries view), "
+        "0 at sea only" in captions(at)
+    )
 
 
 def test_category_widget_gets_no_default_and_session_state_value_together(
@@ -1248,3 +1266,63 @@ def test_a_source_that_keeps_its_last_data_shows_the_dates_of_its_accepted_downl
     assert leiden["Downloaded"] == "2026-03-05 10:00 UTC"
     assert leiden["Updated by source"] == "2026-01-13 14:22 UTC"
     assert table.loc[SOURCES["eodi"].title, "Downloaded"] == "2026-03-06 10:00 UTC"
+
+
+def test_the_split_line_and_the_line_under_the_map(sample_data_dir):
+    at = run_app()
+    assert (
+        "17 incidents: 7 at a place (map), 9 in a country only (Countries view), "
+        "1 at sea only (listed below)" in captions(at)
+    )
+    assert "At sea only, no country: North Sea; Baltic Sea (1)." in captions(at)
+    assert sum(len(trace.customdata) for trace in chart(at, 1).data) == 7
+
+
+def test_the_split_line_for_a_domain_and_a_country(sample_data_dir):
+    at = run_app()
+    at.multiselect(key="domains").set_value(["espionage"]).run()
+    assert not at.exception
+    assert (
+        "1 incident: 0 at a place, 0 in a country only, 1 at sea only (listed below)"
+        in captions(at)
+    )
+    assert "At sea only, no country: North Sea; Baltic Sea (1)." in captions(at)
+    assert "on no map" not in at.info[0].value
+    at.multiselect(key="domains").set_value(DOMAINS).run()
+    at.multiselect(key="countries").set_value(["DE"]).run()
+    assert (
+        "4 incidents: 1 at a place (map), 3 in a country only (Countries view), "
+        "0 at sea only" in captions(at)
+    )
+    assert "At sea only" not in captions(at)
+
+
+def test_the_message_without_a_map_names_the_sources_without_coordinates(
+    sample_data_dir,
+):
+    at = run_app()
+    at.multiselect(key="domains").set_value(["sabotage"]).run()
+    info = at.info[0].value
+    assert "Russian Operations Against Europe Dataset, 2022-2025" in info
+    assert "Try the Countries view" in info
+    assert "a country and no coordinates" not in info
+
+
+def hover_point(at):
+    traces = chart(at, 1).data
+    position = int(
+        re.search(r"Point=%\{customdata\[(\d+)\]", traces[0].hovertemplate)[1]
+    )
+    return {row[position] for trace in traces for row in trace.customdata}
+
+
+def test_the_hover_says_where_the_point_comes_from(sample_data_dir):
+    assert hover_point(run_app()) == {"Coordinates from the source"}
+    eodi = read_events("eodi")
+    located = eodi[eodi["lat"].notna()]
+    eodi.loc[located.index[0], "geo_precision"] = "place"
+    eodi.to_csv(events_path("eodi"), index=False)
+    st.cache_data.clear()
+    assert "Town centre (GeoNames) of the place that the source names" in hover_point(
+        run_app()
+    )
