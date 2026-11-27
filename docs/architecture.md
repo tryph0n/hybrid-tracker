@@ -81,6 +81,7 @@ flowchart LR
   job_image --> job_report_failure
   job_deploy --> job_report_failure
   job_publish --> job_report_failure
+  job_source_alerts --> job_report_failure
   job_data --> job_source_alerts
   job_lint --> job_close_failure
   job_data --> job_close_failure
@@ -88,12 +89,14 @@ flowchart LR
   job_image --> job_close_failure
   job_deploy --> job_close_failure
   job_publish --> job_close_failure
+  job_source_alerts --> job_close_failure
   job_lint --> job_heartbeat
   job_data --> job_heartbeat
   job_docs --> job_heartbeat
   job_image --> job_heartbeat
   job_deploy --> job_heartbeat
   job_publish --> job_heartbeat
+  job_source_alerts --> job_heartbeat
 ```
 
 | Job | Runs if | Secrets and variables |
@@ -106,7 +109,7 @@ flowchart LR
 | Deploy to Render | `needs.image.outputs.image != ''` | `RENDER_DEPLOY_HOOK_URL` (secret) |
 | Hugging Face publish | `github.ref == 'refs/heads/main' && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
 | Report failure | `failure() && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
-| Source alerts | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` |  |
+| Source alerts | `github.ref == 'refs/heads/main' && (github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch')` |  |
 | Close failure issue | `${{ !failure() && !cancelled() && github.event_name == 'schedule' }}` |  |
 | Heartbeat | `${{ !failure() && !cancelled() && github.event_name == 'schedule' }}` | `HEARTBEAT_URL` (secret) |
 
@@ -184,6 +187,7 @@ flowchart TB
   module_streamlit_app_py --> module_tracker_views
   module_tracker_actors --> module_tracker_errors
   module_tracker_actors --> module_tracker_store
+  module_tracker_alerts --> module_tracker_errors
   module_tracker_build --> module_tracker_actors
   module_tracker_build --> module_tracker_dedup
   module_tracker_build --> module_tracker_errors

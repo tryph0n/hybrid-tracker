@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from tracker.errors import UserError
+
 logger = logging.getLogger(__name__)
 
 LABEL = "source-alert"
@@ -102,8 +104,17 @@ def sync(alerts_path: Path, run_url: str, gh: Gh) -> list[Action]:
 
     Returns:
         The actions that were done.
+
+    Raises:
+        UserError: The alerts file does not exist.
     """
-    alerts = json.loads(alerts_path.read_text(encoding="utf-8"))
+    try:
+        text = alerts_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise UserError(
+            f"no alerts file at {alerts_path}, run `tracker quality`"
+        ) from None
+    alerts = json.loads(text)
     gh(
         ["label", "create", LABEL, "--force", "--color", "D93F0B"]
         + ["--description", "A source has a cause that needs a look"]

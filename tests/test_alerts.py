@@ -3,10 +3,12 @@
 import json
 
 import pandas as pd
+import pytest
 import yaml
 from conftest import ROOT
 
 from tracker import alerts, quality
+from tracker.errors import UserError
 
 NOW = pd.Timestamp("2026-11-27T04:17:00Z")
 RUN = "https://example.org/run/1"
@@ -105,6 +107,28 @@ def test_the_alert_job_can_write_issues_and_close_failure_leaves_alerts_open():
         (ROOT / ".github" / "workflows" / "pipeline.yml").read_text(encoding="utf-8")
     )["jobs"]
     assert workflow["source-alerts"]["permissions"]["issues"] == "write"
-    closing = yaml.dump(workflow["close-failure"])
+    closing = yaml.dump(workflow["close-failure"]["steps"])
     assert "pipeline-failure" in closing
     assert alerts.LABEL not in closing
+
+
+def test_every_alert_and_failure_job_waits_for_the_source_alerts_job():
+    jobs = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "pipeline.yml").read_text(encoding="utf-8")
+    )["jobs"]
+    for name in ("report-failure", "close-failure", "heartbeat"):
+        assert "source-alerts" in jobs[name]["needs"], name
+
+
+def test_the_alert_job_runs_on_main_only():
+    jobs = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "pipeline.yml").read_text(encoding="utf-8")
+    )["jobs"]
+    assert jobs["source-alerts"]["if"].startswith("github.ref == 'refs/heads/main' &&")
+    assert jobs["source-alerts"]["if"] == jobs["publish"]["if"]
+
+
+def test_a_missing_alerts_file_is_a_user_error_that_names_the_file(tmp_path):
+    missing = tmp_path / "alerts.json"
+    with pytest.raises(UserError, match="alerts.json"):
+        alerts.sync(missing, "https://run", lambda args: "[]")
