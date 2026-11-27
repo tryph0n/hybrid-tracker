@@ -93,6 +93,15 @@ upstream label also stops the ingest, in the adapter or in `validate`.
 If the drop is a real correction, delete `clean/<name>.parquet` in the raw
 store, then run `uv run tracker ingest <name>`.
 
+`ingest live` and `ingest static` do not stop at the first source that fails,
+whatever the error: the source keeps its last clean table, the others are
+refreshed, and the command exits with code 0. The run summary names each failed
+source with its error, and the raw store keeps the error in
+`failures/<name>.json`, which `tracker quality` reads. The next successful
+refresh of the source clears this record. A source that you name alone, and an
+error of the raw store, still fail the command. Until the alert issues exist, a
+failed source shows only in the run summary.
+
 To apply a mapping fix, use `uv run tracker rebuild` (every source) or
 `uv run tracker rebuild <name>`. It reads the latest stored payload of each
 file, runs `normalize()`, validates, and writes the clean table. It downloads
@@ -477,7 +486,7 @@ A failed run shows a red job in Actions. Read the log of that job first.
 | Failed job | Likely cause | Action |
 |---|---|---|
 | Lint | Style error | Run `uv run ruff check --fix . && uv run ruff format .` and commit. |
-| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | Old data stays and the later jobs skip. Run `uv run tracker ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
+| Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | The source keeps its last clean table and the other sources go on: the run stays green and the run summary names the source with its error. Run `uv run tracker ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
 | Data, build or tests | An adapter bug, or a published table that breaks the schema. The error usually names the column. | Find the cause, fix it, push. |
 | Docs, architecture | The page does not match the code | Run `uv run python scripts/architecture.py` and commit the page. |
 | Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `uv run sphinx-build` command above and read the warning. |

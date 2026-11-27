@@ -9,7 +9,7 @@ from conftest import FIXTURES, recorded_payloads
 
 from tracker import cli, clock, eodi, ingest, sources
 from tracker.schema import read_csv
-from tracker.store import LocalBackend, Payload, Store, open_store
+from tracker.store import LocalBackend, Payload, Store, StoreError, open_store
 
 HEADER = (
     "event_id,source,date,end_date,date_precision,countries,place,lat,lon,"
@@ -611,3 +611,118 @@ def test_a_source_without_a_date_records_none(store, monkeypatch, eodi_events):
     serve(monkeypatch, "eodi", eodi_events)
     ingest.ingest("eodi", store)
     assert lineage_of(store, "eodi")["updated_by_source"] is None
+
+
+def serve_failing(monkeypatch, name: str, error: Exception) -> None:
+    """Make source `name` fail its download with `error`."""
+
+    def extract():
+        raise error
+
+    source = dataclasses.replace(sources.SOURCES[name], extract=extract)
+    monkeypatch.setitem(sources.SOURCES, name, source)
+
+
+def two_live_sources(tmp_path, monkeypatch):
+    """A local store where `leiden` is live and `eodi` fills a clean table first."""
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
+    monkeypatch.setitem(
+        sources.SOURCES,
+        "leiden",
+        dataclasses.replace(sources.SOURCES["leiden"], kind="live"),
+    )
+    serve_recorded(monkeypatch, "eodi")
+    serve_recorded(monkeypatch, "leiden")
+    cli.main(["ingest", "live"])
+    return open_store()
+
+
+def test_a_failed_download_does_not_stop_the_other_sources(tmp_path, monkeypatch):
+    store = two_live_sources(tmp_path, monkeypatch)
+    before = clean_bytes(store, "eodi")
+    leiden_before = clean_bytes(store, "leiden")
+    (tmp_path / "store" / ingest.clean_path("leiden")).unlink()
+
+    serve_failing(monkeypatch, "eodi", RuntimeError("HTTP 500"))
+    cli.main(["ingest", "live"])
+
+    assert clean_bytes(store, "eodi") == before
+    assert clean_bytes(store, "leiden") == leiden_before
+    summary = (tmp_path / "summary.md").read_text()
+    assert "`eodi`: RuntimeError: HTTP 500" in summary
+    failure = ingest.read_failure("eodi", store)
+    assert failure is not None and failure["error"] == "RuntimeError: HTTP 500"
+    assert ingest.read_failure("leiden", store) is None
+
+
+def test_a_shrink_guard_rejection_does_not_stop_the_other_sources(
+    tmp_path, monkeypatch, eodi_events
+):
+    store = two_live_sources(tmp_path, monkeypatch)
+    before = clean_bytes(store, "eodi")
+    (tmp_path / "store" / ingest.clean_path("leiden")).unlink()
+    serve(monkeypatch, "eodi", eodi_events.head(1))
+
+    cli.main(["ingest", "live"])
+
+    assert clean_bytes(store, "eodi") == before
+    assert clean_bytes(store, "leiden") is not None
+    failure = ingest.read_failure("eodi", store)
+    assert failure is not None and "events" in failure["error"]
+    assert "`eodi`" in (tmp_path / "summary.md").read_text()
+
+
+def test_a_mapping_error_does_not_stop_the_other_sources(tmp_path, monkeypatch):
+    store = two_live_sources(tmp_path, monkeypatch)
+    before = clean_bytes(store, "eodi")
+    (tmp_path / "store" / ingest.clean_path("leiden")).unlink()
+
+    def broken(files):
+        raise ValueError("Unknown category 'balloon'")
+
+    monkeypatch.setitem(
+        sources.SOURCES,
+        "eodi",
+        dataclasses.replace(sources.SOURCES["eodi"], normalize=broken),
+    )
+    cli.main(["ingest", "live"])
+
+    assert clean_bytes(store, "eodi") == before
+    assert clean_bytes(store, "leiden") is not None
+    failure = ingest.read_failure("eodi", store)
+    assert failure is not None and "Unknown category" in failure["error"]
+
+
+def test_a_later_success_clears_the_failure_record(tmp_path, monkeypatch):
+    store = two_live_sources(tmp_path, monkeypatch)
+    serve_failing(monkeypatch, "eodi", RuntimeError("HTTP 500"))
+    cli.main(["ingest", "live"])
+    assert ingest.read_failure("eodi", store) is not None
+
+    serve_recorded(monkeypatch, "eodi")
+    cli.main(["ingest", "live"])
+    assert ingest.read_failure("eodi", store) is None
+
+
+def test_a_source_named_alone_still_fails_the_command(tmp_path, monkeypatch):
+    two_live_sources(tmp_path, monkeypatch)
+    serve_failing(monkeypatch, "eodi", RuntimeError("HTTP 500"))
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        cli.main(["ingest", "eodi"])
+
+
+def test_a_raw_store_that_cannot_be_written_still_fails_the_ingest(
+    tmp_path, monkeypatch
+):
+    store = two_live_sources(tmp_path, monkeypatch)
+
+    def refuse(files, message):
+        raise StoreError("raw store is read only")
+
+    monkeypatch.setattr(store.backend, "commit", refuse)
+    monkeypatch.setattr(ingest, "open_store", lambda: store)
+    serve_recorded(monkeypatch, "eodi")
+    with pytest.raises(SystemExit, match="raw store is read only"):
+        cli.main(["ingest", "live"])
