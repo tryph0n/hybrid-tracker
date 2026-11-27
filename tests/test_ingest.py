@@ -13,8 +13,8 @@ from tracker.store import LocalBackend, Payload, Store, StoreError, open_store
 
 HEADER = (
     "event_id,source,date,end_date,date_precision,countries,place,lat,lon,"
-    "geo_precision,domain,category,subcategory,title,event_status,actors,"
-    "actor_name,attribution,attributed_by,url\n"
+    "geo_precision,domain,category,subcategory,title,event_status,"
+    "drone_presence,actors,actor_name,attribution,attributed_by,url\n"
 )
 
 pytestmark = pytest.mark.disable_socket
@@ -114,7 +114,7 @@ def test_ingest_rejects_a_blank_required_cell(store, monkeypatch, eodi_events):
 def test_read_csv_keeps_the_namibia_code(tmp_path):
     row = (
         "eodi:X,eodi,2025-01-01,,day,NA,Windhoek,,,place,other,unclassified,x,"
-        "Title,confirmed,,,none,,https://e\n"
+        "Title,confirmed,,,,none,,https://e\n"
     )
     path = tmp_path / "eodi.csv"
     path.write_text(HEADER + row, encoding="utf-8")

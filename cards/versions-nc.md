@@ -7,6 +7,13 @@ never moved.
 
 This dataset starts with schema 2.1.0. It has no earlier version.
 
+### 2.6.0
+
+One new column in `events`, the same as in the other dataset: `drone_presence`.
+The values of `event_status` of the EODI rows change as described in its
+"Versions" section. The column `drone_presence` is empty in the rows of the versions before this one.
+The tag `v2.6.0` is on the commit of the first upload.
+
 ### 2.5.0
 
 One new column in the `quality` table, the same as in the other dataset:

@@ -10,7 +10,7 @@ import pandas as pd
 
 from tracker.errors import UserError
 
-SCHEMA_VERSION = "2.5.0"
+SCHEMA_VERSION = "2.6.0"
 
 # Column order of the clean and published tables.
 COLUMNS = [
@@ -29,6 +29,7 @@ COLUMNS = [
     "subcategory",  # the source's own label, untouched
     "title",  # one-line description in English
     "event_status",  # one of EVENT_STATUSES: is the event itself established?
+    "drone_presence",  # one of DRONE_PRESENCES: does an authority attribute it to a drone? Empty when the source has no such field
     "actors",  # linked states, ISO 3166-1 alpha-2 codes joined by ";", empty when attribution is none
     "actor_name",  # unit or group, for example "APT28"
     "attribution",  # one of ATTRIBUTIONS: who attributes the event to the actors?
@@ -100,8 +101,13 @@ CATEGORY_DOMAINS = {
     "unclassified": "other",
 }
 
-# "dismissed": the source itself concluded there was no event (e.g. no drone).
+# "dismissed": the source or an authority denies that the incident happened.
+# A drone that is missing or ruled out does not dismiss an incident: see
+# DRONE_PRESENCES.
 EVENT_STATUSES = ["confirmed", "unconfirmed", "dismissed"]
+
+# EODI's own four words for the drone presence, a fact apart from the event status.
+DRONE_PRESENCES = ["confirmed", "not_confirmed", "not_substantiated", "ruled_out"]
 
 # "official": a government, prosecutor, court or intelligence service named the state.
 # "assessed": the source's analysts or a security vendor judge the state responsible.
@@ -186,6 +192,7 @@ ALLOWED_VALUES = {
     "domain": DOMAINS,
     "category": CATEGORIES,
     "event_status": EVENT_STATUSES,
+    "drone_presence": DRONE_PRESENCES,
     "attribution": ATTRIBUTIONS,
 }
 
@@ -231,13 +238,13 @@ def validate(events: pd.DataFrame) -> None:
     Checks, in order: the columns and their order are exactly `COLUMNS`; there
     is at least one row; no `REQUIRED` cell is missing (NaN, None, or an empty
     or whitespace-only string); `event_id` is unique; `ALLOWED_VALUES`
-    columns hold allowed values; each `category` belongs to the row's
-    `domain`; non-empty `countries` and `actors` match `COUNTRIES_PATTERN`
-    and `ACTORS_PATTERN`; `actors` is empty exactly when `attribution` is
-    "none"; `date` parses with `pd.to_datetime` and `%Y-%m-%d` (so "2025-1-5"
-    passes); a non-empty `end_date` parses the same way and is not before
-    `date`; `lat` and `lon` are both set or both missing, and in range when
-    set.
+    columns hold allowed values (a column outside `REQUIRED` may be empty);
+    each `category` belongs to the row's `domain`; non-empty `countries` and
+    `actors` match `COUNTRIES_PATTERN` and `ACTORS_PATTERN`; `actors` is
+    empty exactly when `attribution` is "none"; `date` parses with
+    `pd.to_datetime` and `%Y-%m-%d` (so "2025-1-5" passes); a non-empty
+    `end_date` parses the same way and is not before `date`; `lat` and `lon`
+    are both set or both missing, and in range when set.
 
     Args:
         events: The events of one source or of all sources.
@@ -260,7 +267,10 @@ def validate(events: pd.DataFrame) -> None:
         raise UserError("Duplicate event_id")
 
     for column, allowed in ALLOWED_VALUES.items():
-        unknown = set(events[column]) - set(allowed)
+        values = events[column]
+        if column not in REQUIRED:
+            values = values[values.notna() & (values.astype(str).str.strip() != "")]
+        unknown = set(values) - set(allowed)
         if unknown:
             raise UserError(f"Unknown {column} values: {sorted(unknown)}")
 

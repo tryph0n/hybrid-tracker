@@ -12,6 +12,19 @@ The branch `main` holds `events.parquet`, `events.csv`, `sources.parquet` and
 the quality table, and no longer holds `eodi.csv` or `leiden.csv`. To read a
 tag, use the file names of that tag.
 
+### 2.6.0
+
+One new column in `events`: `drone_presence`. It gives whether an authority
+attributes the incident to a drone: `confirmed`, `not_confirmed`,
+`not_substantiated` or `ruled_out`, the four words of the EODI field
+`presencia_dron`. It is empty for a source that has no such field (Leiden), and
+in the rows of the versions before this one. The values of `event_status` of the
+EODI rows change: they now come from the EODI field `estado` (confirmed and
+attributed give `confirmed`, reported gives `unconfirmed`), no longer from the
+drone presence. An incident with a ruled-out drone is no longer `dismissed`. It
+changes no column of `sources`, `quality` or `threat_actors`. The tag `v2.6.0`
+is on the commit of the first upload.
+
 ### 2.5.0
 
 One new column in the `quality` table: `cause`. It gives why a source needs

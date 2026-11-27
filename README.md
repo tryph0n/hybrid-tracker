@@ -32,10 +32,13 @@ publishes the two datasets, then updates the dashboard. See the
 ## Reading the data
 
 A reported incident is not a confirmed one, and a confirmed one is not an
-attribution. Three fields keep these questions apart:
+attribution. Four fields keep these questions apart:
 
 - `event_status`: is the event itself established (`confirmed`, `unconfirmed`,
-  `dismissed`)?
+  `dismissed`)? For EODI it comes from the field `estado`.
+- `drone_presence`: does an authority attribute the incident to a drone
+  (`confirmed`, `not_confirmed`, `not_substantiated`, `ruled_out`)? It is a fact
+  apart from `event_status`, and it is empty for a source with no such field.
 - `actors`: which states a source links to the event (ISO codes joined by ";").
   It is empty when nobody attributes the event.
 - `attribution`: how strong that link is (`official` authority, `assessed` by
@@ -45,7 +48,7 @@ attribution. Three fields keep these questions apart:
 `domain` groups the events (air, sabotage, violence, maritime, cyber,
 information, espionage, other), and `category` refines it.
 
-The data has a version, 2.1.0 today. The first version (1.0.0) used other
+The data has a version, 2.6.0 today. The first version (1.0.0) used other
 column names. It stays readable at the tag `v1.0.0` of the dataset, for example
 `pd.read_csv("hf://datasets/sam-bot/europe-hybrid-incidents@v1.0.0/eodi.csv")`.
 See the

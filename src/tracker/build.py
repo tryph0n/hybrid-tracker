@@ -232,7 +232,9 @@ def prepare(
     hold those only.
 
     `clean` casts each column to its published type: pandas writes a column
-    with no value as `double`, and the union must not inherit that. `geocode`
+    with no value as `double`, and the union must not inherit that. A column
+    that no stored table has (`drone_presence` before the first ingest of
+    each source after the schema change) is read as empty. `geocode`
     is the lookup of `tracker.geonames`, and `fold` is its name folding.
     """
     con.create_function("fold", geonames.fold, [VARCHAR], VARCHAR)
@@ -240,9 +242,15 @@ def prepare(
     con.execute("CREATE TABLE geocode AS SELECT * FROM geocode_frame")
     con.unregister("geocode_frame")
     files = [str(work / f"{name}.parquet") for name in names]
+    stored = {
+        row[0]
+        for row in con.execute(
+            "DESCRIBE SELECT * FROM read_parquet(?, union_by_name=true)", [files]
+        ).fetchall()
+    }
     columns = ", ".join(
-        f"CAST({column} AS {'DOUBLE' if column in NUMERIC_COLUMNS else 'VARCHAR'}) "
-        f"AS {column}"
+        f"CAST({column if column in stored else 'NULL'} "
+        f"AS {'DOUBLE' if column in NUMERIC_COLUMNS else 'VARCHAR'}) AS {column}"
         for column in COLUMNS
     )
     con.execute(

@@ -636,3 +636,35 @@ def test_the_open_clusters_use_no_row_of_a_nc_source(
     assert open_.loc[eodi.iloc[0], "n_sources"] == 1
     assert open_.loc[eodi.iloc[0], "is_canonical"]
     assert set(open_["cluster_id"]) <= set(open_.index)
+
+
+def test_a_stored_table_without_drone_presence_is_read_as_empty(store, tmp_path):
+    put_clean(store, "leiden", fixture_events("leiden").drop(columns="drone_presence"))
+
+    events = build_events(store, tmp_path)
+
+    leiden = events[events["source"] == "leiden"]
+    assert len(leiden) == len(fixture_events("leiden"))
+    assert leiden["drone_presence"].isna().all()
+    eodi_rows = events[events["source"] == "eodi"]
+    expected = fixture_events("eodi").set_index("event_id")["drone_presence"]
+    assert eodi_rows["drone_presence"].to_dict() == expected.to_dict()
+
+
+def test_a_build_on_tables_that_all_lack_drone_presence_gives_an_empty_column(
+    store, tmp_path
+):
+    for name in sources.SOURCES:
+        put_clean(store, name, fixture_events(name).drop(columns="drone_presence"))
+
+    events = build_events(store, tmp_path)
+
+    assert list(events.reset_index().columns) == PUBLISHED_COLUMNS
+    assert events["drone_presence"].isna().all()
+
+
+def test_a_stored_table_without_a_required_column_fails_the_build(store, tmp_path):
+    put_clean(store, "leiden", fixture_events("leiden").drop(columns="title"))
+
+    with pytest.raises(ValueError, match="without title"):
+        build_events(store, tmp_path)

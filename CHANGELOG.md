@@ -10,6 +10,10 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Added
 
+- Schema 2.6.0: the column `drone_presence` (`confirmed`, `not_confirmed`,
+  `not_substantiated`, `ruled_out`) holds the EODI field `presencia_dron`. It is
+  empty for Leiden. The build reads a stored clean table that has no such column as
+  empty.
 - Under the map of the Incidents view, a bar chart shows the incidents with a country and
   no point on the map: one bar for each state of the European list, stacked by domain.
   The part of a bar that comes from incidents that name several countries is hatched.
@@ -33,9 +37,16 @@ The version number is set by hand in `pyproject.toml` only.
   the dashboard counts incidents, not rows. The curation files are
   `curation/merges.csv` and `curation/splits.csv`. RapidFuzz is a new
   dependency.
+- The Events table and the map hover show the drone presence ("Confirmed", "Not
+  confirmed", "Not substantiated", "Ruled out"). A published table that has no
+  `drone_presence` column shows it empty. The help of the Event status filter says that
+  a dismissed event is one that a source or an authority denies.
 
 ### Changed
 
+- The `event_status` of an EODI row comes from the EODI field `estado`, no longer
+  from the drone presence: an incident with a ruled-out drone is `confirmed`, not
+  `dismissed`. The app does not show the new column yet.
 - The KPI "Countries", the Countries view and "Most affected countries" count only
   the 43 states of the European list of decision record 0002. The help of the KPI
   names the other states that the incidents name, with their counts.
