@@ -20,6 +20,7 @@ import logging
 import ssl
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,7 @@ from tracker.ingest import (
     read_lineage,
     without_commit,
 )
-from tracker.store import Payload, Store
+from tracker.store import MAX_FILES_PER_COMMIT, Payload, Store
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,18 @@ TIMEOUT = 60
 RECHECK_DAYS = 7
 FIRST_RUN_LOOKBACK = 14
 MAX_PAYLOADS_PER_SAVE = 50
+FIRST_DAY = date(2022, 1, 1)
+"""First day of the source."""
+HISTORY_PAYLOADS_PER_SAVE = MAX_FILES_PER_COMMIT - 9
+"""Payloads per commit of the history run. A commit also holds the month files
+of the months that the chunk before it closed, the lineage record and the
+manifest. A chunk of 90 days touches at most 4 months, so a commit holds at most
+4 month files (5 when it also repairs a month, see `history`), the record and
+the manifest: 7 files, and 2 more are kept free, so a commit stays at or under
+`MAX_FILES_PER_COMMIT`."""
+MAX_HISTORY_COMMITS = 25
+"""Commits that add payloads in one history run, so one run makes at most this
+number plus one commit for the last month files."""
 LAT_RANGE = (34.0, 72.0)
 LON_RANGE = (-25.0, 45.0)
 COLUMNS = [
@@ -145,9 +158,10 @@ def fetch_days(
         when `skip_missing` is set).
 
     Raises:
-        OSError: A TLS check failed (`ssl.SSLCertVerificationError`), a request
-            failed, or the status of a day is not 200 (a day not published yet
-            gives 404, unless `skip_missing` is set).
+        OSError: A request failed (a TLS check, a timeout, a cut answer, a body
+            that is not valid brotli), or the status of a day is not 200 (a day
+            not published yet gives 404, unless `skip_missing` is set). The
+            message starts with the day, and `__cause__` is the first error.
     """
     started = time.monotonic()
     connection = http.client.HTTPSConnection(
@@ -158,23 +172,29 @@ def fetch_days(
         for day in days:
             path = HEATMAP_PATH.format(day=day)
             url = f"https://{host}{path}"
-            connection.request("GET", path, headers=HEADERS)
-            response = connection.getresponse()
-            body = response.read()
+            try:
+                connection.request("GET", path, headers=HEADERS)
+                response = connection.getresponse()
+                body = response.read()
+            except (OSError, http.client.HTTPException) as error:
+                raise OSError(f"{day}: {url}: {error!r}") from error
             if response.status == 404 and skip_missing:
                 logger.info("stanford: %s not published yet", day)
                 continue
             if response.status != 200:
-                raise OSError(f"{url}: HTTP {response.status}")
-            payloads.append(
-                make_payload(
-                    day,
-                    url,
-                    response.status,
-                    body,
-                    response.getheader("Content-Encoding", ""),
+                raise OSError(f"{day}: {url}: HTTP {response.status}")
+            try:
+                payloads.append(
+                    make_payload(
+                        day,
+                        url,
+                        response.status,
+                        body,
+                        response.getheader("Content-Encoding", ""),
+                    )
                 )
-            )
+            except (OSError, brotli.error) as error:
+                raise OSError(f"{day}: {url}: {error!r}") from error
     finally:
         connection.close()
     logger.info(
@@ -383,34 +403,35 @@ def context_table(files: Mapping[str, bytes]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def write_months(store: Store, months: Collection[str]) -> list[str]:
-    """Write the month files of the context table and its lineage record.
+def month_commit(store: Store, months: Collection[str]) -> dict[str, bytes]:
+    """The files to commit for the month files of the context table and its lineage record.
 
     Each month is built from the stored days of that month only. All the months
-    are reduced first: if one fails, nothing is written, so a download that the
+    are reduced first: if one fails, nothing is returned, so a download that the
     mapping refuses changes neither the month files nor the record. A month file
-    whose bytes do not change is not written. The changed files and the record
-    (`ingest.lineage_path`) go in one commit; the record alone goes in a commit
-    when only it changed, which is the case of an accepted download of the same
-    files. Its `downloaded_at` is the time of the newest download of the days of
-    these months, which `tracker quality` copies.
+    whose bytes do not change is left out. The record (`ingest.lineage_path`) is
+    in the result when a month file changed or the record alone changed, which is
+    the case of an accepted download of the same files. Its `downloaded_at` is
+    the time of the newest download of the days of these months, which
+    `tracker quality` copies.
 
-    The record covers the months of this run only: its `rows` and `payloads` are
-    those of these months, not of the whole table. Code that reads the record
-    must not take `rows` as the size of the table.
+    The record covers these months only: its `rows` and `payloads` are those of
+    these months, not of the whole table. Code that reads the record must not
+    take `rows` as the size of the table.
 
     Args:
         store: The raw store, which holds the clean store.
         months: The months to build, as `fetched_months` returns them.
 
     Returns:
-        The month file paths written, sorted.
+        Path to bytes: the changed month files and the record, empty when
+        nothing changed.
 
     Raises:
         UserError: A stored day fails `reduce_day`.
     """
     if not months:
-        return []
+        return {}
     files: dict[str, bytes] = {}
     contents: dict[str, bytes] = {}
     rows = 0
@@ -429,17 +450,45 @@ def write_months(store: Store, months: Collection[str]) -> list[str]:
     }
     record = lineage(SOURCE, files, store, rows)
     if written or without_commit(read_lineage(SOURCE, store)) != without_commit(record):
+        return {**written, lineage_path(SOURCE): encode_lineage(record)}
+    return {}
+
+
+def write_months(store: Store, months: Collection[str]) -> list[str]:
+    """Write the month files of `month_commit` in one commit.
+
+    Args:
+        store: The raw store, which holds the clean store.
+        months: The months to build, as `fetched_months` returns them.
+
+    Returns:
+        The month file paths written, sorted.
+
+    Raises:
+        UserError: A stored day fails `reduce_day`.
+    """
+    files = month_commit(store, months)
+    written = sorted(path for path in files if path != lineage_path(SOURCE))
+    if files:
         store.backend.commit(
-            {**written, lineage_path(SOURCE): encode_lineage(record)},
-            f"clean: {SOURCE} table, {len(written)} month file(s)",
+            files, f"clean: {SOURCE} table, {len(written)} month file(s)"
         )
     logger.info("stanford: %d month file(s) written", len(written))
-    return sorted(written)
+    return written
 
 
 def stored_months(store: Store) -> list[str]:
     """The months of the stored days, oldest first, as `YYYY-MM`."""
     return sorted({month_of(day) for day in stored_days(store)})
+
+
+def months_without_file(store: Store) -> set[str]:
+    """The months that have a stored day and no month file in the clean store."""
+    return {
+        month
+        for month in stored_months(store)
+        if store.backend.read(month_path(month)) is None
+    }
 
 
 def table_days(store: Store) -> pd.DataFrame | None:
@@ -456,16 +505,123 @@ def table_days(store: Store) -> pd.DataFrame | None:
 
 
 def new_day_stored_at(store: Store) -> pd.Timestamp | None:
-    """Time of the latest run that stored a day for the first time, None if none did.
+    """Time of the latest run that stored a day newer than all earlier days, None if none did.
 
-    A run that stores a new file of a day already held, or that fetches days
-    again with no change, does not count.
+    A run that stores a new file of a day already held, that fetches days again
+    with no change, or that stores only days older than the newest day held
+    (the history run) does not count: the source published no new day.
     """
-    first: dict[str, pd.Timestamp] = {}
+    runs: dict[pd.Timestamp, list[date]] = {}
+    seen: set[str] = set()
     for line in store.payloads(SOURCE):
-        fetched = pd.Timestamp(line["fetched_at"])
-        first[line["name"]] = min(fetched, first.get(line["name"], fetched))
-    return max(first.values()) if first else None
+        if line["name"] not in seen:
+            seen.add(line["name"])
+            runs.setdefault(pd.Timestamp(line["fetched_at"]), []).append(
+                day_of(line["name"])
+            )
+    newest: date | None = None
+    found: pd.Timestamp | None = None
+    for fetched, days in sorted(runs.items()):
+        if newest is None or max(days) > newest:
+            found = fetched
+            newest = max(days)
+    return found
+
+
+@dataclass(frozen=True)
+class History:
+    """The result of `history`."""
+
+    stored: int
+    missing: list[date]
+    seconds: float
+    size: int
+
+
+def history(store: Store, fetch: Fetcher | None = None) -> History:
+    """Fetch the days before the first stored day, back to `FIRST_DAY`, and save them.
+
+    The days go newest first, `HISTORY_PAYLOADS_PER_SAVE` per fetch and per
+    commit, so a stopped run leaves the days stored without a gap before the
+    first stored day, and a rerun asks only for the days before it. A run makes
+    at most `MAX_HISTORY_COMMITS` commits that add payloads, and one last commit
+    for the month files: a longer history needs a rerun. A day that is not
+    published (404) is listed in the result and the run goes on.
+
+    A month is complete once a chunk reaches an older month. Its month file goes
+    in the commit of the next chunk, beside the payloads, so a run makes about
+    one commit per chunk. The run holds the decoded days of the months of one
+    commit at a time. The months still open at the end of the run, or when it
+    stops, are written in one last commit, so a stop keeps the month files of
+    its stored days. If an earlier run was killed between two commits, the months
+    that have stored days and no month file are written in the first commit of
+    this run (the month that the first chunk continues is written when it closes).
+
+    Args:
+        store: The raw store. It must hold a day (the daily ingest ran).
+        fetch: Fetches days and leaves out the missing ones. Default:
+            `fetch_days` with `skip_missing`.
+
+    Returns:
+        The days stored, the days that are not published, the time of the run
+        and the bytes added to the raw store.
+
+    Raises:
+        UserError: The store holds no day, or a fetch failed: a TLS error, a
+            timeout, a bad status, a cut answer (the message has the day and the
+            error). A stored day that `reduce_day` refuses also stops the run.
+    """
+    fetch = fetch or functools.partial(fetch_days, skip_missing=True)
+    stored = stored_days(store)
+    if not stored:
+        raise UserError("stanford: the store holds no day, run `tracker ingest` first")
+    started = time.monotonic()
+    wanted = [
+        stored[0] - timedelta(days=n)
+        for n in range(1, (stored[0] - FIRST_DAY).days + 1)
+    ]
+    limit = MAX_HISTORY_COMMITS * HISTORY_PAYLOADS_PER_SAVE
+    if len(wanted) > limit:
+        logger.info("stanford: %d day(s) left for a rerun", len(wanted) - limit)
+        wanted = wanted[:limit]
+    stored_count = 0
+    missing: list[date] = []
+    size = 0
+    pending = months_without_file(store)
+    try:
+        for start in range(0, len(wanted), HISTORY_PAYLOADS_PER_SAVE):
+            chunk = wanted[start : start + HISTORY_PAYLOADS_PER_SAVE]
+            payloads = fetch(chunk)
+            got = {day_of(payload.name) for payload in payloads}
+            missing.extend(day for day in chunk if day not in got)
+            closed = pending - {month_of(chunk[0])} if payloads else set()
+            extra = month_commit(store, closed)
+            saved = store.save_many(payloads, extra) if payloads else []
+            stored_count += len(saved)
+            pending -= closed
+            pending.update(fetched_months(saved))
+            size += sum(
+                len(payload.content)
+                for payload, line in zip(payloads, saved, strict=True)
+                if line["stored"]
+            )
+    except (OSError, http.client.HTTPException, brotli.error) as error:
+        write_months(store, pending)
+        raise UserError(f"stanford history stopped: {error}") from error
+    write_months(store, pending)
+    return History(stored_count, sorted(missing), time.monotonic() - started, size)
+
+
+def history_summary(result: History) -> str:
+    """The Markdown for the run summary: days stored, missing days, time and size."""
+    gaps = ", ".join(f"{day}" for day in result.missing) or "none"
+    return (
+        "### Stanford history\n\n"
+        f"- Days stored: {result.stored}\n"
+        f"- Missing days (404): {len(result.missing)} ({gaps})\n"
+        f"- Time: {result.seconds:.0f} s\n"
+        f"- Added to the raw store: {result.size / 1e6:.1f} MB\n"
+    )
 
 
 def ingest_days(store: Store) -> None:

@@ -5,7 +5,7 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from tracker import alerts, build, ingest, publish, quality
+from tracker import alerts, build, ingest, publish, quality, stanford
 from tracker.errors import UserError
 from tracker.sources import FAMILIES, REFERENCES, SOURCES
 from tracker.store import StoreError, open_store
@@ -32,6 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--if-missing",
         action="store_true",
         help="skip a source that already has a clean table in the raw store",
+    )
+    commands.add_parser(
+        "history",
+        help="fetch the Stanford days before the first stored day, back to 1 January 2022",
     )
     rebuild_parser = commands.add_parser(
         "rebuild",
@@ -115,6 +119,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             failures = ingest.run(args.target, args.if_missing)
             if failures:
                 quality.write_summary(ingest.failure_summary(failures))
+        elif args.command == "history":
+            result = stanford.history(open_store())
+            quality.write_summary(stanford.history_summary(result))
         elif args.command == "rebuild":
             ingest.rebuild(args.source, open_store(), args.allow_shrink)
         elif args.command == "build":

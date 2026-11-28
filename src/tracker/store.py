@@ -143,16 +143,20 @@ class Store:
         """Save one payload. Return its manifest line."""
         return self.save_many([payload])[0]
 
-    def save_many(self, payloads: Sequence[Payload]) -> list[dict[str, Any]]:
+    def save_many(
+        self, payloads: Sequence[Payload], extra: Mapping[str, bytes] | None = None
+    ) -> list[dict[str, Any]]:
         """Save payloads in one commit. Return one manifest line per payload.
 
         A payload identical to the latest stored one of the same source and file
         is not written again: only its manifest line is added, with `stored` false.
+        The files of `extra` (path to bytes) go in the same commit and count in
+        the limit of `MAX_FILES_PER_COMMIT`.
         """
         now = clock.utc_now()
         fetched_at = now.isoformat()
         manifests: dict[str, list[dict[str, Any]]] = {}
-        files: dict[str, bytes] = {}
+        files: dict[str, bytes] = dict(extra or {})
         lines: list[dict[str, Any]] = []
         for payload in payloads:
             _check_segment("source", payload.source)

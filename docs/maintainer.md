@@ -93,9 +93,22 @@ uv run tracker ingest static --if-missing # only the ones with no clean table
 uv run tracker ingest <name>    # one source, for example eodi
 uv run tracker ingest geonames  # the GeoNames file (reference data), by hand
 uv run tracker rebuild [<name>] # clean tables again from the stored payloads, no download
+uv run tracker history          # Stanford days before the first stored day, back to 2022-01-01
 uv run tracker build [--out build] # published tables of each licence family
 uv run tracker quality [--out build] # quality table and run summary
 ```
+
+`history` is a one-off run, started by hand with the `history` input of the
+`pipeline` workflow on `main`. It runs after the Data job, and no job needs
+it, except `report-failure`, which reports a failed run. The next build adds the
+history to the published files. It fetches the Stanford days newest first, at
+most 90 per commit and 25 commits that add payloads per run, and lists the days
+that return 404. The month files of the months that a chunk closes go in the
+commit of the next chunk, and the last months in one last commit, so a run
+makes at most 26 commits (about 21 for the whole history). After a stop, run it
+again: it asks only for the days before the first stored day, and it writes
+first the month files that a killed run left out. A day newer than all stored
+days is the only one that ends the stale cause of the source.
 
 `ingest` saves the payloads first, so a payload that fails to map stays in the
 raw store. It validates the events before it writes the clean table. It rejects a refresh that loses more than 5% of the stored events

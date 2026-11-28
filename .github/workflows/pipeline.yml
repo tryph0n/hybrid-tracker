@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "17 4 * * *" # every day at 04:17 UTC
   workflow_dispatch:
+    inputs:
+      history:
+        description: Fetch the Stanford history before the daily refresh
+        type: boolean
+        default: false
 
 # One run at a time: a data refresh and a code push must not race.
 # Pull requests get their own group so they never cancel a pending main run.
@@ -36,6 +41,30 @@ jobs:
         run: uv run ruff check . && uv run ruff format --check .
       - name: Type check
         run: uv run --locked mypy
+
+  # A manual run on main only, after the Data job. The Hugging Face token lasts 60
+  # minutes, so the job stops at 60. Only report-failure needs it, to see a failed run: its
+  # result cannot skip or stop the jobs after Data, and the next build adds the history
+  # to the published files.
+  history:
+    name: Stanford history
+    needs: data
+    if: github.event_name == 'workflow_dispatch' && inputs.history && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write # the raw store signs in with the run OIDC token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - name: Install
+        run: uv sync --locked
+      - name: Fetch the history
+        env:
+          TRACKER_STORE: hf
+          HF_OIDC_RESOURCE: datasets/sam-bot/hybrid-tracker-raw
+        run: uv run tracker history
 
   data:
     name: Data
@@ -347,11 +376,11 @@ jobs:
         run: uv run tracker publish nc
 
   # Alerts. They run on a scheduled or manual run only, never on a pull request
-  # or a push. Every job of the run is listed in needs, so a failure in any of
-  # them is seen. Each job does nothing until its secret is set, where it needs one.
+  # or a push. Every job of the run is listed in needs of report-failure, so a failure
+  # in any of them is seen. Each job does nothing until its secret is set, where it needs one.
   report-failure:
     name: Report failure
-    needs: [lint, data, docs, image, deploy, publish, source-alerts]
+    needs: [lint, data, docs, image, deploy, publish, source-alerts, history]
     if: failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5

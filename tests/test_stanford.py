@@ -169,8 +169,9 @@ def test_the_repository_holds_the_intermediate_certificate():
 @pytest.mark.enable_socket
 def test_the_fetch_fails_against_a_server_whose_certificate_is_not_trusted(tls_server):
     port, *_ = tls_server
-    with pytest.raises(ssl.SSLCertVerificationError):
+    with pytest.raises(OSError, match=f"{DAY}: ") as raised:
         stanford.fetch_days([DAY], stanford.tls_context(), "localhost", port)
+    assert isinstance(raised.value.__cause__, ssl.SSLCertVerificationError)
 
 
 @pytest.mark.enable_socket
