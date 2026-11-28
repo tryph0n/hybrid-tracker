@@ -43,8 +43,9 @@ jobs:
         run: uv run --locked mypy
 
   # A manual run on main only, after the Data job. The Hugging Face token lasts 60
-  # minutes, so the job stops at 60. No job needs it: its result cannot skip or stop
-  # the jobs after Data, and the next build adds the history to the published files.
+  # minutes, so the job stops at 60. Only report-failure needs it, to see a failed run: its
+  # result cannot skip or stop the jobs after Data, and the next build adds the history
+  # to the published files.
   history:
     name: Stanford history
     needs: data
@@ -375,11 +376,11 @@ jobs:
         run: uv run tracker publish nc
 
   # Alerts. They run on a scheduled or manual run only, never on a pull request
-  # or a push. Every job of the run is listed in needs, so a failure in any of
-  # them is seen. Each job does nothing until its secret is set, where it needs one.
+  # or a push. Every job of the run is listed in needs of report-failure, so a failure
+  # in any of them is seen. Each job does nothing until its secret is set, where it needs one.
   report-failure:
     name: Report failure
-    needs: [lint, data, docs, image, deploy, publish, source-alerts]
+    needs: [lint, data, docs, image, deploy, publish, source-alerts, history]
     if: failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5

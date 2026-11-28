@@ -87,6 +87,7 @@ flowchart LR
   job_deploy --> job_report_failure
   job_publish --> job_report_failure
   job_source_alerts --> job_report_failure
+  job_history --> job_report_failure
   job_data --> job_source_alerts
   job_lint --> job_close_failure
   job_data --> job_close_failure

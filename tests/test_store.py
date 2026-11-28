@@ -148,6 +148,16 @@ def test_too_many_files_in_one_commit_is_refused(local):
     assert local.manifest("eodi") == []
 
 
+def test_extra_files_go_in_the_commit_of_the_payloads_and_count_in_the_limit(local):
+    local.save_many([payload(b"x")], {"clean/a.bin": b"a"})
+    assert (local.backend.root / "clean/a.bin").read_bytes() == b"a"
+
+    many = [payload(bytes([i]), name=f"f{i}.bin") for i in range(97)]
+    with pytest.raises(StoreError, match="keep it under"):
+        local.save_many(many, {"clean/b.bin": b"b", "clean/c.bin": b"c"})
+    assert not (local.backend.root / "clean/b.bin").exists()
+
+
 def test_open_store_from_environment(tmp_path):
     chosen = open_store({"TRACKER_STORE": "local", "TRACKER_STORE_DIR": str(tmp_path)})
     assert isinstance(chosen.backend, LocalBackend)

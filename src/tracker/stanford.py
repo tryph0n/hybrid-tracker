@@ -58,10 +58,16 @@ FIRST_RUN_LOOKBACK = 14
 MAX_PAYLOADS_PER_SAVE = 50
 FIRST_DAY = date(2022, 1, 1)
 """First day of the source."""
-HISTORY_PAYLOADS_PER_SAVE = MAX_FILES_PER_COMMIT - 2
-"""Payloads per commit of the history run: the manifest of the commit fits
-beside them, and one more file is kept free."""
+HISTORY_PAYLOADS_PER_SAVE = MAX_FILES_PER_COMMIT - 9
+"""Payloads per commit of the history run. A commit also holds the month files
+of the months that the chunk before it closed, the lineage record and the
+manifest. A chunk of 90 days touches at most 4 months, so a commit holds at most
+4 month files (5 when it also repairs a month, see `history`), the record and
+the manifest: 7 files, and 2 more are kept free, so a commit stays at or under
+`MAX_FILES_PER_COMMIT`."""
 MAX_HISTORY_COMMITS = 25
+"""Commits that add payloads in one history run, so one run makes at most this
+number plus one commit for the last month files."""
 LAT_RANGE = (34.0, 72.0)
 LON_RANGE = (-25.0, 45.0)
 COLUMNS = [
@@ -397,34 +403,35 @@ def context_table(files: Mapping[str, bytes]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def write_months(store: Store, months: Collection[str]) -> list[str]:
-    """Write the month files of the context table and its lineage record.
+def month_commit(store: Store, months: Collection[str]) -> dict[str, bytes]:
+    """The files to commit for the month files of the context table and its lineage record.
 
     Each month is built from the stored days of that month only. All the months
-    are reduced first: if one fails, nothing is written, so a download that the
+    are reduced first: if one fails, nothing is returned, so a download that the
     mapping refuses changes neither the month files nor the record. A month file
-    whose bytes do not change is not written. The changed files and the record
-    (`ingest.lineage_path`) go in one commit; the record alone goes in a commit
-    when only it changed, which is the case of an accepted download of the same
-    files. Its `downloaded_at` is the time of the newest download of the days of
-    these months, which `tracker quality` copies.
+    whose bytes do not change is left out. The record (`ingest.lineage_path`) is
+    in the result when a month file changed or the record alone changed, which is
+    the case of an accepted download of the same files. Its `downloaded_at` is
+    the time of the newest download of the days of these months, which
+    `tracker quality` copies.
 
-    The record covers the months of this run only: its `rows` and `payloads` are
-    those of these months, not of the whole table. Code that reads the record
-    must not take `rows` as the size of the table.
+    The record covers these months only: its `rows` and `payloads` are those of
+    these months, not of the whole table. Code that reads the record must not
+    take `rows` as the size of the table.
 
     Args:
         store: The raw store, which holds the clean store.
         months: The months to build, as `fetched_months` returns them.
 
     Returns:
-        The month file paths written, sorted.
+        Path to bytes: the changed month files and the record, empty when
+        nothing changed.
 
     Raises:
         UserError: A stored day fails `reduce_day`.
     """
     if not months:
-        return []
+        return {}
     files: dict[str, bytes] = {}
     contents: dict[str, bytes] = {}
     rows = 0
@@ -443,17 +450,45 @@ def write_months(store: Store, months: Collection[str]) -> list[str]:
     }
     record = lineage(SOURCE, files, store, rows)
     if written or without_commit(read_lineage(SOURCE, store)) != without_commit(record):
+        return {**written, lineage_path(SOURCE): encode_lineage(record)}
+    return {}
+
+
+def write_months(store: Store, months: Collection[str]) -> list[str]:
+    """Write the month files of `month_commit` in one commit.
+
+    Args:
+        store: The raw store, which holds the clean store.
+        months: The months to build, as `fetched_months` returns them.
+
+    Returns:
+        The month file paths written, sorted.
+
+    Raises:
+        UserError: A stored day fails `reduce_day`.
+    """
+    files = month_commit(store, months)
+    written = sorted(path for path in files if path != lineage_path(SOURCE))
+    if files:
         store.backend.commit(
-            {**written, lineage_path(SOURCE): encode_lineage(record)},
-            f"clean: {SOURCE} table, {len(written)} month file(s)",
+            files, f"clean: {SOURCE} table, {len(written)} month file(s)"
         )
     logger.info("stanford: %d month file(s) written", len(written))
-    return sorted(written)
+    return written
 
 
 def stored_months(store: Store) -> list[str]:
     """The months of the stored days, oldest first, as `YYYY-MM`."""
     return sorted({month_of(day) for day in stored_days(store)})
+
+
+def months_without_file(store: Store) -> set[str]:
+    """The months that have a stored day and no month file in the clean store."""
+    return {
+        month
+        for month in stored_months(store)
+        if store.backend.read(month_path(month)) is None
+    }
 
 
 def table_days(store: Store) -> pd.DataFrame | None:
@@ -509,12 +544,18 @@ def history(store: Store, fetch: Fetcher | None = None) -> History:
     The days go newest first, `HISTORY_PAYLOADS_PER_SAVE` per fetch and per
     commit, so a stopped run leaves the days stored without a gap before the
     first stored day, and a rerun asks only for the days before it. A run makes
-    at most `MAX_HISTORY_COMMITS` commits: a longer history needs a rerun. A day
-    that is not published (404) is listed in the result and the run goes on.
-    The days go newest first, so a month is complete once a chunk reaches an
-    older month: the month files are written then, one commit at most per chunk,
-    and the run holds the decoded days of one month at a time. The month files
-    of the days stored are written also when the run stops.
+    at most `MAX_HISTORY_COMMITS` commits that add payloads, and one last commit
+    for the month files: a longer history needs a rerun. A day that is not
+    published (404) is listed in the result and the run goes on.
+
+    A month is complete once a chunk reaches an older month. Its month file goes
+    in the commit of the next chunk, beside the payloads, so a run makes about
+    one commit per chunk. The run holds the decoded days of the months of one
+    commit at a time. The months still open at the end of the run, or when it
+    stops, are written in one last commit, so a stop keeps the month files of
+    its stored days. If an earlier run was killed between two commits, the months
+    that have stored days and no month file are written in the first commit of
+    this run (the month that the first chunk continues is written when it closes).
 
     Args:
         store: The raw store. It must hold a day (the daily ingest ran).
@@ -546,25 +587,24 @@ def history(store: Store, fetch: Fetcher | None = None) -> History:
     stored_count = 0
     missing: list[date] = []
     size = 0
-    pending: set[str] = set()
+    pending = months_without_file(store)
     try:
         for start in range(0, len(wanted), HISTORY_PAYLOADS_PER_SAVE):
             chunk = wanted[start : start + HISTORY_PAYLOADS_PER_SAVE]
             payloads = fetch(chunk)
             got = {day_of(payload.name) for payload in payloads}
             missing.extend(day for day in chunk if day not in got)
-            saved = store.save_many(payloads) if payloads else []
+            closed = pending - {month_of(chunk[0])} if payloads else set()
+            extra = month_commit(store, closed)
+            saved = store.save_many(payloads, extra) if payloads else []
             stored_count += len(saved)
+            pending -= closed
             pending.update(fetched_months(saved))
             size += sum(
                 len(payload.content)
                 for payload, line in zip(payloads, saved, strict=True)
                 if line["stored"]
             )
-            closed = pending - {month_of(chunk[-1])}
-            if closed:
-                write_months(store, closed)
-                pending -= closed
     except (OSError, http.client.HTTPException, brotli.error) as error:
         write_months(store, pending)
         raise UserError(f"stanford history stopped: {error}") from error

@@ -54,31 +54,61 @@ def test_a_404_day_is_listed_and_the_run_stores_the_days_around_it(local):
     assert str(missing) in stanford.history_summary(result)
 
 
-@pytest.mark.disable_socket
-def test_each_commit_has_at_most_99_files_and_200_days_make_3_payload_commits(
-    tmp_path, monkeypatch
-):
-    commits = []
+class CountingBackend(LocalBackend):
+    """A local backend that records the paths of each commit."""
 
-    class CountingBackend(LocalBackend):
-        def commit(self, files, message):
-            commits.append([path for path in files if path.endswith(".json.br")])
-            commits[-1].append(len(files))
-            super().commit(files, message)
+    def __init__(self, root):
+        super().__init__(root)
+        self.commits = []
 
+    def commit(self, files, message):
+        self.commits.append(sorted(files))
+        super().commit(files, message)
+
+
+def counting_store(tmp_path, monkeypatch):
     monkeypatch.setattr(
         clock, "utc_now", lambda: pd.Timestamp("2026-11-24 04:17:00", tz="UTC")
     )
     counting = Store(CountingBackend(tmp_path))
     seed(counting, {FIRST_STORED: FIXTURE})
-    commits.clear()
+    counting.backend.commits.clear()
+    return counting
+
+
+def payload_files(commit):
+    return [path for path in commit if path.endswith(".json.br")]
+
+
+@pytest.mark.disable_socket
+def test_200_days_make_4_commits_with_month_files_beside_the_next_payloads(
+    tmp_path, monkeypatch
+):
+    counting = counting_store(tmp_path, monkeypatch)
 
     result = stanford.history(counting, fetcher(YEAR))
 
+    commits = counting.backend.commits
+    months = {stanford.month_of(day) for day in stanford.stored_days(counting)}
     assert result.stored == 200
-    adding = [commit for commit in commits if len(commit) > 1]
-    assert [len(commit) - 1 for commit in adding] == [97, 97, 6]
-    assert all(commit[-1] <= 99 for commit in commits)
+    assert [len(payload_files(commit)) for commit in commits] == [90, 90, 20, 0]
+    assert all(len(commit) <= 99 for commit in commits)
+    assert not any(stanford.month_path(month) in commits[0] for month in months)
+    assert any(path.startswith("clean/stanford/") for path in commits[1])
+    assert payload_files(commits[1])
+    written = {path for commit in commits for path in commit}
+    assert {stanford.month_path(month) for month in months} <= written
+
+
+@pytest.mark.disable_socket
+def test_the_history_commit_size_leaves_room_for_the_month_files_of_a_chunk():
+    chunk = stanford.HISTORY_PAYLOADS_PER_SAVE
+    first = date(2022, 1, 1)
+    worst = max(
+        len({stanford.month_of(first + timedelta(days=n + k)) for k in range(chunk)})
+        for n in range(1500)
+    )
+    assert worst + 1 + 1 + 1 <= stanford.MAX_FILES_PER_COMMIT - chunk
 
 
 @pytest.mark.disable_socket
@@ -97,9 +127,9 @@ def test_a_server_error_stops_the_run_with_the_day_and_a_rerun_fetches_only_the_
         stanford.history(local, fails_on_the_second_chunk)
 
     kept = stanford.stored_days(local)
-    assert len(kept) == 1 + 97
+    assert len(kept) == 1 + 90
     assert kept[:-1] == [
-        FIRST_STORED - timedelta(days=97) + timedelta(days=n) for n in range(97)
+        FIRST_STORED - timedelta(days=90) + timedelta(days=n) for n in range(90)
     ]
     asked = []
 
@@ -109,7 +139,7 @@ def test_a_server_error_stops_the_run_with_the_day_and_a_rerun_fetches_only_the_
 
     stanford.history(local, healthy)
 
-    assert asked == [kept[0] - timedelta(days=n) for n in range(1, 104)]
+    assert asked == [kept[0] - timedelta(days=n) for n in range(1, 111)]
     assert stanford.stored_days(local)[0] == YEAR_START
     assert len(stanford.stored_days(local)) == 201
 
@@ -126,8 +156,8 @@ def test_a_run_stops_at_the_commit_cap_and_a_rerun_goes_on(tmp_path, monkeypatch
     first = stanford.history(held, fetcher(YEAR))
     second = stanford.history(held, fetcher(YEAR))
 
-    assert first.stored == 2 * 97
-    assert second.stored == 200 - 2 * 97
+    assert first.stored == 2 * 90
+    assert second.stored == 200 - 2 * 90
 
 
 @pytest.mark.disable_socket
@@ -281,15 +311,10 @@ def test_a_timeout_a_cut_answer_or_a_bad_body_stops_the_run_with_the_day(
 
 
 @pytest.mark.disable_socket
-def test_a_stopped_run_has_the_month_files_of_its_stored_days(local, monkeypatch):
-    calls = []
-    write = stanford.write_months
-
-    def recording(store, months):
-        calls.append(sorted(months))
-        return write(store, months)
-
-    monkeypatch.setattr(stanford, "write_months", recording)
+def test_a_stopped_run_has_the_month_files_of_its_stored_days_in_one_last_commit(
+    tmp_path, monkeypatch
+):
+    counting = counting_store(tmp_path, monkeypatch)
     healthy = fetcher(YEAR)
     asked = []
 
@@ -300,15 +325,48 @@ def test_a_stopped_run_has_the_month_files_of_its_stored_days(local, monkeypatch
         return healthy(days)
 
     with pytest.raises(UserError, match="timed out"):
-        stanford.history(local, stops_on_the_third_chunk)
+        stanford.history(counting, stops_on_the_third_chunk)
 
-    kept = stanford.stored_days(local)
+    kept = stanford.stored_days(counting)
     months = sorted({stanford.month_of(day) for day in kept})
-    assert len(kept) == 1 + 2 * 97
+    commits = counting.backend.commits
+    assert len(kept) == 1 + 2 * 90
     assert all(
-        local.backend.read(stanford.month_path(month)) is not None for month in months
+        counting.backend.read(stanford.month_path(month)) is not None
+        for month in months
     )
+    assert [len(payload_files(commit)) for commit in commits] == [90, 90, 0]
+    assert stanford.month_path(stanford.month_of(asked[1][-1])) in commits[-1]
+
+
+@pytest.mark.disable_socket
+def test_a_rerun_writes_the_month_files_that_a_killed_run_left_out(
+    tmp_path, monkeypatch
+):
+    counting = counting_store(tmp_path, monkeypatch)
+    healthy = fetcher(YEAR)
+    asked = []
+
+    def killed_on_the_second_chunk(days):
+        asked.append(list(days))
+        if len(asked) == 2:
+            raise KeyboardInterrupt
+        return healthy(days)
+
+    with pytest.raises(KeyboardInterrupt):
+        stanford.history(counting, killed_on_the_second_chunk)
+
+    left_out = sorted(stanford.months_without_file(counting))
+    assert len(left_out) >= 3
+    counting.backend.commits.clear()
+
+    stanford.history(counting, healthy)
+
+    first = counting.backend.commits[0]
     open_month = stanford.month_of(asked[0][-1])
-    assert open_month not in calls[0]
-    assert any(open_month in call for call in calls[1:])
-    assert stanford.month_of(asked[1][-1]) in calls[-1]
+    closed = [month for month in left_out if month != open_month]
+    assert closed
+    assert all(stanford.month_path(month) in first for month in closed)
+    assert payload_files(first)
+    assert len(first) <= 99
+    assert stanford.months_without_file(counting) == set()
