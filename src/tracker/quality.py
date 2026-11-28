@@ -25,9 +25,11 @@ not apply to it. The run fails only when no source has a clean table.
 
 A context source (`Source.table`) has no events: its row counts the rows of its
 month files, gives the newest stored day as `latest_event_date`, and leaves the
-columns of events empty. Its `downloaded_at` is its last successful fetch, and
-it has a cause when no run stored a new day for more than `MAX_NEW_DAY_AGE_DAYS`
-days, since the days fetched again keep `last_fetch_at` recent.
+columns of events empty. Its `downloaded_at` comes from the record that
+`stanford.write_months` writes once it reduced the fetched months, blank when
+there is none. It has a cause when no run stored a new day for more than
+`MAX_NEW_DAY_AGE_DAYS` days, since the days fetched again keep `last_fetch_at`
+recent.
 """
 
 import io
@@ -187,6 +189,7 @@ def context_row(
     days: pd.DataFrame,
     fetched: pd.Timestamp | None,
     run_at: str,
+    lineage: Mapping[str, Any] | None = None,
     causes: Sequence[str] = (),
 ) -> dict[str, object]:
     """The quality row of one context source for this run.
@@ -194,9 +197,10 @@ def context_row(
     Args:
         name: Key of `SOURCES`.
         days: A frame with the `day` column of its month files.
-        fetched: Time of its last successful fetch. The manifest gives each
-            download, also of an identical file, so it is also `downloaded_at`.
+        fetched: Time of its last successful fetch.
         run_at: Time of this run, ISO format.
+        lineage: The record of its month files, None when it has none. It gives
+            `downloaded_at`, blank otherwise.
         causes: Why the source has an alert, joined in the `cause` column.
     """
     row: dict[str, object] = {
@@ -209,10 +213,9 @@ def context_row(
         "none_added": 0,
     }
     row.update({f"empty_{column}": None for column in KEY_COLUMNS})
-    fetched_at = None if fetched is None else fetched.isoformat()
     row["latest_event_date"] = None if days.empty else str(days["day"].max())
-    row["last_fetch_at"] = fetched_at
-    row["downloaded_at"] = fetched_at
+    row["last_fetch_at"] = None if fetched is None else fetched.isoformat()
+    row["downloaded_at"] = (lineage or {}).get("downloaded_at")
     row["updated_by_source"] = None
     row["cause"] = "; ".join(causes) or None
     return row
@@ -380,7 +383,11 @@ def run(store: Store, out: Path) -> pd.DataFrame:
             alerts[name] = found
         if context:
             days = pd.DataFrame({"day": []}) if events is None else events
-            rows.append(context_row(name, days, fetched, run_at, found))
+            rows.append(
+                context_row(
+                    name, days, fetched, run_at, read_lineage(name, store), found
+                )
+            )
             continue
         if events is None:
             events = pd.DataFrame(

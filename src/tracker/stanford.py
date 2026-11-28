@@ -29,6 +29,13 @@ import h3
 import pandas as pd
 
 from tracker.errors import UserError
+from tracker.ingest import (
+    encode_lineage,
+    lineage,
+    lineage_path,
+    read_lineage,
+    without_commit,
+)
 from tracker.store import Payload, Store
 
 logger = logging.getLogger(__name__)
@@ -374,29 +381,50 @@ def context_table(files: Mapping[str, bytes]) -> pd.DataFrame:
 
 
 def write_months(store: Store, months: Collection[str]) -> list[str]:
-    """Write the month files of the context table in the clean store.
+    """Write the month files of the context table and its lineage record.
 
-    Each month is built from the stored days of that month only. A month file
-    whose bytes do not change is not written. The files go in one commit.
+    Each month is built from the stored days of that month only. All the months
+    are reduced first: if one fails, nothing is written, so a download that the
+    mapping refuses changes neither the month files nor the record. A month file
+    whose bytes do not change is not written. The changed files and the record
+    (`ingest.lineage_path`) go in one commit; the record alone goes in a commit
+    when only it changed, which is the case of an accepted download of the same
+    files. Its `downloaded_at` is the time of the newest download of the days of
+    these months, which `tracker quality` copies.
 
     Args:
         store: The raw store, which holds the clean store.
         months: The months to build, as `fetched_months` returns them.
 
     Returns:
-        The paths written, sorted.
+        The month file paths written, sorted.
+
+    Raises:
+        UserError: A stored day fails `reduce_day`.
     """
-    written: dict[str, bytes] = {}
+    if not months:
+        return []
+    files: dict[str, bytes] = {}
+    contents: dict[str, bytes] = {}
+    rows = 0
     for month in sorted(months):
-        table = context_table(decoded_files(store, {month}))
+        month_files = decoded_files(store, {month})
+        table = context_table(month_files)
         content = io.BytesIO()
         table.to_parquet(content, index=False)
-        path = month_path(month)
-        if store.backend.read(path) != content.getvalue():
-            written[path] = content.getvalue()
-    if written:
+        contents[month_path(month)] = content.getvalue()
+        files.update(month_files)
+        rows += len(table)
+    written = {
+        path: content
+        for path, content in contents.items()
+        if store.backend.read(path) != content
+    }
+    record = lineage(SOURCE, files, store, rows)
+    if written or without_commit(read_lineage(SOURCE, store)) != without_commit(record):
         store.backend.commit(
-            written, f"clean: {SOURCE} table, {len(written)} month file(s)"
+            {**written, lineage_path(SOURCE): encode_lineage(record)},
+            f"clean: {SOURCE} table, {len(written)} month file(s)",
         )
     logger.info("stanford: %d month file(s) written", len(written))
     return sorted(written)

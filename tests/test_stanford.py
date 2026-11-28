@@ -32,6 +32,13 @@ def fixed_clock(monkeypatch):
     monkeypatch.setattr(clock, "utc_now", lambda: now)
 
 
+@pytest.fixture(autouse=True)
+def stanford_source(monkeypatch):
+    monkeypatch.setitem(
+        SOURCES, stanford.SOURCE, SimpleNamespace(updated_by_source=lambda files: None)
+    )
+
+
 @pytest.fixture
 def local(tmp_path):
     return Store(LocalBackend(tmp_path))
@@ -427,9 +434,6 @@ def test_a_row_with_no_aircraft_or_too_many_low_quality_ones_stops_the_table(
 def test_the_lineage_takes_the_decoded_files_and_refuses_the_stored_bytes(
     local, monkeypatch, tmp_path
 ):
-    monkeypatch.setitem(
-        SOURCES, stanford.SOURCE, SimpleNamespace(updated_by_source=lambda files: None)
-    )
     seed(local, {DAY: FIXTURE})
     seed(local, {DAY: changed(4)})
     files = stanford.decoded_files(local)
@@ -487,7 +491,9 @@ def test_the_clean_store_holds_one_file_per_month_and_a_run_rewrites_only_its_mo
 
 
 @pytest.mark.disable_socket
-def test_a_recheck_with_no_change_and_a_month_with_the_same_bytes_write_nothing(local):
+def test_a_recheck_with_no_change_and_a_month_with_the_same_bytes_rewrite_no_month(
+    local,
+):
     days = {DAY: FIXTURE}
     stanford.catch_up(local, DAY, fetcher(days))
     stanford.write_months(local, ["2026-11"])
@@ -500,7 +506,9 @@ def test_a_recheck_with_no_change_and_a_month_with_the_same_bytes_write_nothing(
     lines = stanford.catch_up(local, DAY, fetcher(days))
     assert stanford.fetched_months(lines) == ["2026-11"]
     assert stanford.write_months(local, stanford.fetched_months(lines)) == []
-    assert not [path for files in commits for path in files if "clean/" in path]
+    assert not [
+        path for files in commits for path in files if path.endswith(".parquet")
+    ]
 
 
 @pytest.mark.disable_socket

@@ -243,6 +243,7 @@ flowchart TB
   module_tracker_sources --> module_tracker_leiden
   module_tracker_sources --> module_tracker_store
   module_tracker_stanford --> module_tracker_errors
+  module_tracker_stanford --> module_tracker_ingest
   module_tracker_stanford --> module_tracker_store
   module_tracker_store --> module_tracker_clock
   module_tracker_views --> module_tracker_schema
