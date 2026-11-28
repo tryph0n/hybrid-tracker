@@ -236,6 +236,7 @@ flowchart TB
   module_tracker_publish --> module_tracker_quality
   module_tracker_publish --> module_tracker_schema
   module_tracker_publish --> module_tracker_sources
+  module_tracker_publish --> module_tracker_stanford
   module_tracker_quality --> module_tracker_build
   module_tracker_quality --> module_tracker_clock
   module_tracker_quality --> module_tracker_errors

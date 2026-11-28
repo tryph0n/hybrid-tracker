@@ -27,8 +27,8 @@ from typing import Any
 
 import pandas as pd
 
-from tracker import actors, provenance
-from tracker.build import CURATION_DIR, family_sources
+from tracker import actors, provenance, stanford
+from tracker.build import CONTEXT_TABLES, CURATION_DIR, family_sources
 from tracker.errors import UserError
 from tracker.quality import write_summary
 from tracker.schema import SCHEMA_VERSION
@@ -102,6 +102,67 @@ def credits(family: str, published: Iterable[str] | None = None) -> list[str]:
                 f"([licence]({reference.licence_url}))"
             )
     return lines
+
+
+def join_names(names: list[str]) -> str:
+    """The names as text: "A", "A and B", "A, B and C"."""
+    return ", ".join(names[:-1]) + (" and " if len(names) > 1 else "") + names[-1]
+
+
+def tables_sentence(family: str, published: Iterable[str] | None) -> str:
+    """The sentence of the card that lists the tables.
+
+    It names the sources that feed `events` and, when the dataset holds a
+    context source, the one that feeds its table: a context source has a row in
+    `sources` and none in `events`.
+    """
+    held = family_sources(family, published)
+    context = [name for name in held if SOURCES[name].table == "context"]
+    events = "the sources listed in `sources`"
+    listed = "one row per published source"
+    extra = ""
+    if context:
+        names = [SOURCES[name].short_name for name in held if name not in context]
+        events = join_names(names)
+        extra = join_names(
+            [
+                f"`{CONTEXT_TABLES[name]}` (month files, one row per cell and day, "
+                f"from {SOURCES[name].short_name}; it has no event)"
+                for name in context
+            ]
+        )
+        listed += ", " + join_names([SOURCES[name].short_name for name in held])
+        extra += ", "
+    return (
+        f"Tables: `events` (one row per event, from {events}), {extra}`sources` "
+        f"({listed}), `quality` (one row per source and per run, when present) "
+        "and, in the open dataset, `threat_actors` (one row per threat group, "
+        "with its aliases and country). The data is updated by the pipeline of "
+        "the project."
+    )
+
+
+def context_section(family: str, published: Iterable[str] | None) -> list[str]:
+    """The card section on the GNSS interference table, empty when there is none."""
+    if stanford.SOURCE not in family_sources(family, published):
+        return []
+    lat, lon = stanford.LAT_RANGE, stanford.LON_RANGE
+    return [
+        "## GNSS interference",
+        "",
+        (
+            f"The table `{stanford.TABLE}` is a context table, not a list of events. "
+            "It has one row per H3 cell (resolution 4) and per day, for the cells "
+            f"whose centre is in latitude {lat[0]:.0f} to {lat[1]:.0f} and "
+            f"longitude {lon[0]:.0f} to {lon[1]:.0f}. A cell with no aircraft has "
+            "no row, so no row means no data, not no interference. The counts are "
+            "aircraft-hours, not distinct aircraft. The last 7 days of the table "
+            "may still change: the source says that recent results may be "
+            "incomplete or temporarily unavailable, and each run fetches these "
+            "days again. The columns are in the data dictionary."
+        ),
+        "",
+    ]
 
 
 def configs(files: set[str]) -> str:
@@ -220,13 +281,7 @@ def render_card(
         "",
         INTRO[family],
         "",
-        (
-            "Tables: `events` (one row per event, from the sources listed in "
-            "`sources`), `sources` (one row per published source), `quality` (one row per source and per run, when "
-            "present) and, in the open dataset, `threat_actors` (one row per "
-            "threat group, with its aliases and country). The data is updated "
-            "by the pipeline of the project."
-        ),
+        tables_sentence(family, published),
         "",
         "- Code and pipeline: [github.com/tryph0n/hybrid-tracker](https://github.com/tryph0n/hybrid-tracker)",
         "- Live dashboard: [hybrid-tracker.onrender.com](https://hybrid-tracker.onrender.com)",
@@ -250,6 +305,7 @@ def render_card(
         ),
         "",
         *curated,
+        *context_section(family, published),
         versions.strip(),
         "",
     ]

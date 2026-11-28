@@ -49,7 +49,7 @@ attribution. Four fields keep these questions apart:
 `domain` groups the events (air, sabotage, violence, maritime, cyber,
 information, espionage, other), and `category` refines it.
 
-The data has a version, 2.6.0 today. The first version (1.0.0) used other
+The data has a version, 2.7.0 today. The first version (1.0.0) used other
 column names. It stays readable at the tag `v1.0.0` of the dataset, for example
 `pd.read_csv("hf://datasets/sam-bot/europe-hybrid-incidents@v1.0.0/eodi.csv")`.
 See the

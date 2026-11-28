@@ -7,6 +7,15 @@ never moved.
 
 This dataset starts with schema 2.1.0. It has no earlier version.
 
+### 2.7.0
+
+One new table: `gnss_interference`, the GNSS interference of Stanford GPS Lab, in
+month files (`gnss_interference/<YYYY>-<MM>.parquet`). It is a context table: it
+has no event, so `events` does not change, and the `sources` table has a row for
+the source. See the section "GNSS interference" of this card. No column of
+`events`, `quality` or `threat_actors` changes. The tag `v2.7.0` is on the commit
+of the first upload.
+
 ### 2.6.0
 
 One new column in `events`, the same as in the other dataset: `drone_presence`.
