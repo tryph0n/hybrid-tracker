@@ -746,6 +746,23 @@ def test_a_context_source_has_a_row_in_the_nc_sources_table_only(
     assert (out / open_sources).read_bytes() == (before / open_sources).read_bytes()
 
 
+def test_the_source_count_in_the_log_includes_the_context_source_of_nc_only(
+    store, tmp_path, monkeypatch, caplog
+):
+    build.build(store, tmp_path / "before")
+    add_context_source(monkeypatch, store, CONTEXT_DAYS)
+    caplog.set_level("INFO")
+
+    build.build(store, tmp_path / "out")
+
+    listed = pd.read_parquet(tmp_path / "out" / "nc" / "sources.parquet")
+    assert f"nc: {len(listed)} sources" in caplog.text
+    open_listed = pd.read_parquet(tmp_path / "out" / "open" / "sources.parquet")
+    assert f"open: {len(open_listed)} sources" in caplog.text
+    assert stanford.SOURCE in set(listed["source"])
+    assert stanford.SOURCE not in set(open_listed["source"])
+
+
 def fixture_names() -> list[str]:
     return [name for name in sources.SOURCES if name != stanford.SOURCE]
 

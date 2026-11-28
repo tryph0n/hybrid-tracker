@@ -544,5 +544,7 @@ def build(
                 else:
                     shutil.copyfile(file, target / file.name)
     for family in FAMILIES:
-        logger.info("%s: %d sources", family, len(family_sources(family, built)))
+        logger.info(
+            "%s: %d sources", family, len(family_sources(family, [*built, *context]))
+        )
     return [name for name in SOURCES if name not in counts and name not in context]
