@@ -22,6 +22,12 @@ row, in the run summary, and in `alerts.json` in the build folder: an object
 that maps each source that has a cause to the list of its causes, empty when no
 source has one. A static source is refreshed by hand: the three-day rule does
 not apply to it. The run fails only when no source has a clean table.
+
+A context source (`Source.table`) has no events: its row counts the rows of its
+month files, gives the newest stored day as `latest_event_date`, and leaves the
+columns of events empty. Its `downloaded_at` is its last successful fetch, and
+it has a cause when no run stored a new day for more than `MAX_NEW_DAY_AGE_DAYS`
+days, since the days fetched again keep `last_fetch_at` recent.
 """
 
 import io
@@ -41,11 +47,13 @@ from tracker.errors import UserError
 from tracker.ingest import clean_path, read_failure, read_lineage
 from tracker.schema import REQUIRED
 from tracker.sources import FAMILIES, SOURCES
+from tracker.stanford import new_day_stored_at, table_days
 from tracker.store import Store
 
 logger = logging.getLogger(__name__)
 
 MAX_FETCH_AGE_DAYS = 3
+MAX_NEW_DAY_AGE_DAYS = 7
 
 QUALITY_PATH = "quality/quality.parquet"
 EVENT_IDS_PATH = "quality/event_ids.parquet"
@@ -174,6 +182,42 @@ def source_row(
     return row
 
 
+def context_row(
+    name: str,
+    days: pd.Series,
+    fetched: pd.Timestamp | None,
+    run_at: str,
+    causes: Sequence[str] = (),
+) -> dict[str, object]:
+    """The quality row of one context source for this run.
+
+    Args:
+        name: Key of `SOURCES`.
+        days: The `day` column of its month files.
+        fetched: Time of its last successful fetch. The manifest gives each
+            download, also of an identical file, so it is also `downloaded_at`.
+        run_at: Time of this run, ISO format.
+        causes: Why the source has an alert, joined in the `cause` column.
+    """
+    row: dict[str, object] = {
+        "run_at": run_at,
+        "source": name,
+        "rows": len(days),
+        "rows_added": 0,
+        "rows_removed": 0,
+        "none_events": 0,
+        "none_added": 0,
+    }
+    row.update({f"empty_{column}": None for column in KEY_COLUMNS})
+    fetched_at = None if fetched is None else fetched.isoformat()
+    row["latest_event_date"] = None if days.empty else str(days.max())
+    row["last_fetch_at"] = fetched_at
+    row["downloaded_at"] = fetched_at
+    row["updated_by_source"] = None
+    row["cause"] = "; ".join(causes) or None
+    return row
+
+
 def typed(table: pd.DataFrame) -> pd.DataFrame:
     """The table with the column order and types of `COLUMNS`.
 
@@ -194,19 +238,23 @@ def typed(table: pd.DataFrame) -> pd.DataFrame:
 
 def causes(
     name: str,
-    events: pd.DataFrame | None,
+    events: pd.DataFrame | pd.Series | None,
     fetched: pd.Timestamp | None,
     failure: Mapping[str, Any] | None,
     now: pd.Timestamp,
+    new_day: pd.Timestamp | None = None,
 ) -> list[str]:
     """Why a source has an alert in this run, empty when it has none.
 
     Args:
         name: Key of `SOURCES`.
-        events: Its clean table, None when it has none.
+        events: Its clean table, None when it has none. For a context source,
+            its `day` column.
         fetched: Time of its last successful fetch.
         failure: The record of its last refresh error, None when it succeeded.
         now: Time of this run.
+        new_day: For a context source, time of the latest run that stored a new
+            day. A successful fetch does not move it.
     """
     found = []
     if events is None:
@@ -223,6 +271,15 @@ def causes(
                 f"no successful fetch since {fetched.isoformat()} "
                 f"(more than {MAX_FETCH_AGE_DAYS} days)"
             )
+    if (
+        SOURCES[name].table == "context"
+        and new_day is not None
+        and now - new_day > timedelta(days=MAX_NEW_DAY_AGE_DAYS)
+    ):
+        found.append(
+            f"no new day stored since {new_day.isoformat()} "
+            f"(more than {MAX_NEW_DAY_AGE_DAYS} days)"
+        )
     return found
 
 
@@ -302,7 +359,12 @@ def run(store: Store, out: Path) -> pd.DataFrame:
     history = read_table(store, QUALITY_PATH)
     stored_ids = read_table(store, EVENT_IDS_PATH)
     seen = set() if history is None else set(history["source"])
-    tables = {name: read_table(store, clean_path(name)) for name in SOURCES}
+    tables = {
+        name: table_days(store)
+        if source.table == "context"
+        else read_table(store, clean_path(name))
+        for name, source in SOURCES.items()
+    }
     if all(events is None for events in tables.values()):
         raise UserError("no source has a clean table, run `tracker ingest`")
 
@@ -311,9 +373,15 @@ def run(store: Store, out: Path) -> pd.DataFrame:
     alerts = {}
     for name, events in tables.items():
         fetched = last_fetch(store, name)
-        found = causes(name, events, fetched, read_failure(name, store), now)
+        context = SOURCES[name].table == "context"
+        new_day = new_day_stored_at(store) if context else None
+        found = causes(name, events, fetched, read_failure(name, store), now, new_day)
         if found:
             alerts[name] = found
+        if context:
+            days = pd.Series([], dtype="object") if events is None else events
+            rows.append(context_row(name, days, fetched, run_at, found))
+            continue
         if events is None:
             events = pd.DataFrame(
                 {column: [] for column in ["event_id", "date", *KEY_COLUMNS]}

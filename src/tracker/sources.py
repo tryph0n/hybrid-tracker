@@ -57,6 +57,12 @@ class Source:
     schema, with no network access. Define it in the adapter module of the
     source."""
 
+    table: str = "events"
+    """Either "events", for a source whose clean table is `clean/<name>.parquet`
+    with the event columns, or "context", for a source whose clean table is month
+    files of another shape (`tracker.stanford`). The quality check reads the
+    month files of a context source and counts no event."""
+
     updated_by_source: Callable[[Mapping[str, bytes]], str | None] = no_date
     """Reads the date of the last change that the source gives, as a UTC ISO 8601
     text, from the stored payloads (file name to bytes), with no network access.

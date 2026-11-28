@@ -400,3 +400,30 @@ def write_months(store: Store, months: Collection[str]) -> list[str]:
         )
     logger.info("stanford: %d month file(s) written", len(written))
     return sorted(written)
+
+
+def table_days(store: Store) -> pd.Series | None:
+    """The `day` column of the month files in the clean store, None when none exists.
+
+    Reads only that column, for the quality check.
+    """
+    months = sorted({month_of(day) for day in stored_days(store)})
+    columns = []
+    for month in months:
+        content = store.backend.read(month_path(month))
+        if content is not None:
+            columns.append(pd.read_parquet(io.BytesIO(content), columns=["day"])["day"])
+    return pd.concat(columns, ignore_index=True) if columns else None
+
+
+def new_day_stored_at(store: Store) -> pd.Timestamp | None:
+    """Time of the latest run that stored a day for the first time, None if none did.
+
+    A run that stores a new file of a day already held, or that fetches days
+    again with no change, does not count.
+    """
+    first: dict[str, pd.Timestamp] = {}
+    for line in store.payloads(SOURCE):
+        fetched = pd.Timestamp(line["fetched_at"])
+        first[line["name"]] = min(fetched, first.get(line["name"], fetched))
+    return max(first.values()) if first else None

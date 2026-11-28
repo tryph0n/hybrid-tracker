@@ -234,6 +234,7 @@ flowchart TB
   module_tracker_quality --> module_tracker_ingest
   module_tracker_quality --> module_tracker_schema
   module_tracker_quality --> module_tracker_sources
+  module_tracker_quality --> module_tracker_stanford
   module_tracker_quality --> module_tracker_store
   module_tracker_schema --> module_tracker_errors
   module_tracker_sources --> module_tracker_actors
