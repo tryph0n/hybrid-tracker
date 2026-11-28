@@ -382,6 +382,21 @@ def test_a_publish_with_no_month_change_sends_no_month_file(api, build):
 
     assert [name for name in paths[0] if "/" in name] == []
     assert set(MONTH_FILES) <= set(api.main[NC])
+    card = api.main[NC]["README.md"].decode("utf-8")
+    assert "  - config_name: gnss_interference\n" in card
+    assert "        path: gnss_interference/*.parquet\n" in card
+
+
+def test_a_hidden_sub_folder_of_the_build_folder_is_not_sent(api, build):
+    add_months(build)
+    (build / "nc" / ".hidden").mkdir()
+    (build / "nc" / ".hidden" / "y.parquet").write_bytes(b"hidden")
+    paths = sent_paths(api)
+
+    publish.run("nc", build, api)
+
+    assert ".hidden/y.parquet" not in paths[0]
+    assert ".hidden/y.parquet" not in api.main[NC]
 
 
 def test_the_card_lists_all_the_month_files_of_the_table_with_one_pattern(api, build):

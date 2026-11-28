@@ -475,8 +475,8 @@ def test_the_clean_store_holds_one_file_per_month_and_a_run_rewrites_only_its_mo
 
     served_days = {days[0]: FIXTURE, days[1]: FIXTURE, days[2]: changed(4)}
     lines = stanford.catch_up(local, date(2026, 11, 2), fetcher(served_days))
-    assert stanford.changed_months(lines) == ["2026-11"]
-    assert stanford.write_months(local, stanford.changed_months(lines)) == [
+    assert stanford.fetched_months(lines) == ["2026-10", "2026-11"]
+    assert stanford.write_months(local, stanford.fetched_months(lines)) == [
         "clean/stanford/2026-11.parquet"
     ]
     october_path = local.backend.root / "clean/stanford/2026-10.parquet"
@@ -498,9 +498,23 @@ def test_a_recheck_with_no_change_and_a_month_with_the_same_bytes_write_nothing(
         commit(files, message),
     )
     lines = stanford.catch_up(local, DAY, fetcher(days))
-    assert stanford.changed_months(lines) == []
-    assert stanford.write_months(local, ["2026-11"]) == []
+    assert stanford.fetched_months(lines) == ["2026-11"]
+    assert stanford.write_months(local, stanford.fetched_months(lines)) == []
     assert not [path for files in commits for path in files if "clean/" in path]
+
+
+@pytest.mark.disable_socket
+def test_a_month_whose_write_failed_is_rebuilt_by_a_run_that_finds_no_change(local):
+    days = {DAY: FIXTURE}
+    stanford.catch_up(local, DAY, fetcher(days))
+    assert not (local.backend.root / "clean/stanford/2026-11.parquet").exists()
+
+    lines = stanford.catch_up(local, DAY, fetcher(days))
+    assert not any(line["stored"] for line in lines)
+    assert stanford.write_months(local, stanford.fetched_months(lines)) == [
+        "clean/stanford/2026-11.parquet"
+    ]
+    assert set(month_table(local, "2026-11")["day"]) == {DAY}
 
 
 @pytest.mark.disable_socket

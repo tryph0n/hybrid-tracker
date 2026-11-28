@@ -293,12 +293,13 @@ def read_back(
 def month_files(folder: Path) -> dict[str, bytes]:
     """The month files of the tables of a build folder: `<table>/<file>` to bytes.
 
-    Only the Parquet files directly inside a sub-folder count.
+    Only the Parquet files directly inside a sub-folder count; a sub-folder whose
+    name starts with a dot is left out.
     """
     return {
         f"{table.name}/{path.name}": path.read_bytes()
         for table in sorted(folder.iterdir())
-        if table.is_dir()
+        if table.is_dir() and not table.name.startswith(".")
         for path in sorted(table.glob("*.parquet"))
     }
 

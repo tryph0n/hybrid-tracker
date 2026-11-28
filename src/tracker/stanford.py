@@ -270,13 +270,14 @@ def month_path(month: str) -> str:
     return f"clean/{SOURCE}/{month}.parquet"
 
 
-def changed_months(lines: Sequence[Mapping[str, Any]]) -> list[str]:
-    """The months of the days that a run stored (the manifest lines of `catch_up`).
+def fetched_months(lines: Sequence[Mapping[str, Any]]) -> list[str]:
+    """The months of the days that a run fetched (the manifest lines of `catch_up`).
 
-    A day fetched again with the same decoded file has `stored` false: its
-    month is not in the result.
+    A day whose file did not change is included: an earlier run may have saved
+    the raw day and failed before it wrote the month file. `write_months`
+    leaves a month whose bytes are the same.
     """
-    return sorted({month_of(day_of(line["name"])) for line in lines if line["stored"]})
+    return sorted({month_of(day_of(line["name"])) for line in lines})
 
 
 def decoded_files(
@@ -380,7 +381,7 @@ def write_months(store: Store, months: Collection[str]) -> list[str]:
 
     Args:
         store: The raw store, which holds the clean store.
-        months: The months to build, as `changed_months` returns them.
+        months: The months to build, as `fetched_months` returns them.
 
     Returns:
         The paths written, sorted.
