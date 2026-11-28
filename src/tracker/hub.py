@@ -2,22 +2,32 @@
 
 The dashboard reads `events.parquet` of the NonCommercial dataset, which holds
 the rows of both licence families, and its `quality.parquet` for the dates of
-each source (blank when that file cannot be read). When the Hub cannot be reached, it reads a
-snapshot of the same file that the image build bundles in a folder, with the
-revision and the date of that snapshot in `snapshot.json`.
+each source (blank when that file cannot be read). For a context source
+(`Source.table`), it reads the first and the newest day from the Parquet
+statistics of the oldest and the newest month file, not the rows. When the Hub
+cannot be reached, it reads a snapshot of the same file that the image build
+bundles in a folder, with the revision and the date of that snapshot in
+`snapshot.json`; the snapshot has no month file, so no context source shows.
 
 This module has no Streamlit code: the app adds the cache.
 """
 
+import datetime
 import json
 import logging
 import os
-from dataclasses import dataclass, replace
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pandas as pd
+import pyarrow.parquet as pq
 
+from tracker.build import CONTEXT_TABLES
+from tracker.errors import UserError
 from tracker.publish import DATASETS
+from tracker.sources import SOURCES
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +85,12 @@ class Published:
     quality: pd.DataFrame | None = None
     """The quality table at the same revision, or None when it cannot be read
     (the snapshot, a revision before the table had the date columns)."""
+
+    context: dict[str, tuple[datetime.date, datetime.date]] = field(
+        default_factory=dict
+    )
+    """The first and the newest day of each context source that has month files
+    at the same revision. A source whose files cannot be read has no entry."""
 
 
 def configured_revision() -> str:
@@ -150,6 +166,88 @@ def read_quality(commit: str) -> pd.DataFrame | None:
         return None
 
 
+def fetch_month_ends(commit: str, folder: str) -> dict[str, Path]:
+    """Download the oldest and the newest month file of a table at a commit.
+
+    Args:
+        commit: A commit hash.
+        folder: The folder of the table, as `CONTEXT_TABLES` gives it.
+
+    Returns:
+        The repository path to the local file, for the two files (one when the
+        table has one month). Empty when the table has no month file.
+    """
+    from huggingface_hub import HfApi, hf_hub_download
+
+    pattern = re.compile(rf"{re.escape(folder)}/\d{{4}}-\d{{2}}\.parquet")
+    names = sorted(
+        name
+        for name in HfApi().list_repo_files(
+            REPO_ID, repo_type="dataset", revision=commit
+        )
+        if pattern.fullmatch(name)
+    )
+    return {
+        name: Path(hf_hub_download(REPO_ID, name, repo_type="dataset", revision=commit))
+        for name in dict.fromkeys(names[:1] + names[-1:])
+    }
+
+
+def column_range(path: Path, column: str) -> tuple[datetime.date, datetime.date]:
+    """The smallest and the largest value of a date column, from the statistics.
+
+    Raises:
+        UserError: The file has no row group, or a row group has no statistics.
+    """
+    metadata = pq.ParquetFile(path).metadata
+    position = metadata.schema.names.index(column)
+    stats = [
+        metadata.row_group(index).column(position).statistics
+        for index in range(metadata.num_row_groups)
+    ]
+    if not stats or any(stat is None or not stat.has_min_max for stat in stats):
+        raise UserError(f"{path.name}: no statistics for {column}")
+    return min(stat.min for stat in stats), max(stat.max for stat in stats)
+
+
+def day_bounds(files: Mapping[str, Path]) -> tuple[datetime.date, datetime.date]:
+    """The first and the newest day of a table from its oldest and newest month file.
+
+    Args:
+        files: Repository path (`<table>/<YYYY>-<MM>.parquet`) to local file.
+            The oldest name gives the first day, the newest name the newest day.
+    """
+    names = sorted(files)
+    return (
+        column_range(files[names[0]], "day")[0],
+        column_range(files[names[-1]], "day")[1],
+    )
+
+
+def read_context(commit: str) -> dict[str, tuple[datetime.date, datetime.date]]:
+    """The first and the newest day of each context source at a commit.
+
+    The table is optional for the dashboard, so an error is logged and the source
+    has no entry.
+    """
+    bounds = {}
+    for name, folder in CONTEXT_TABLES.items():
+        if name not in SOURCES or SOURCES[name].table != "context":
+            continue
+        try:
+            files = fetch_month_ends(commit, folder)
+            if files:
+                bounds[name] = day_bounds(files)
+        except Exception:
+            logger.warning(
+                "Could not read the month files of %s at %s, the source is not shown",
+                name,
+                commit,
+                exc_info=True,
+            )
+    return bounds
+
+
 def read_snapshot(folder: Path) -> Published:
     """Read the bundled snapshot.
 
@@ -198,5 +296,10 @@ def load_published(revision: str, fallback: Path) -> Published:
         )
         return replace(read_snapshot(fallback), failure=failure)
     return Published(
-        events, commit, committed, from_snapshot=False, quality=read_quality(commit)
+        events,
+        commit,
+        committed,
+        from_snapshot=False,
+        quality=read_quality(commit),
+        context=read_context(commit),
     )

@@ -454,12 +454,16 @@ def latest_dates(quality: pd.DataFrame | None) -> dict[str, tuple[str, str]]:
     }
 
 
-def published_sources(events: pd.DataFrame, order: Sequence[str]) -> list[str]:
+def published_sources(
+    events: pd.DataFrame, order: Sequence[str], tables: Collection[str] = ()
+) -> list[str]:
     """The sources that have rows in the published events, in the source order.
 
     Args:
         events: The published events.
         order: Every source of the registry, first in the source order first.
+        tables: Sources that have data in a published table of their own, not in
+            the events (a context source). They are listed too.
     """
-    present = set(events["source"])
+    present = set(events["source"]) | set(tables)
     return [name for name in order if name in present]

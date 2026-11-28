@@ -41,6 +41,8 @@ from tracker.store import Payload, Store
 logger = logging.getLogger(__name__)
 
 SOURCE = "stanford"
+TABLE = "gnss_interference"
+"""Folder of the month files in the published datasets: `<TABLE>/<YYYY>-<MM>.parquet`."""
 HOST = "waas-nas.stanford.edu"
 HEATMAP_PATH = "/data/jamming/{day:%Y/%m/%d}/heatmap.json"
 CA_FILE = Path(__file__).parent / "certs" / "incommon-rsa-server-ca-2.pem"
@@ -434,14 +436,18 @@ def write_months(store: Store, months: Collection[str]) -> list[str]:
     return sorted(written)
 
 
+def stored_months(store: Store) -> list[str]:
+    """The months of the stored days, oldest first, as `YYYY-MM`."""
+    return sorted({month_of(day) for day in stored_days(store)})
+
+
 def table_days(store: Store) -> pd.DataFrame | None:
     """The `day` column of the month files in the clean store, None when none exists.
 
     Reads only that column, for the quality check.
     """
-    months = sorted({month_of(day) for day in stored_days(store)})
     columns = []
-    for month in months:
+    for month in stored_months(store):
         content = store.backend.read(month_path(month))
         if content is not None:
             columns.append(pd.read_parquet(io.BytesIO(content), columns=["day"]))

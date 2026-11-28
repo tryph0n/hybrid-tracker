@@ -20,6 +20,11 @@ reduces from the latest stored MISP galaxy file and `curation/actors.csv`; a
 store without that file fails the build: run `tracker ingest misp_galaxy`.
 Nothing is written to `<out>` if a check fails.
 
+A context source (`Source.table`, see `tracker.stanford`) has no clean table with
+the event columns: its month files are copied to `<out>/<family>/<table>/`, for
+each family that holds its rows, and never enter `clean`, `events` or `sources`.
+It is left out when the clean store holds no month file of it.
+
 A source with no clean table is left out: `build` returns its name, and the
 registry, the clusters, the row-count check and the `sources` table all use
 the other sources only. The build fails when no source has a clean table. A
@@ -39,7 +44,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from duckdb.sqltypes import VARCHAR
 
-from tracker import actors, dedup, geonames
+from tracker import actors, dedup, geonames, stanford
 from tracker.errors import UserError
 from tracker.ingest import clean_path
 from tracker.schema import (
@@ -72,6 +77,9 @@ CLUSTER_SQL_TYPES = {
 ACTORS_FILE = "threat_actors.parquet"
 ACTORS_FAMILY = "open"
 """The family whose dataset holds the `threat_actors` table."""
+
+CONTEXT_TABLES = {stanford.SOURCE: stanford.TABLE}
+"""Folder of the month files of each context source in a published dataset."""
 
 SOURCE_COLUMNS = ["source", "title", "kind", "homepage", "licence", "citation"]
 
@@ -116,7 +124,8 @@ def type_name(arrow_type: pa.DataType) -> str:
 def load_clean(store: Store, work: Path) -> dict[str, int]:
     """Copy the clean table of each source that has one to `work`, and count its rows.
 
-    A source with no clean table is left out of the result and logged.
+    A source with no clean table is left out of the result and logged. A
+    context source has none: `load_context` reads it.
 
     Raises:
         UserError: No source has a clean table.
@@ -126,6 +135,8 @@ def load_clean(store: Store, work: Path) -> dict[str, int]:
     for name, source in SOURCES.items():
         if source.family not in FAMILIES:
             raise ValueError(f"{name}: unknown licence family {source.family!r}")
+        if source.table == "context":
+            continue
         table = store.backend.read(clean_path(name))
         if table is None:
             logger.warning("%s: no clean table, left out of the build", name)
@@ -137,9 +148,47 @@ def load_clean(store: Store, work: Path) -> dict[str, int]:
     return counts
 
 
+def load_context(store: Store, work: Path) -> dict[str, list[str]]:
+    """Copy the month files of each context source to `work/<table>/`.
+
+    A context source with no month file in the clean store is left out of the
+    result and logged.
+
+    Returns:
+        The months (`YYYY-MM`, oldest first) of each source that has month files.
+
+    Raises:
+        UserError: A month file does not have the columns of the context table.
+    """
+    months: dict[str, list[str]] = {}
+    for name, source in SOURCES.items():
+        if source.table != "context":
+            continue
+        folder = work / CONTEXT_TABLES[name]
+        found = []
+        for month in stanford.stored_months(store):
+            content = store.backend.read(stanford.month_path(month))
+            if content is None:
+                continue
+            folder.mkdir(exist_ok=True)
+            (folder / f"{month}.parquet").write_bytes(content)
+            if pq.read_schema(folder / f"{month}.parquet").names != stanford.COLUMNS:
+                raise UserError(f"{name}: month file {month} breaks the schema")
+            found.append(month)
+        if found:
+            months[name] = found
+        else:
+            logger.warning("%s: no month file, left out of the build", name)
+    return months
+
+
 def empty_families(left_out: Sequence[str]) -> list[str]:
-    """The families that no built source feeds, given the sources left out."""
-    built = [name for name in SOURCES if name not in left_out]
+    """The families that no built source feeds with events, given those left out."""
+    built = [
+        name
+        for name, source in SOURCES.items()
+        if name not in left_out and source.table == "events"
+    ]
     return [family for family in FAMILIES if not family_sources(family, built)]
 
 
@@ -440,7 +489,8 @@ def build(
             `tracker.dedup`). The default is `CURATION_DIR`.
 
     Returns:
-        The sources that have no clean table, left out of the tables.
+        The sources that have no clean table (for a context source, no month
+        file), left out of the tables.
 
     Raises:
         UserError: No source has a clean table, or a check of `check` fails.
@@ -453,6 +503,7 @@ def build(
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         counts = load_clean(store, work)
+        context = load_context(store, work)
         built = [name for name in SOURCES if name in counts]
         geocode = load_geocode(store)
         threat_actors = load_actors(store, curation_dir or CURATION_DIR)
@@ -471,13 +522,19 @@ def build(
                 if family == ACTORS_FAMILY:
                     export_actors(threat_actors, staged / family)
                     check_actors(staged / family, threat_actors)
+                for name in family_sources(family, context):
+                    table = CONTEXT_TABLES[name]
+                    shutil.copytree(work / table, staged / family / table)
         finally:
             con.close()
         for family in FAMILIES:
             target = out / family
             target.mkdir(parents=True, exist_ok=True)
             for file in (staged / family).iterdir():
-                shutil.copyfile(file, target / file.name)
+                if file.is_dir():
+                    shutil.copytree(file, target / file.name, dirs_exist_ok=True)
+                else:
+                    shutil.copyfile(file, target / file.name)
     for family in FAMILIES:
         logger.info("%s: %d sources", family, len(family_sources(family, built)))
-    return [name for name in SOURCES if name not in counts]
+    return [name for name in SOURCES if name not in counts and name not in context]

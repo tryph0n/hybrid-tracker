@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import zipfile
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -29,7 +30,7 @@ from streamlit.elements.lib import policies
 from streamlit.runtime.caching import cache_utils
 from streamlit.testing.v1 import AppTest
 
-from tracker import actors, build, clock, geonames, hub, ingest, quality
+from tracker import actors, build, clock, geonames, hub, ingest, quality, stanford
 from tracker.clock import utc_today
 from tracker.schema import (
     ATTRIBUTIONS,
@@ -1325,7 +1326,7 @@ def test_a_source_that_keeps_its_last_data_shows_the_dates_of_its_accepted_downl
     )
     table = run_app().dataframe[-1].value.set_index("Source")
     leiden = table.loc[SOURCES["leiden"].title]
-    assert leiden["Events"] == (published["source"] == "leiden").sum() > 0
+    assert int(leiden["Events"]) == (published["source"] == "leiden").sum() > 0
     assert leiden["Downloaded"] == "2026-03-05 10:00 UTC"
     assert leiden["Updated by source"] == "2026-01-13 14:22 UTC"
     assert table.loc[SOURCES["eodi"].title, "Downloaded"] == "2026-03-06 10:00 UTC"
@@ -1591,3 +1592,83 @@ def test_most_affected_countries_says_that_it_counts_the_incidents_with_no_point
         "Counts every selected incident that names the country, with or without "
         "a point on the map."
     ) in captions(run_app())
+
+
+CONTEXT_TITLE = "Fake context"
+CONTEXT_CITATION = "Source: Fake context."
+
+
+def add_context_source(monkeypatch, tmp_path) -> None:
+    """Register a `nc` context source and serve two month files from the Hub.
+
+    The oldest file starts on the 30th, not on the 1st, and the newest ends on
+    the 3rd: From and To must come from the days in the files.
+    """
+    monkeypatch.setitem(
+        SOURCES,
+        stanford.SOURCE,
+        dataclasses.replace(
+            SOURCES["eodi"],
+            title=CONTEXT_TITLE,
+            citation=CONTEXT_CITATION,
+            licence="CC BY-NC 4.0",
+            family="nc",
+            table="context",
+        ),
+    )
+    read_events("eodi").iloc[0:0].to_csv(events_path(stanford.SOURCE), index=False)
+    heatmap = (FIXTURES / "stanford_heatmap.json").read_bytes()
+    files = {}
+    for month, days in (("2026-10", (30, 31)), ("2026-11", (2, 3))):
+        table = pd.concat(
+            [
+                stanford.reduce_day(date(*map(int, month.split("-")), day), heatmap)
+                for day in days
+            ]
+        )
+        path = tmp_path / f"{month}.parquet"
+        table.to_parquet(path, index=False)
+        files[f"{stanford.TABLE}/{month}.parquet"] = path
+    monkeypatch.setattr(hub, "fetch_month_ends", lambda commit, folder: files)
+
+
+def test_the_sources_section_lists_a_context_source_with_a_blank_events_cell(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    add_context_source(monkeypatch, tmp_path)
+    at = run_app()
+
+    table = at.dataframe[-1].value.set_index("Source")
+    assert list(table.index) == [
+        SOURCES["eodi"].title,
+        SOURCES["leiden"].title,
+        CONTEXT_TITLE,
+    ]
+    row = table.loc[CONTEXT_TITLE]
+    assert row["Events"] == ""
+    assert str(row["From"]) == "2026-10-30"
+    assert str(row["To"]) == "2026-11-03"
+    assert "None" not in table.astype(str).to_string()
+    assert CONTEXT_CITATION in captions(at)
+    assert table.loc[SOURCES["eodi"].title, "Events"] != ""
+    assert at.multiselect(key="sources").options == [
+        SOURCES["eodi"].title,
+        SOURCES["leiden"].title,
+    ]
+    assert at.multiselect(key="sources").value == ["eodi", "leiden"]
+    assert link_columns(at) == {"link_eodi": "EODI", "link_leiden": "Leiden"}
+
+
+def test_a_context_source_whose_month_files_cannot_be_read_is_not_listed(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    add_context_source(monkeypatch, tmp_path)
+
+    def refuse(commit, folder):
+        raise ConnectionError("no network")
+
+    monkeypatch.setattr(hub, "fetch_month_ends", refuse)
+    at = run_app()
+
+    assert CONTEXT_TITLE not in set(at.dataframe[-1].value["Source"])
+    assert CONTEXT_CITATION not in captions(at)

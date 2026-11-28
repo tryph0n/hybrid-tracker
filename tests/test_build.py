@@ -2,13 +2,16 @@ import dataclasses
 import hashlib
 import io
 import shutil
+from datetime import date
 
 import duckdb
 import pandas as pd
 import pytest
 from conftest import FIXTURES, GEONAMES_PLACES, ROOT, geonames_archive
+from test_stanford import FIXTURE, seed
 
-from tracker import actors, build, cli, geonames, ingest, publish, sources
+from tracker import actors, build, cli, geonames, ingest, publish, sources, stanford
+from tracker.errors import UserError
 from tracker.schema import PUBLISHED_COLUMNS, read_csv
 from tracker.store import LocalBackend, Payload, Store
 
@@ -668,3 +671,81 @@ def test_a_stored_table_without_a_required_column_fails_the_build(store, tmp_pat
 
     with pytest.raises(ValueError, match="without title"):
         build_events(store, tmp_path)
+
+
+def add_context_source(monkeypatch, store: Store, days: list[date]) -> None:
+    """Register a `nc` context source and store its month files, as a run does."""
+    monkeypatch.setitem(
+        sources.SOURCES,
+        stanford.SOURCE,
+        dataclasses.replace(
+            sources.SOURCES["eodi"],
+            title="Fake context",
+            licence="CC BY-NC 4.0",
+            family="nc",
+            table="context",
+            updated_by_source=sources.no_date,
+        ),
+    )
+    seed(store, {day: FIXTURE for day in days})
+    stanford.write_months(store, {stanford.month_of(day) for day in days})
+
+
+MONTHS = ["2026-10", "2026-11"]
+CONTEXT_DAYS = [date(2026, 10, 31), date(2026, 11, 1)]
+
+
+def test_a_context_table_is_in_the_nc_build_folder_only_and_not_in_the_events(
+    store, tmp_path, monkeypatch
+):
+    add_context_source(monkeypatch, store, CONTEXT_DAYS)
+    out = tmp_path / "out"
+
+    left_out = build.build(store, out)
+    again = build.build(store, out)
+
+    assert left_out == again == []
+    folder = out / "nc" / stanford.TABLE
+    assert sorted(path.name for path in folder.iterdir()) == [
+        f"{month}.parquet" for month in MONTHS
+    ]
+    for month in MONTHS:
+        stored = store.backend.read(stanford.month_path(month))
+        assert (folder / f"{month}.parquet").read_bytes() == stored
+    assert not (out / "open" / stanford.TABLE).exists()
+    assert sorted(path.name for path in (out / "open").iterdir()) == sorted(OPEN_FILES)
+    for family in sources.FAMILIES:
+        events = pd.read_parquet(out / family / "events.parquet")
+        assert stanford.SOURCE not in set(events["source"])
+        assert len(events) == sum(len(fixture_events(name)) for name in fixture_names())
+        assert (
+            stanford.SOURCE
+            not in pd.read_parquet(out / family / "sources.parquet")["source"].tolist()
+        )
+
+
+def fixture_names() -> list[str]:
+    return [name for name in sources.SOURCES if name != stanford.SOURCE]
+
+
+def test_a_context_source_with_no_month_file_is_left_out(store, tmp_path, monkeypatch):
+    add_context_source(monkeypatch, store, [])
+
+    left_out = build.build(store, tmp_path / "out")
+
+    assert left_out == [stanford.SOURCE]
+    assert not (tmp_path / "out" / "nc" / stanford.TABLE).exists()
+
+
+def test_a_month_file_with_other_columns_fails_the_build_and_writes_nothing(
+    store, tmp_path, monkeypatch
+):
+    add_context_source(monkeypatch, store, CONTEXT_DAYS)
+    wrong = io.BytesIO()
+    pd.DataFrame({"day": [CONTEXT_DAYS[0]]}).to_parquet(wrong, index=False)
+    store.backend.commit({stanford.month_path("2026-10"): wrong.getvalue()}, "test")
+
+    with pytest.raises(UserError, match="stanford: month file 2026-10 breaks"):
+        build.build(store, tmp_path / "out")
+
+    assert not (tmp_path / "out").exists()
