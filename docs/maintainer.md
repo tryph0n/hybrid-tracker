@@ -99,7 +99,8 @@ uv run tracker quality [--out build] # quality table and run summary
 ```
 
 `history` is a one-off run, started by hand with the `history` input of the
-`pipeline` workflow on `main`. It fetches the Stanford days newest first, at
+`pipeline` workflow on `main`. It runs after the Data job, and no job needs
+it. The next build adds the history to the published files. It fetches the Stanford days newest first, at
 most 97 per commit and 25 commits per run, and lists the days that return 404.
 After a stop, run it again: it asks only for the days before the first stored
 day. A day newer than all stored days is the only one that ends the stale cause

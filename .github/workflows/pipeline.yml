@@ -42,11 +42,12 @@ jobs:
       - name: Type check
         run: uv run --locked mypy
 
-  # A manual run only. The Hugging Face token lasts 60 minutes, so the job stops at 60.
-  # A failure here does not stop the Data job.
+  # A manual run on main only, after the Data job. The Hugging Face token lasts 60
+  # minutes, so the job stops at 60. No job needs it: its result cannot skip or stop
+  # the jobs after Data, and the next build adds the history to the published files.
   history:
     name: Stanford history
-    needs: lint
+    needs: data
     if: github.event_name == 'workflow_dispatch' && inputs.history && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -66,8 +67,7 @@ jobs:
 
   data:
     name: Data
-    needs: [lint, history]
-    if: ${{ !cancelled() && needs.lint.result == 'success' }}
+    needs: lint
     runs-on: ubuntu-latest
     timeout-minutes: 15 # a stalled download must not hold the group for hours
     permissions:

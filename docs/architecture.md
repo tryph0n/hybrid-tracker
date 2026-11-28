@@ -63,7 +63,7 @@ flowchart LR
   classDef conditional stroke-dasharray: 6 4
   job_lint["Lint"]
   job_history["Stanford history"]:::conditional
-  job_data["Data"]:::conditional
+  job_data["Data"]
   job_docs["Docs"]
   job_image_check["Docker build check"]:::conditional
   job_image["Docker image"]:::conditional
@@ -73,9 +73,8 @@ flowchart LR
   job_source_alerts["Source alerts"]:::conditional
   job_close_failure["Close failure issue"]:::conditional
   job_heartbeat["Heartbeat"]:::conditional
-  job_lint --> job_history
+  job_data --> job_history
   job_lint --> job_data
-  job_history --> job_data
   job_lint --> job_docs
   job_data --> job_image
   job_docs --> job_image
@@ -109,7 +108,7 @@ flowchart LR
 | --- | --- | --- |
 | Lint |  |  |
 | Stanford history | `github.event_name == 'workflow_dispatch' && inputs.history && github.ref == 'refs/heads/main'` |  |
-| Data | `${{ !cancelled() && needs.lint.result == 'success' }}` |  |
+| Data |  |  |
 | Docs |  |  |
 | Docker build check | `github.event_name == 'pull_request'` |  |
 | Docker image | `github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''` | `DOCKERHUB_TOKEN` (secret), `DOCKER_IMAGE` (variable) |

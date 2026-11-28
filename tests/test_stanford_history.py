@@ -1,6 +1,7 @@
 """The Stanford history run: the days before the first stored day."""
 
 import functools
+import http.client
 import json
 from datetime import date, timedelta
 
@@ -229,3 +230,85 @@ def test_the_command_writes_the_run_summary(local, tmp_path, monkeypatch):
     assert "Added to the raw store: " in text
     summary.unlink()
     assert json.loads((tmp_path / "clean/stanford.json").read_text())["payloads"]
+
+
+class FakeConnection:
+    """A connection whose request, answer or body fails as `fail` says."""
+
+    fail = "timeout"
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def request(self, *args, **kwargs):
+        if self.fail == "timeout":
+            raise TimeoutError("timed out")
+
+    def getresponse(self):
+        return self
+
+    def read(self):
+        if self.fail == "cut":
+            raise http.client.IncompleteRead(b"abc", 10)
+        return b"not brotli"
+
+    status = 200
+
+    def getheader(self, *args):
+        return "br"
+
+    def close(self):
+        pass
+
+
+@pytest.mark.disable_socket
+@pytest.mark.parametrize(
+    ("fail", "text"),
+    [("timeout", "TimeoutError"), ("cut", "IncompleteRead"), ("body", "error")],
+)
+def test_a_timeout_a_cut_answer_or_a_bad_body_stops_the_run_with_the_day(
+    local, monkeypatch, fail, text
+):
+    monkeypatch.setattr(FakeConnection, "fail", fail)
+    monkeypatch.setattr(stanford.http.client, "HTTPSConnection", FakeConnection)
+    monkeypatch.setattr(stanford, "tls_context", lambda: None)
+    day = FIRST_STORED - timedelta(days=1)
+
+    with pytest.raises(UserError, match=f"{day}: .*{text}"):
+        stanford.history(local)
+
+    assert stanford.stored_days(local) == [FIRST_STORED]
+
+
+@pytest.mark.disable_socket
+def test_a_stopped_run_has_the_month_files_of_its_stored_days(local, monkeypatch):
+    calls = []
+    write = stanford.write_months
+
+    def recording(store, months):
+        calls.append(sorted(months))
+        return write(store, months)
+
+    monkeypatch.setattr(stanford, "write_months", recording)
+    healthy = fetcher(YEAR)
+    asked = []
+
+    def stops_on_the_third_chunk(days):
+        asked.append(list(days))
+        if len(asked) == 3:
+            raise OSError(f"{days[0]}: https://x: timed out")
+        return healthy(days)
+
+    with pytest.raises(UserError, match="timed out"):
+        stanford.history(local, stops_on_the_third_chunk)
+
+    kept = stanford.stored_days(local)
+    months = sorted({stanford.month_of(day) for day in kept})
+    assert len(kept) == 1 + 2 * 97
+    assert all(
+        local.backend.read(stanford.month_path(month)) is not None for month in months
+    )
+    open_month = stanford.month_of(asked[0][-1])
+    assert open_month not in calls[0]
+    assert any(open_month in call for call in calls[1:])
+    assert stanford.month_of(asked[1][-1]) in calls[-1]

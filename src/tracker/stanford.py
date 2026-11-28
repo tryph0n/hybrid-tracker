@@ -59,8 +59,8 @@ MAX_PAYLOADS_PER_SAVE = 50
 FIRST_DAY = date(2022, 1, 1)
 """First day of the source."""
 HISTORY_PAYLOADS_PER_SAVE = MAX_FILES_PER_COMMIT - 2
-"""Payloads per commit of the history run: two manifests fit beside them, one
-for each month that a run can span."""
+"""Payloads per commit of the history run: the manifest of the commit fits
+beside them, and one more file is kept free."""
 MAX_HISTORY_COMMITS = 25
 LAT_RANGE = (34.0, 72.0)
 LON_RANGE = (-25.0, 45.0)
@@ -152,9 +152,10 @@ def fetch_days(
         when `skip_missing` is set).
 
     Raises:
-        OSError: A TLS check failed (`ssl.SSLCertVerificationError`), a request
-            failed, or the status of a day is not 200 (a day not published yet
-            gives 404, unless `skip_missing` is set).
+        OSError: A request failed (a TLS check, a timeout, a cut answer, a body
+            that is not valid brotli), or the status of a day is not 200 (a day
+            not published yet gives 404, unless `skip_missing` is set). The
+            message starts with the day, and `__cause__` is the first error.
     """
     started = time.monotonic()
     connection = http.client.HTTPSConnection(
@@ -165,23 +166,29 @@ def fetch_days(
         for day in days:
             path = HEATMAP_PATH.format(day=day)
             url = f"https://{host}{path}"
-            connection.request("GET", path, headers=HEADERS)
-            response = connection.getresponse()
-            body = response.read()
+            try:
+                connection.request("GET", path, headers=HEADERS)
+                response = connection.getresponse()
+                body = response.read()
+            except (OSError, http.client.HTTPException) as error:
+                raise OSError(f"{day}: {url}: {error!r}") from error
             if response.status == 404 and skip_missing:
                 logger.info("stanford: %s not published yet", day)
                 continue
             if response.status != 200:
                 raise OSError(f"{day}: {url}: HTTP {response.status}")
-            payloads.append(
-                make_payload(
-                    day,
-                    url,
-                    response.status,
-                    body,
-                    response.getheader("Content-Encoding", ""),
+            try:
+                payloads.append(
+                    make_payload(
+                        day,
+                        url,
+                        response.status,
+                        body,
+                        response.getheader("Content-Encoding", ""),
+                    )
                 )
-            )
+            except (OSError, brotli.error) as error:
+                raise OSError(f"{day}: {url}: {error!r}") from error
     finally:
         connection.close()
     logger.info(
@@ -504,7 +511,10 @@ def history(store: Store, fetch: Fetcher | None = None) -> History:
     first stored day, and a rerun asks only for the days before it. A run makes
     at most `MAX_HISTORY_COMMITS` commits: a longer history needs a rerun. A day
     that is not published (404) is listed in the result and the run goes on.
-    The month files are written for the days stored, also when the run stops.
+    The days go newest first, so a month is complete once a chunk reaches an
+    older month: the month files are written then, one commit at most per chunk,
+    and the run holds the decoded days of one month at a time. The month files
+    of the days stored are written also when the run stops.
 
     Args:
         store: The raw store. It must hold a day (the daily ingest ran).
@@ -516,8 +526,9 @@ def history(store: Store, fetch: Fetcher | None = None) -> History:
         and the bytes added to the raw store.
 
     Raises:
-        UserError: The store holds no day, or a fetch failed (the message has
-            the day and the error).
+        UserError: The store holds no day, or a fetch failed: a TLS error, a
+            timeout, a bad status, a cut answer (the message has the day and the
+            error). A stored day that `reduce_day` refuses also stops the run.
     """
     fetch = fetch or functools.partial(fetch_days, skip_missing=True)
     stored = stored_days(store)
@@ -532,9 +543,10 @@ def history(store: Store, fetch: Fetcher | None = None) -> History:
     if len(wanted) > limit:
         logger.info("stanford: %d day(s) left for a rerun", len(wanted) - limit)
         wanted = wanted[:limit]
-    lines: list[dict[str, Any]] = []
+    stored_count = 0
     missing: list[date] = []
     size = 0
+    pending: set[str] = set()
     try:
         for start in range(0, len(wanted), HISTORY_PAYLOADS_PER_SAVE):
             chunk = wanted[start : start + HISTORY_PAYLOADS_PER_SAVE]
@@ -542,17 +554,22 @@ def history(store: Store, fetch: Fetcher | None = None) -> History:
             got = {day_of(payload.name) for payload in payloads}
             missing.extend(day for day in chunk if day not in got)
             saved = store.save_many(payloads) if payloads else []
-            lines.extend(saved)
+            stored_count += len(saved)
+            pending.update(fetched_months(saved))
             size += sum(
                 len(payload.content)
                 for payload, line in zip(payloads, saved, strict=True)
                 if line["stored"]
             )
-    except OSError as error:
-        write_months(store, fetched_months(lines))
+            closed = pending - {month_of(chunk[-1])}
+            if closed:
+                write_months(store, closed)
+                pending -= closed
+    except (OSError, http.client.HTTPException, brotli.error) as error:
+        write_months(store, pending)
         raise UserError(f"stanford history stopped: {error}") from error
-    write_months(store, fetched_months(lines))
-    return History(len(lines), sorted(missing), time.monotonic() - started, size)
+    write_months(store, pending)
+    return History(stored_count, sorted(missing), time.monotonic() - started, size)
 
 
 def history_summary(result: History) -> str:
