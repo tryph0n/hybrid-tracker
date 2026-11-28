@@ -1,5 +1,6 @@
 """The Stanford fetch: TLS check, brotli payloads and the raw store."""
 
+import dataclasses
 import functools
 import hashlib
 import http.server
@@ -7,18 +8,17 @@ import ssl
 import subprocess
 import threading
 from datetime import date, timedelta
-from types import SimpleNamespace
 
 import brotli
 import pandas as pd
 import pytest
-from conftest import FIXTURES
+from conftest import FIXTURES, recorded_payloads
 
-from tracker import clock, stanford
+from tracker import clock, ingest, stanford
 from tracker.errors import UserError
 from tracker.ingest import lineage
 from tracker.sources import SOURCES
-from tracker.store import LocalBackend, Store
+from tracker.store import LocalBackend, Payload, Store
 
 DAY = date(2026, 11, 22)
 FIXTURE = (FIXTURES / "stanford_heatmap.json").read_bytes()
@@ -30,13 +30,6 @@ INTERMEDIATE_SHA256 = "87e01cc4dd0c9d92a3dbd49092ff13f9cd387445cdc57e5b984e1b772
 def fixed_clock(monkeypatch):
     now = pd.Timestamp("2026-11-24 04:17:00", tz="UTC")
     monkeypatch.setattr(clock, "utc_now", lambda: now)
-
-
-@pytest.fixture(autouse=True)
-def stanford_source(monkeypatch):
-    monkeypatch.setitem(
-        SOURCES, stanford.SOURCE, SimpleNamespace(updated_by_source=lambda files: None)
-    )
 
 
 @pytest.fixture
@@ -538,3 +531,47 @@ def test_the_month_build_reads_the_stored_days_of_its_months_only(local):
         "heatmap-2026-11-02.json.br",
     ]
     assert sorted(reads) == sorted(files)
+
+
+@pytest.mark.enable_socket
+def test_a_server_error_fails_this_source_only_and_leaves_the_table_as_it_was(
+    tls_server, tmp_path, monkeypatch
+):
+    port, cert, _, _, answer = tls_server
+    monkeypatch.setenv("TRACKER_STORE", "local")
+    monkeypatch.setenv("TRACKER_STORE_DIR", str(tmp_path / "store"))
+    local = Store(LocalBackend(tmp_path / "store"))
+    seed(local, {DAY: FIXTURE})
+    stanford.write_months(local, {"2026-11"})
+    before = {
+        path: local.backend.read(path)
+        for path in ("clean/stanford/2026-11.parquet", "clean/stanford.json")
+    }
+    answer["status"] = 500
+    monkeypatch.setattr(
+        stanford,
+        "fetch_days",
+        functools.partial(
+            stanford.fetch_days,
+            context=stanford.tls_context(cert),
+            host="localhost",
+            port=port,
+            skip_missing=True,
+        ),
+    )
+    eodi = dataclasses.replace(
+        SOURCES["eodi"],
+        extract=lambda: [
+            Payload("eodi", name, content, f"https://e/{name}", 200)
+            for name, content in recorded_payloads("eodi").items()
+        ],
+    )
+    registry = {stanford.SOURCE: SOURCES[stanford.SOURCE], "eodi": eodi}
+    monkeypatch.setattr(ingest, "SOURCES", registry)
+
+    failures = ingest.run("live")
+
+    assert list(failures) == [stanford.SOURCE]
+    assert "HTTP 500" in failures[stanford.SOURCE]
+    assert {path: local.backend.read(path) for path in before} == before
+    assert local.backend.read("clean/eodi.parquet") is not None

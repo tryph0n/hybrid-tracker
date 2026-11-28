@@ -28,6 +28,7 @@ import brotli
 import h3
 import pandas as pd
 
+from tracker import clock
 from tracker.errors import UserError
 from tracker.ingest import (
     encode_lineage,
@@ -465,3 +466,30 @@ def new_day_stored_at(store: Store) -> pd.Timestamp | None:
         fetched = pd.Timestamp(line["fetched_at"])
         first[line["name"]] = min(fetched, first.get(line["name"], fetched))
     return max(first.values()) if first else None
+
+
+def ingest_days(store: Store) -> None:
+    """The ingest of this source: catch up the days, then write the month files.
+
+    Nothing is written to the clean store when the fetch fails, so the table
+    keeps its last data.
+    """
+    lines = catch_up(store, clock.utc_now().date())
+    write_months(store, fetched_months(lines))
+
+
+def rebuild_months(store: Store) -> bool:
+    """Write the month files of every stored day again, offline.
+
+    Returns:
+        False when the raw store holds no day, true otherwise.
+    """
+    months = stored_months(store)
+    if months:
+        write_months(store, months)
+    return bool(months)
+
+
+def has_table(store: Store) -> bool:
+    """Whether the clean store holds a month file of the table."""
+    return table_days(store) is not None

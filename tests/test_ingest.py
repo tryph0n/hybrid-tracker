@@ -5,9 +5,10 @@ import json
 
 import pandas as pd
 import pytest
-from conftest import FIXTURES, recorded_payloads
+from conftest import EVENT_SOURCES, FIXTURES, recorded_payloads
+from test_stanford import FIXTURE, fetcher
 
-from tracker import cli, clock, eodi, ingest, sources
+from tracker import cli, clock, eodi, ingest, sources, stanford
 from tracker.schema import read_csv
 from tracker.store import LocalBackend, Payload, Store, StoreError, open_store
 
@@ -143,7 +144,7 @@ def test_the_command_shows_its_help(capsys):
     assert "live" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("name", sources.SOURCES)
+@pytest.mark.parametrize("name", EVENT_SOURCES)
 def test_normalize_works_offline_on_the_recorded_payloads(name):
     events = sources.SOURCES[name].normalize(recorded_payloads(name))
     ingest.validate(events)
@@ -200,7 +201,7 @@ def test_run_ingests_every_source_of_a_kind(tmp_path, monkeypatch, eodi_events):
     assert clean_bytes(store, "leiden") is None
 
 
-@pytest.mark.parametrize("name", sources.SOURCES)
+@pytest.mark.parametrize("name", EVENT_SOURCES)
 def test_registry_matches_the_recorded_payloads(name):
     source = sources.SOURCES[name]
     assert source.kind in ("live", "static")
@@ -213,7 +214,7 @@ def test_registry_matches_the_recorded_payloads(name):
 def forbid_download(monkeypatch) -> None:
     """Make every source and reference dataset fail if its `extract` is called."""
 
-    def fail() -> list[Payload]:
+    def fail(*args, **kwargs) -> list[Payload]:
         raise AssertionError("rebuild must not download")
 
     for name, source in sources.SOURCES.items():
@@ -224,6 +225,7 @@ def forbid_download(monkeypatch) -> None:
         monkeypatch.setitem(
             sources.REFERENCES, name, dataclasses.replace(reference, extract=fail)
         )
+    monkeypatch.setattr(stanford, "fetch_days", fail)
 
 
 def serve_geonames(monkeypatch, content: bytes = b"zip") -> list[int]:
@@ -277,10 +279,15 @@ def test_the_rebuild_command_runs_without_sockets(tmp_path, monkeypatch):
     serve_recorded(monkeypatch, "eodi")
     serve_recorded(monkeypatch, "leiden")
     serve_geonames(monkeypatch)
+    monkeypatch.setattr(
+        stanford,
+        "fetch_days",
+        lambda days, **kwargs: fetcher({day: FIXTURE for day in days})(days),
+    )
     cli.main(["ingest", "live"])
     cli.main(["ingest", "static"])
     store = open_store()
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         (tmp_path / "store" / ingest.clean_path(name)).unlink()
 
     forbid_download(monkeypatch)
@@ -289,7 +296,7 @@ def test_the_rebuild_command_runs_without_sockets(tmp_path, monkeypatch):
     assert clean_bytes(store, "leiden") is None
 
     cli.main(["rebuild"])
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         assert len(clean_table(store, name)) > 0
 
 

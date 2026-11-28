@@ -16,6 +16,10 @@ from tracker import hub
 from tracker.schema import read_csv
 from tracker.sources import SOURCES
 
+EVENT_SOURCES = {
+    name: source for name, source in SOURCES.items() if source.table == "events"
+}
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 APP = ROOT / "src" / "streamlit_app.py"
@@ -83,7 +87,7 @@ def read_events(name: str) -> pd.DataFrame:
 
 def read_all_events() -> pd.DataFrame:
     """The sample events of every source as one frame."""
-    return pd.concat([read_events(name) for name in SOURCES], ignore_index=True)
+    return pd.concat([read_events(name) for name in EVENT_SOURCES], ignore_index=True)
 
 
 @pytest.fixture

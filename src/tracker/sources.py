@@ -2,16 +2,27 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import NoReturn
 
 import pandas as pd
 
 from tracker import actors, eodi, geonames, leiden
+from tracker.errors import UserError
 from tracker.store import Payload
 
 
 def no_date(files: Mapping[str, bytes]) -> str | None:
     """The date of the last change of a source that gives none."""
     return None
+
+
+def context_only(*args: object) -> NoReturn:
+    """`extract` and `normalize` of a context source, which never calls them.
+
+    A context source is fetched and written by its own module, which
+    `tracker.ingest` calls for it (`Source.table`).
+    """
+    raise UserError("A context source has no extract or normalize step")
 
 
 @dataclass(frozen=True)
@@ -143,6 +154,19 @@ SOURCES = {
         extract=leiden.extract,
         normalize=leiden.normalize,
         updated_by_source=leiden.updated_by_source,
+    ),
+    "stanford": Source(
+        title="Stanford GNSS interference",
+        short_name="Stanford",
+        kind="live",
+        homepage="https://rfi.stanford.edu",
+        licence="CC BY-NC 4.0",
+        licence_page="https://rfi.stanford.edu/resources",
+        family="nc",
+        citation="Source: Stanford GPS Lab, rfi.stanford.edu.",
+        extract=context_only,
+        normalize=context_only,
+        table="context",
     ),
 }
 

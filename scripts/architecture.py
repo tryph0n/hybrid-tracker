@@ -251,7 +251,7 @@ def sources_table() -> str:
             f"[{plain(source.title)}]({source.homepage})",
             plain(source.kind),
             plain(source.licence),
-            code(clean_path(key)),
+            code(f"clean/{key}/" if source.table == "context" else clean_path(key)),
         )
         for key, source in SOURCES.items()
     ]

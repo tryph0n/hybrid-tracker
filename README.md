@@ -24,6 +24,7 @@ The datasets hold the events of the sources, all with the same columns.
 |---|---|---|---|
 | [European Observatory of Drone Incidents](https://droneobservatory.eu) | Drone incidents in Europe | Daily refresh | CC BY 4.0 |
 | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | Operations that the author judges Russian | Frozen snapshot | CC BY 4.0 |
+| [Stanford GNSS interference](https://rfi.stanford.edu) | Daily share of aircraft with a low navigation integrity category, by H3 cell (a context table, in the NonCommercial dataset only). Source: Stanford GPS Lab, rfi.stanford.edu. | Daily refresh | CC BY-NC 4.0 |
 
 Each day at 04:17 UTC, the pipeline downloads each daily source again, checks every row,
 publishes the two datasets, then updates the dashboard. See the

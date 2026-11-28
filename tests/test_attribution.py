@@ -138,7 +138,10 @@ def test_the_check_fails_when_a_source_is_missing_from_a_card_where_it_must_be(
 def test_the_check_fails_when_an_nc_source_is_in_the_open_card(nc_source):
     card = render_card("nc", FILES)
 
-    assert card_problems("open", card) == ["example_nc must be absent"]
+    assert sorted(card_problems("open", card)) == [
+        "example_nc must be absent",
+        "stanford must be absent",
+    ]
 
 
 @pytest.mark.parametrize("family", FAMILIES)

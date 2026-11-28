@@ -30,6 +30,7 @@ Where the events come from, where they are stored, and where they go. Rounded bo
 flowchart TB
   source_eodi("eodi<br/>live")
   source_leiden("leiden<br/>static")
+  source_stanford("stanford<br/>live")
   ingest["tracker.ingest"]
   app["streamlit_app.py"]
   service_Docker_Hub("Docker Hub")
@@ -38,6 +39,7 @@ flowchart TB
   service_Heartbeat_monitor("Heartbeat monitor")
   source_eodi -->|"Data job"| ingest
   source_leiden -->|"Data job"| ingest
+  source_stanford -->|"Data job"| ingest
   app -->|"Docker image job"| service_Docker_Hub
   service_Docker_Hub -->|"Deploy to Render job"| service_Render
   ingest -->|"Hugging Face publish job"| service_Hugging_Face
@@ -48,6 +50,7 @@ flowchart TB
 | --- | --- | --- | --- | --- |
 | `eodi` | [European Observatory of Drone Incidents](https://droneobservatory.eu) | live | CC BY 4.0 | `clean/eodi.parquet` |
 | `leiden` | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | static | CC BY 4.0 | `clean/leiden.parquet` |
+| `stanford` | [Stanford GNSS interference](https://rfi.stanford.edu) | live | CC BY-NC 4.0 | `clean/stanford/` |
 
 ## Pipeline
 
@@ -221,6 +224,7 @@ flowchart TB
   module_tracker_ingest --> module_tracker_provenance
   module_tracker_ingest --> module_tracker_schema
   module_tracker_ingest --> module_tracker_sources
+  module_tracker_ingest --> module_tracker_stanford
   module_tracker_ingest --> module_tracker_store
   module_tracker_leiden --> module_tracker_errors
   module_tracker_leiden --> module_tracker_schema
@@ -243,9 +247,11 @@ flowchart TB
   module_tracker_schema --> module_tracker_errors
   module_tracker_sources --> module_tracker_actors
   module_tracker_sources --> module_tracker_eodi
+  module_tracker_sources --> module_tracker_errors
   module_tracker_sources --> module_tracker_geonames
   module_tracker_sources --> module_tracker_leiden
   module_tracker_sources --> module_tracker_store
+  module_tracker_stanford --> module_tracker_clock
   module_tracker_stanford --> module_tracker_errors
   module_tracker_stanford --> module_tracker_ingest
   module_tracker_stanford --> module_tracker_store

@@ -1,6 +1,5 @@
 """The quality row and the stale alert of the Stanford context source."""
 
-import dataclasses
 import json
 from datetime import date, timedelta
 
@@ -11,7 +10,6 @@ from test_stanford import FIXTURE, changed, fetcher, seed
 
 from tracker import alerts, cli, clock, ingest, quality, stanford
 from tracker.errors import UserError
-from tracker.sources import SOURCES, no_date
 from tracker.store import LocalBackend, Store
 
 pytestmark = pytest.mark.disable_socket
@@ -26,17 +24,6 @@ def set_clock(monkeypatch, days_later: int) -> date:
     now = START + pd.Timedelta(days=days_later)
     monkeypatch.setattr(clock, "utc_now", lambda: now)
     return now.date()
-
-
-@pytest.fixture(autouse=True)
-def stanford_source(monkeypatch):
-    monkeypatch.setitem(
-        SOURCES,
-        stanford.SOURCE,
-        dataclasses.replace(
-            SOURCES["eodi"], table="context", updated_by_source=no_date
-        ),
-    )
 
 
 @pytest.fixture
