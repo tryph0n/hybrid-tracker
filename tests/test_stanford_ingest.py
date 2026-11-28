@@ -45,6 +45,7 @@ def test_the_registry_entry_records_the_licence_the_family_and_the_credit_line()
 
     assert source.licence == "CC BY-NC 4.0"
     assert source.family == "nc"
+    assert source.kind == "live"
     assert source.table == "context"
     assert source.licence_page == "https://rfi.stanford.edu/resources"
     assert source.citation == "Source: Stanford GPS Lab, rfi.stanford.edu."

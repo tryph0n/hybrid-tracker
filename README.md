@@ -18,7 +18,8 @@ Europe since 2022, from open datasets.
 
 ## Data
 
-The datasets hold the events of the sources, all with the same columns.
+The events come from the event sources, all with the same columns. Stanford gives a
+context table, in the NonCommercial dataset only.
 
 | Source | Content | Updates | Licence |
 |---|---|---|---|

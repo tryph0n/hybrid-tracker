@@ -26,6 +26,16 @@ def store(tmp_path) -> Store:
     return Store(LocalBackend(tmp_path / "store"))
 
 
+@pytest.fixture(autouse=True)
+def stanford_recorded(monkeypatch):
+    """Serve the recorded Stanford day, so no test tries the real fetch."""
+    monkeypatch.setattr(
+        stanford,
+        "fetch_days",
+        lambda days, **kwargs: fetcher({day: FIXTURE for day in days})(days),
+    )
+
+
 def serve(monkeypatch, name: str, events: pd.DataFrame) -> None:
     """Make source `name` download one payload and map it to `events`."""
     source = dataclasses.replace(
@@ -279,11 +289,6 @@ def test_the_rebuild_command_runs_without_sockets(tmp_path, monkeypatch):
     serve_recorded(monkeypatch, "eodi")
     serve_recorded(monkeypatch, "leiden")
     serve_geonames(monkeypatch)
-    monkeypatch.setattr(
-        stanford,
-        "fetch_days",
-        lambda days, **kwargs: fetcher({day: FIXTURE for day in days})(days),
-    )
     cli.main(["ingest", "live"])
     cli.main(["ingest", "static"])
     store = open_store()

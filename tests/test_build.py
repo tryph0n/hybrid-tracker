@@ -306,7 +306,7 @@ def test_a_folder_without_sql_fails_the_build(store, tmp_path):
 
 
 def test_every_source_has_a_known_family():
-    for source in EVENT_SOURCES.values():
+    for source in sources.SOURCES.values():
         assert source.family in sources.FAMILIES
 
 
