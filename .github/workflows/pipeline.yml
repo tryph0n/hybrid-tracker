@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "17 4 * * *" # every day at 04:17 UTC
   workflow_dispatch:
+    inputs:
+      history:
+        description: Fetch the Stanford history before the daily refresh
+        type: boolean
+        default: false
 
 # One run at a time: a data refresh and a code push must not race.
 # Pull requests get their own group so they never cancel a pending main run.
@@ -37,9 +42,32 @@ jobs:
       - name: Type check
         run: uv run --locked mypy
 
+  # A manual run only. The Hugging Face token lasts 60 minutes, so the job stops at 60.
+  # A failure here does not stop the Data job.
+  history:
+    name: Stanford history
+    needs: lint
+    if: github.event_name == 'workflow_dispatch' && inputs.history && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write # the raw store signs in with the run OIDC token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - name: Install
+        run: uv sync --locked
+      - name: Fetch the history
+        env:
+          TRACKER_STORE: hf
+          HF_OIDC_RESOURCE: datasets/sam-bot/hybrid-tracker-raw
+        run: uv run tracker history
+
   data:
     name: Data
-    needs: lint
+    needs: [lint, history]
+    if: ${{ !cancelled() && needs.lint.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15 # a stalled download must not hold the group for hours
     permissions:

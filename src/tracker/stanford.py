@@ -20,6 +20,7 @@ import logging
 import ssl
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,7 @@ from tracker.ingest import (
     read_lineage,
     without_commit,
 )
-from tracker.store import Payload, Store
+from tracker.store import MAX_FILES_PER_COMMIT, Payload, Store
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,12 @@ TIMEOUT = 60
 RECHECK_DAYS = 7
 FIRST_RUN_LOOKBACK = 14
 MAX_PAYLOADS_PER_SAVE = 50
+FIRST_DAY = date(2022, 1, 1)
+"""First day of the source."""
+HISTORY_PAYLOADS_PER_SAVE = MAX_FILES_PER_COMMIT - 2
+"""Payloads per commit of the history run: two manifests fit beside them, one
+for each month that a run can span."""
+MAX_HISTORY_COMMITS = 25
 LAT_RANGE = (34.0, 72.0)
 LON_RANGE = (-25.0, 45.0)
 COLUMNS = [
@@ -165,7 +172,7 @@ def fetch_days(
                 logger.info("stanford: %s not published yet", day)
                 continue
             if response.status != 200:
-                raise OSError(f"{url}: HTTP {response.status}")
+                raise OSError(f"{day}: {url}: HTTP {response.status}")
             payloads.append(
                 make_payload(
                     day,
@@ -456,16 +463,108 @@ def table_days(store: Store) -> pd.DataFrame | None:
 
 
 def new_day_stored_at(store: Store) -> pd.Timestamp | None:
-    """Time of the latest run that stored a day for the first time, None if none did.
+    """Time of the latest run that stored a day newer than all earlier days, None if none did.
 
-    A run that stores a new file of a day already held, or that fetches days
-    again with no change, does not count.
+    A run that stores a new file of a day already held, that fetches days again
+    with no change, or that stores only days older than the newest day held
+    (the history run) does not count: the source published no new day.
     """
-    first: dict[str, pd.Timestamp] = {}
+    runs: dict[pd.Timestamp, list[date]] = {}
+    seen: set[str] = set()
     for line in store.payloads(SOURCE):
-        fetched = pd.Timestamp(line["fetched_at"])
-        first[line["name"]] = min(fetched, first.get(line["name"], fetched))
-    return max(first.values()) if first else None
+        if line["name"] not in seen:
+            seen.add(line["name"])
+            runs.setdefault(pd.Timestamp(line["fetched_at"]), []).append(
+                day_of(line["name"])
+            )
+    newest: date | None = None
+    found: pd.Timestamp | None = None
+    for fetched, days in sorted(runs.items()):
+        if newest is None or max(days) > newest:
+            found = fetched
+            newest = max(days)
+    return found
+
+
+@dataclass(frozen=True)
+class History:
+    """The result of `history`."""
+
+    stored: int
+    missing: list[date]
+    seconds: float
+    size: int
+
+
+def history(store: Store, fetch: Fetcher | None = None) -> History:
+    """Fetch the days before the first stored day, back to `FIRST_DAY`, and save them.
+
+    The days go newest first, `HISTORY_PAYLOADS_PER_SAVE` per fetch and per
+    commit, so a stopped run leaves the days stored without a gap before the
+    first stored day, and a rerun asks only for the days before it. A run makes
+    at most `MAX_HISTORY_COMMITS` commits: a longer history needs a rerun. A day
+    that is not published (404) is listed in the result and the run goes on.
+    The month files are written for the days stored, also when the run stops.
+
+    Args:
+        store: The raw store. It must hold a day (the daily ingest ran).
+        fetch: Fetches days and leaves out the missing ones. Default:
+            `fetch_days` with `skip_missing`.
+
+    Returns:
+        The days stored, the days that are not published, the time of the run
+        and the bytes added to the raw store.
+
+    Raises:
+        UserError: The store holds no day, or a fetch failed (the message has
+            the day and the error).
+    """
+    fetch = fetch or functools.partial(fetch_days, skip_missing=True)
+    stored = stored_days(store)
+    if not stored:
+        raise UserError("stanford: the store holds no day, run `tracker ingest` first")
+    started = time.monotonic()
+    wanted = [
+        stored[0] - timedelta(days=n)
+        for n in range(1, (stored[0] - FIRST_DAY).days + 1)
+    ]
+    limit = MAX_HISTORY_COMMITS * HISTORY_PAYLOADS_PER_SAVE
+    if len(wanted) > limit:
+        logger.info("stanford: %d day(s) left for a rerun", len(wanted) - limit)
+        wanted = wanted[:limit]
+    lines: list[dict[str, Any]] = []
+    missing: list[date] = []
+    size = 0
+    try:
+        for start in range(0, len(wanted), HISTORY_PAYLOADS_PER_SAVE):
+            chunk = wanted[start : start + HISTORY_PAYLOADS_PER_SAVE]
+            payloads = fetch(chunk)
+            got = {day_of(payload.name) for payload in payloads}
+            missing.extend(day for day in chunk if day not in got)
+            saved = store.save_many(payloads) if payloads else []
+            lines.extend(saved)
+            size += sum(
+                len(payload.content)
+                for payload, line in zip(payloads, saved, strict=True)
+                if line["stored"]
+            )
+    except OSError as error:
+        write_months(store, fetched_months(lines))
+        raise UserError(f"stanford history stopped: {error}") from error
+    write_months(store, fetched_months(lines))
+    return History(len(lines), sorted(missing), time.monotonic() - started, size)
+
+
+def history_summary(result: History) -> str:
+    """The Markdown for the run summary: days stored, missing days, time and size."""
+    gaps = ", ".join(f"{day}" for day in result.missing) or "none"
+    return (
+        "### Stanford history\n\n"
+        f"- Days stored: {result.stored}\n"
+        f"- Missing days (404): {len(result.missing)} ({gaps})\n"
+        f"- Time: {result.seconds:.0f} s\n"
+        f"- Added to the raw store: {result.size / 1e6:.1f} MB\n"
+    )
 
 
 def ingest_days(store: Store) -> None:

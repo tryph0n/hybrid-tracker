@@ -56,13 +56,14 @@ flowchart TB
 
 The jobs of each workflow in `.github/workflows/`. Jobs run from left to right: a job starts when the jobs it needs have passed. Dashed jobs run only when their `if` condition holds. Edge labels name the job outputs that the next job reads. Secrets and variables are set in the repository settings (Secrets and variables, Actions). The steps table leaves out the steps without a name, and shows "a script" for a `run` of several lines.
 
-`pipeline.yml` runs on `push` (`branches: main`), `pull_request`, `schedule` (`cron: 17 4 * * *`), `workflow_dispatch`.
+`pipeline.yml` runs on `push` (`branches: main`), `pull_request`, `schedule` (`cron: 17 4 * * *`), `workflow_dispatch` (`inputs: history: description: Fetch the Stanford history before the daily refresh, type: boolean, default: false`).
 
 ```mermaid
 flowchart LR
   classDef conditional stroke-dasharray: 6 4
   job_lint["Lint"]
-  job_data["Data"]
+  job_history["Stanford history"]:::conditional
+  job_data["Data"]:::conditional
   job_docs["Docs"]
   job_image_check["Docker build check"]:::conditional
   job_image["Docker image"]:::conditional
@@ -72,7 +73,9 @@ flowchart LR
   job_source_alerts["Source alerts"]:::conditional
   job_close_failure["Close failure issue"]:::conditional
   job_heartbeat["Heartbeat"]:::conditional
+  job_lint --> job_history
   job_lint --> job_data
+  job_history --> job_data
   job_lint --> job_docs
   job_data --> job_image
   job_docs --> job_image
@@ -105,7 +108,8 @@ flowchart LR
 | Job | Runs if | Secrets and variables |
 | --- | --- | --- |
 | Lint |  |  |
-| Data |  |  |
+| Stanford history | `github.event_name == 'workflow_dispatch' && inputs.history && github.ref == 'refs/heads/main'` |  |
+| Data | `${{ !cancelled() && needs.lint.result == 'success' }}` |  |
 | Docs |  |  |
 | Docker build check | `github.event_name == 'pull_request'` |  |
 | Docker image | `github.ref == 'refs/heads/main' && vars.DOCKER_IMAGE != ''` | `DOCKERHUB_TOKEN` (secret), `DOCKER_IMAGE` (variable) |
@@ -121,6 +125,8 @@ flowchart LR
 | Lint | Install |  | `uv sync --locked` |
 | Lint | Lint |  | `uv run ruff check . && uv run ruff format --check .` |
 | Lint | Type check |  | `uv run --locked mypy` |
+| Stanford history | Install |  | `uv sync --locked` |
+| Stanford history | Fetch the history |  | `uv run tracker history` |
 | Data | Install |  | `uv sync --locked` |
 | Data | Refresh live sources | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest live` |
 | Data | Ingest static sources missing from the store | `github.event_name == 'schedule' \|\| github.event_name == 'workflow_dispatch'` | `uv run tracker ingest static --if-missing` |
@@ -208,6 +214,7 @@ flowchart TB
   module_tracker_cli --> module_tracker_publish
   module_tracker_cli --> module_tracker_quality
   module_tracker_cli --> module_tracker_sources
+  module_tracker_cli --> module_tracker_stanford
   module_tracker_cli --> module_tracker_store
   module_tracker_dedup --> module_tracker_errors
   module_tracker_eodi --> module_tracker_errors
