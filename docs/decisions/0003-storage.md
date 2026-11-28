@@ -68,14 +68,26 @@ One folder holds at most 10,000 entries, so the raw store is sharded by date.
 - Payloads: `raw/<source>/<YYYY>/<MM>/<DD>/<file>`, as fetched.
 - News article metadata: `news/<source>/<YYYY>/<MM>/<DD>/<file>`.
 - Clean tables: `clean/<source>.parquet`, one file per source.
+- Clean tables of a context table (one row per cell and per day, which grows
+  each day): `clean/<source>/<YYYY>-<MM>.parquet`, one file per calendar month
+  of the data. A run rewrites only the month files of the days that it stored
+  or changed.
 
 Each public dataset keeps its published files at the root of the repository,
-as the current dataset does.
+as the current dataset does. A context table is the exception: its month files
+are in a folder, `<table>/<YYYY>-<MM>.parquet`, and a publish sends only the
+month files that differ from the Hub. Reason: the stores keep their history, so
+one file rewritten on each run adds about 24 to 27 GB a year, and month files
+add about 0.2 to 0.3 GB a year (measured on real files of the source). One
+commit to the NonCommercial dataset also stays under the 50 to 100 files that
+the Hub advises.
 
 ### File names of the published tables
 
 `events.parquet`, `events.csv`, `sources.parquet`, `quality.parquet`, and the
-dataset card `README.md`. The two public datasets use the same names.
+dataset card `README.md`. The two public datasets use the same names. The card
+lists the month files of a context table in one `configs` entry, with the
+pattern `<table>/*.parquet`.
 
 ### Versions of the public datasets
 

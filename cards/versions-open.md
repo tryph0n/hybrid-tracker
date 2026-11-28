@@ -12,6 +12,12 @@ The branch `main` holds `events.parquet`, `events.csv`, `sources.parquet` and
 the quality table, and no longer holds `eodi.csv` or `leiden.csv`. To read a
 tag, use the file names of that tag.
 
+### 2.7.0
+
+The same data as 2.6.0. The version follows the NonCommercial dataset, which has
+a new table (`gnss_interference`) that this dataset does not hold. The tag
+`v2.7.0` is on the commit of the first upload.
+
 ### 2.6.0
 
 One new column in `events`: `drone_presence`. It gives whether an authority

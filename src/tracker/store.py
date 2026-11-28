@@ -56,6 +56,10 @@ class Payload:
     content: bytes
     url: str
     status: int
+    decoded: bytes | None = None
+    """The file that `content` is a compressed form of. The store compares the
+    SHA-256 of this file, not of `content`, so the same file compressed another
+    way is not a new payload. None when `content` is the file itself."""
 
 
 class LocalBackend:
@@ -157,7 +161,8 @@ class Store:
             path = manifests_path(month)
             if path not in manifests:
                 manifests[path] = self._read_manifest(path)
-            digest = hashlib.sha256(payload.content).hexdigest()
+            compared = payload.content if payload.decoded is None else payload.decoded
+            digest = hashlib.sha256(compared).hexdigest()
             previous = self._latest_line(payload.source, payload.name, manifests)
             stored = previous is None or previous["sha256"] != digest
             line: dict[str, Any] = {

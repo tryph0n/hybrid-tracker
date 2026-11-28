@@ -2,13 +2,16 @@ import dataclasses
 import hashlib
 import io
 import shutil
+from datetime import date
 
 import duckdb
 import pandas as pd
 import pytest
-from conftest import FIXTURES, GEONAMES_PLACES, ROOT, geonames_archive
+from conftest import EVENT_SOURCES, FIXTURES, GEONAMES_PLACES, ROOT, geonames_archive
+from test_stanford import FIXTURE, seed
 
-from tracker import actors, build, cli, geonames, ingest, publish, sources
+from tracker import actors, build, cli, geonames, ingest, publish, sources, stanford
+from tracker.errors import UserError
 from tracker.schema import PUBLISHED_COLUMNS, read_csv
 from tracker.store import LocalBackend, Payload, Store
 
@@ -41,7 +44,7 @@ def put_actors(store: Store, content: bytes | None = None) -> None:
 @pytest.fixture
 def store(tmp_path) -> Store:
     store = Store(LocalBackend(tmp_path / "store"))
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         put_clean(store, name, fixture_events(name))
     put_geonames(store)
     put_actors(store)
@@ -105,8 +108,8 @@ def test_build_writes_the_three_files_of_each_family(store, tmp_path):
         assert len(read_csv(out / family / "events.csv")) == len(events)
         assert events["event_id"].is_unique
         listed = pd.read_parquet(out / family / "sources.parquet")
-        assert sorted(listed["source"]) == sorted(sources.SOURCES)
-    total = sum(len(fixture_events(name)) for name in sources.SOURCES)
+        assert sorted(listed["source"]) == sorted(EVENT_SOURCES)
+    total = sum(len(fixture_events(name)) for name in EVENT_SOURCES)
     assert len(pd.read_parquet(out / "open" / "events.parquet")) == total
 
 
@@ -120,7 +123,7 @@ def test_two_builds_give_the_same_bytes(store, tmp_path):
 
 def test_the_output_does_not_depend_on_the_input_row_order(store, tmp_path):
     build.build(store, tmp_path / "one")
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         shuffled = fixture_events(name).sample(frac=1, random_state=3)
         put_clean(store, name, shuffled)
     build.build(store, tmp_path / "two")
@@ -235,6 +238,7 @@ def test_a_source_without_a_clean_table_is_left_out(
 
 
 def test_the_card_of_a_build_without_a_source_does_not_name_it(store, tmp_path):
+    add_context_source(store, CONTEXT_DAYS)
     (store.backend.root / ingest.clean_path("leiden")).unlink()
     out = tmp_path / "out"
     left_out = build.build(store, out)
@@ -252,6 +256,7 @@ def test_the_card_of_a_build_without_a_source_does_not_name_it(store, tmp_path):
 
 
 def test_a_build_with_every_clean_table_leaves_out_nothing(store, tmp_path):
+    add_context_source(store, CONTEXT_DAYS)
     assert build.build(store, tmp_path / "out") == []
 
 
@@ -277,7 +282,7 @@ def test_a_family_with_no_built_source_is_written_empty_and_named(
 
 
 def test_a_build_with_no_clean_table_fails(store, tmp_path):
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         (store.backend.root / ingest.clean_path(name)).unlink()
 
     with pytest.raises(ValueError, match="No source has a clean table"):
@@ -372,7 +377,7 @@ def test_a_source_that_gives_coordinates_is_never_overwritten(store, tmp_path):
         ],
     )
     events = build_events(store, tmp_path)
-    given = pd.concat([fixture_events(name) for name in sources.SOURCES])
+    given = pd.concat([fixture_events(name) for name in EVENT_SOURCES])
     given = given[given["lat"].notna()].set_index("event_id")
 
     assert len(given) > 5
@@ -384,7 +389,7 @@ def test_a_source_that_gives_coordinates_is_never_overwritten(store, tmp_path):
 
 def test_only_rows_without_source_coordinates_gain_the_place_precision(store, tmp_path):
     events = build_events(store, tmp_path)
-    clean = pd.concat([fixture_events(name) for name in sources.SOURCES])
+    clean = pd.concat([fixture_events(name) for name in EVENT_SOURCES])
     clean = clean.set_index("event_id")
 
     gained = events[events["lat"].notna() & clean.loc[events.index, "lat"].isna()]
@@ -482,7 +487,7 @@ def test_an_ambiguous_name_gives_the_same_coordinates_whatever_the_file_order(
 
 def test_the_build_fails_without_a_geonames_file(tmp_path):
     store = Store(LocalBackend(tmp_path / "empty"))
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         put_clean(store, name, fixture_events(name))
 
     with pytest.raises(ValueError, match="geonames.*ingest geonames"):
@@ -508,7 +513,7 @@ def test_the_open_family_gets_the_threat_actors_table_and_the_nc_family_does_not
 
 def test_the_build_fails_without_a_misp_galaxy_file(tmp_path):
     store = Store(LocalBackend(tmp_path / "empty"))
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         put_clean(store, name, fixture_events(name))
     put_geonames(store)
 
@@ -654,7 +659,7 @@ def test_a_stored_table_without_drone_presence_is_read_as_empty(store, tmp_path)
 def test_a_build_on_tables_that_all_lack_drone_presence_gives_an_empty_column(
     store, tmp_path
 ):
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         put_clean(store, name, fixture_events(name).drop(columns="drone_presence"))
 
     events = build_events(store, tmp_path)
@@ -668,3 +673,105 @@ def test_a_stored_table_without_a_required_column_fails_the_build(store, tmp_pat
 
     with pytest.raises(ValueError, match="without title"):
         build_events(store, tmp_path)
+
+
+CONTEXT_CITATION = sources.SOURCES[stanford.SOURCE].citation
+
+
+def add_context_source(store: Store, days: list[date]) -> None:
+    """Store the month files of the context source, as a run does."""
+    seed(store, {day: FIXTURE for day in days})
+    stanford.write_months(store, {stanford.month_of(day) for day in days})
+
+
+MONTHS = ["2026-10", "2026-11"]
+CONTEXT_DAYS = [date(2026, 10, 31), date(2026, 11, 1)]
+
+
+def test_a_context_table_is_in_the_nc_build_folder_only_and_not_in_the_events(
+    store, tmp_path
+):
+    add_context_source(store, CONTEXT_DAYS)
+    out = tmp_path / "out"
+
+    left_out = build.build(store, out)
+    again = build.build(store, out)
+
+    assert left_out == again == []
+    folder = out / "nc" / stanford.TABLE
+    assert sorted(path.name for path in folder.iterdir()) == [
+        f"{month}.parquet" for month in MONTHS
+    ]
+    for month in MONTHS:
+        stored = store.backend.read(stanford.month_path(month))
+        assert (folder / f"{month}.parquet").read_bytes() == stored
+    assert not (out / "open" / stanford.TABLE).exists()
+    assert sorted(path.name for path in (out / "open").iterdir()) == sorted(OPEN_FILES)
+    for family in sources.FAMILIES:
+        events = pd.read_parquet(out / family / "events.parquet")
+        assert stanford.SOURCE not in set(events["source"])
+        assert len(events) == sum(len(fixture_events(name)) for name in fixture_names())
+
+
+def test_a_context_source_has_a_row_in_the_nc_sources_table_only(store, tmp_path):
+    build.build(store, tmp_path / "before")
+    add_context_source(store, CONTEXT_DAYS)
+
+    build.build(store, tmp_path / "out")
+
+    before, out = tmp_path / "before", tmp_path / "out"
+    listed = pd.read_parquet(out / "nc" / "sources.parquet")
+    row = listed[listed["source"] == stanford.SOURCE]
+    assert row[["title", "licence", "citation"]].values.tolist() == [
+        [sources.SOURCES[stanford.SOURCE].title, "CC BY-NC 4.0", CONTEXT_CITATION]
+    ]
+    others = listed[listed["source"] != stanford.SOURCE].reset_index(drop=True)
+    assert others.equals(pd.read_parquet(before / "nc" / "sources.parquet"))
+    credit_lines = "\n".join(publish.credits("nc", listed["source"]))
+    assert f"- {CONTEXT_CITATION} CC BY-NC 4.0." in credit_lines
+    open_sources = "open/sources.parquet"
+    assert (out / open_sources).read_bytes() == (before / open_sources).read_bytes()
+
+
+def test_the_source_count_in_the_log_includes_the_context_source_of_nc_only(
+    store, tmp_path, caplog
+):
+    build.build(store, tmp_path / "before")
+    add_context_source(store, CONTEXT_DAYS)
+    caplog.set_level("INFO")
+
+    build.build(store, tmp_path / "out")
+
+    listed = pd.read_parquet(tmp_path / "out" / "nc" / "sources.parquet")
+    assert f"nc: {len(listed)} sources" in caplog.text
+    open_listed = pd.read_parquet(tmp_path / "out" / "open" / "sources.parquet")
+    assert f"open: {len(open_listed)} sources" in caplog.text
+    assert stanford.SOURCE in set(listed["source"])
+    assert stanford.SOURCE not in set(open_listed["source"])
+
+
+def fixture_names() -> list[str]:
+    return [name for name in sources.SOURCES if name != stanford.SOURCE]
+
+
+def test_a_context_source_with_no_month_file_is_left_out(store, tmp_path):
+    add_context_source(store, [])
+
+    left_out = build.build(store, tmp_path / "out")
+
+    assert left_out == [stanford.SOURCE]
+    assert not (tmp_path / "out" / "nc" / stanford.TABLE).exists()
+
+
+def test_a_month_file_with_other_columns_fails_the_build_and_writes_nothing(
+    store, tmp_path
+):
+    add_context_source(store, CONTEXT_DAYS)
+    wrong = io.BytesIO()
+    pd.DataFrame({"day": [CONTEXT_DAYS[0]]}).to_parquet(wrong, index=False)
+    store.backend.commit({stanford.month_path("2026-10"): wrong.getvalue()}, "test")
+
+    with pytest.raises(UserError, match="stanford: month file 2026-10 breaks"):
+        build.build(store, tmp_path / "out")
+
+    assert not (tmp_path / "out").exists()

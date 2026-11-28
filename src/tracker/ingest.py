@@ -67,6 +67,9 @@ def lineage(
     Args:
         name: Key of `SOURCES`.
         files: Payload file name to bytes, the ones that make the table.
+            For a source that the store keeps compressed (Stanford), the decoded
+            files: the manifest holds their hash, and the `sha256` of the record
+            is then the hash of the decoded file, not of the file at `path`.
         store: The raw store, whose manifest gives the path of each payload.
         rows: Number of rows of the table.
 
@@ -242,6 +245,11 @@ def ingest(name: str, store: Store) -> None:
         ValueError: The events fail `validate`, or the download loses more than
             the `MAX_SHRINK` share of the stored events.
     """
+    if SOURCES[name].table == "context":
+        from tracker import stanford  # here: stanford imports this module
+
+        stanford.ingest_days(store)
+        return
     payloads = SOURCES[name].extract()
     store.save_many(payloads)
     write_clean(name, {p.name: p.content for p in payloads}, store)
@@ -298,6 +306,16 @@ def rebuild(name: str | None, store: Store, allow_shrink: bool = False) -> None:
     if name is not None and name not in SOURCES:
         raise KeyError(name)
     for key in SOURCES if name is None else [name]:
+        if SOURCES[key].table == "context":
+            from tracker import stanford  # here: stanford imports this module
+
+            if not stanford.rebuild_months(store):
+                if name is not None:
+                    raise UserError(
+                        f"{key}: no stored payload, run `tracker ingest {key}`"
+                    )
+                logger.warning("%s: no stored payload, skipped", key)
+            continue
         files = latest_payloads(key, store)
         if not files:
             if name is not None:
@@ -305,6 +323,20 @@ def rebuild(name: str | None, store: Store, allow_shrink: bool = False) -> None:
             logger.warning("%s: no stored payload, skipped", key)
             continue
         write_clean(key, files, store, allow_shrink)
+
+
+def has_clean_table(name: str, store: Store) -> bool:
+    """Whether the store holds the clean table of a source and its lineage record.
+
+    The clean table of a context source is its month files.
+    """
+    if SOURCES[name].table == "context":
+        from tracker import stanford  # here: stanford imports this module
+
+        table = stanford.has_table(store)
+    else:
+        table = store.backend.read(clean_path(name)) is not None
+    return table and read_lineage(name, store) is not None
 
 
 def run(target: str, if_missing: bool = False) -> dict[str, str]:
@@ -343,11 +375,7 @@ def run(target: str, if_missing: bool = False) -> dict[str, str]:
                 logger.info("%s: payload in the store, skipped", name)
                 continue
             ingest_reference(name, store)
-        elif (
-            if_missing
-            and store.backend.read(clean_path(name)) is not None
-            and read_lineage(name, store) is not None
-        ):
+        elif if_missing and has_clean_table(name, store):
             logger.info("%s: clean table and lineage in the store, skipped", name)
         elif len(names) == 1:
             ingest(name, store)

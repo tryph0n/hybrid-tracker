@@ -30,6 +30,7 @@ Where the events come from, where they are stored, and where they go. Rounded bo
 flowchart TB
   source_eodi("eodi<br/>live")
   source_leiden("leiden<br/>static")
+  source_stanford("stanford<br/>live")
   ingest["tracker.ingest"]
   app["streamlit_app.py"]
   service_Docker_Hub("Docker Hub")
@@ -38,6 +39,7 @@ flowchart TB
   service_Heartbeat_monitor("Heartbeat monitor")
   source_eodi -->|"Data job"| ingest
   source_leiden -->|"Data job"| ingest
+  source_stanford -->|"Data job"| ingest
   app -->|"Docker image job"| service_Docker_Hub
   service_Docker_Hub -->|"Deploy to Render job"| service_Render
   ingest -->|"Hugging Face publish job"| service_Hugging_Face
@@ -48,6 +50,7 @@ flowchart TB
 | --- | --- | --- | --- | --- |
 | `eodi` | [European Observatory of Drone Incidents](https://droneobservatory.eu) | live | CC BY 4.0 | `clean/eodi.parquet` |
 | `leiden` | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | static | CC BY 4.0 | `clean/leiden.parquet` |
+| `stanford` | [Stanford GNSS interference](https://rfi.stanford.edu) | live | CC BY-NC 4.0 | `clean/stanford/` |
 
 ## Pipeline
 
@@ -177,6 +180,7 @@ flowchart TB
   module_tracker_quality["tracker.quality"]
   module_tracker_schema["tracker.schema"]
   module_tracker_sources["tracker.sources"]
+  module_tracker_stanford["tracker.stanford"]
   module_tracker_store["tracker.store"]
   module_tracker_views["tracker.views"]
   module_architecture_py["architecture.py"]
@@ -195,6 +199,7 @@ flowchart TB
   module_tracker_build --> module_tracker_ingest
   module_tracker_build --> module_tracker_schema
   module_tracker_build --> module_tracker_sources
+  module_tracker_build --> module_tracker_stanford
   module_tracker_build --> module_tracker_store
   module_tracker_cli --> module_tracker_alerts
   module_tracker_cli --> module_tracker_build
@@ -210,12 +215,16 @@ flowchart TB
   module_tracker_eodi --> module_tracker_store
   module_tracker_geonames --> module_tracker_errors
   module_tracker_geonames --> module_tracker_store
+  module_tracker_hub --> module_tracker_build
+  module_tracker_hub --> module_tracker_errors
   module_tracker_hub --> module_tracker_publish
+  module_tracker_hub --> module_tracker_sources
   module_tracker_ingest --> module_tracker_clock
   module_tracker_ingest --> module_tracker_errors
   module_tracker_ingest --> module_tracker_provenance
   module_tracker_ingest --> module_tracker_schema
   module_tracker_ingest --> module_tracker_sources
+  module_tracker_ingest --> module_tracker_stanford
   module_tracker_ingest --> module_tracker_store
   module_tracker_leiden --> module_tracker_errors
   module_tracker_leiden --> module_tracker_schema
@@ -227,19 +236,26 @@ flowchart TB
   module_tracker_publish --> module_tracker_quality
   module_tracker_publish --> module_tracker_schema
   module_tracker_publish --> module_tracker_sources
+  module_tracker_publish --> module_tracker_stanford
   module_tracker_quality --> module_tracker_build
   module_tracker_quality --> module_tracker_clock
   module_tracker_quality --> module_tracker_errors
   module_tracker_quality --> module_tracker_ingest
   module_tracker_quality --> module_tracker_schema
   module_tracker_quality --> module_tracker_sources
+  module_tracker_quality --> module_tracker_stanford
   module_tracker_quality --> module_tracker_store
   module_tracker_schema --> module_tracker_errors
   module_tracker_sources --> module_tracker_actors
   module_tracker_sources --> module_tracker_eodi
+  module_tracker_sources --> module_tracker_errors
   module_tracker_sources --> module_tracker_geonames
   module_tracker_sources --> module_tracker_leiden
   module_tracker_sources --> module_tracker_store
+  module_tracker_stanford --> module_tracker_clock
+  module_tracker_stanford --> module_tracker_errors
+  module_tracker_stanford --> module_tracker_ingest
+  module_tracker_stanford --> module_tracker_store
   module_tracker_store --> module_tracker_clock
   module_tracker_views --> module_tracker_schema
   module_architecture_py --> module_tracker_ingest
@@ -258,7 +274,7 @@ flowchart TB
 | `tracker.eodi` | `src/tracker/eodi.py` | European Observatory of Drone Incidents (EODI) - live source. | pandas |
 | `tracker.errors` | `src/tracker/errors.py` | Errors that the code raises on purpose with a message for the user. |  |
 | `tracker.geonames` | `src/tracker/geonames.py` | GeoNames populated places - reference data, not an event source. | pandas |
-| `tracker.hub` | `src/tracker/hub.py` | Read the published tables from the public Hugging Face dataset. | huggingface_hub, pandas |
+| `tracker.hub` | `src/tracker/hub.py` | Read the published tables from the public Hugging Face dataset. | huggingface_hub, pandas, pyarrow |
 | `tracker.ingest` | `src/tracker/ingest.py` | Download sources, keep their payloads in the raw store and write clean tables. | pandas |
 | `tracker.leiden` | `src/tracker/leiden.py` | Russian Operations Against Europe Dataset (Leiden University) - static source. | openpyxl, pandas, pycountry |
 | `tracker.provenance` | `src/tracker/provenance.py` | Code commit and workflow run of a pipeline step, read from the GitHub variables. |  |
@@ -266,6 +282,7 @@ flowchart TB
 | `tracker.quality` | `src/tracker/quality.py` | Quality table and run summary: one row per source and per run. | pandas |
 | `tracker.schema` | `src/tracker/schema.py` | Unified event schema shared by every source adapter. | pandas |
 | `tracker.sources` | `src/tracker/sources.py` | Registry of data sources. | pandas |
+| `tracker.stanford` | `src/tracker/stanford.py` | Stanford GNSS interference (rfi.stanford.edu): daily heatmaps and context table. | brotli, h3, pandas |
 | `tracker.store` | `src/tracker/store.py` | Raw store client: keeps each source payload as fetched, with a manifest. | huggingface_hub |
 | `tracker.views` | `src/tracker/views.py` | Filters and headline counts of the dashboard, as plain functions on a frame. | pandas |
 | `architecture.py` | `scripts/architecture.py` | Generate docs/architecture.md, the architecture diagrams, from the code. | yaml |

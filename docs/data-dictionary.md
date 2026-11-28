@@ -41,6 +41,30 @@ incident, because each dataset clusters its own rows: do not join the two
 datasets on `cluster_id`. Counts are de-duplicated across sources only (see
 [#147](https://github.com/tryph0n/hybrid-tracker/issues/147)).
 
+## GNSS interference
+
+The NonCommercial dataset has a context table, `gnss_interference` (added in
+2.7.0), from Stanford GPS Lab (CC BY-NC 4.0). It has no event and no `event_id`:
+it is not joined to `events`. It is stored as one file per month,
+`gnss_interference/<YYYY>-<MM>.parquet`. One row is one H3 cell (resolution 4,
+1,770 km2 on average) on one day, for the cells whose centre is in latitude 34
+to 72 and longitude -25 to 45.
+
+| Column | Meaning |
+| --- | --- |
+| `day` | The day of the daily file of the source (UTC). |
+| `h3_index` | The H3 cell, as the source gives it. |
+| `low_quality_count` | Aircraft whose ADS-B position messages report a Navigation Integrity Category below 7, a proxy for poor GNSS reception. |
+| `total_aircraft_count` | All aircraft seen in the cell that day. |
+| `low_quality_percent` | `low_quality_count` / `total_aircraft_count` x 100. The project computes it, the source does not give it. |
+
+A daily count is the sum of the 24 hourly counts of the cell, so it counts
+aircraft-hours, not distinct aircraft: an aircraft seen in a cell during 3 hours
+counts 3 times. A cell with no aircraft has no row, so no row means no data, not
+no interference. The last 7 days of the table may still change, because the
+source says that recent results may be incomplete or temporarily unavailable,
+and each run fetches these days again.
+
 ## Threat actors
 
 The open dataset has a second table, `threat_actors` (added in 2.3.0): one row

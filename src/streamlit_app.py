@@ -4,6 +4,7 @@ Run from the repository root: streamlit run src/streamlit_app.py
 """
 
 from collections.abc import Collection
+from datetime import date
 
 import pandas as pd
 import plotly.express as px
@@ -160,13 +161,21 @@ LINE_FIELDS = [
 @st.cache_data(ttl="1h", max_entries=2)
 def load_events(
     revision: str,
-) -> tuple[pd.DataFrame, str, str, str, pd.DataFrame | None]:
+) -> tuple[
+    pd.DataFrame,
+    str,
+    str,
+    str,
+    pd.DataFrame | None,
+    dict[str, tuple[date, date] | None],
+]:
     """Load and prepare the published events: the Hub is read once an hour.
 
     Returns:
         The events, the revision read, its date and whether the bundled
-        snapshot was used because the Hub could not be read, and the quality
-        table (None when it could not be read).
+        snapshot was used because the Hub could not be read, the quality
+        table (None when it could not be read), and the first and the newest day
+        of each context source (see `tracker.hub.Published.context`).
     """
     published = load_published(revision, snapshot_dir())
     events = published.events
@@ -201,6 +210,7 @@ def load_events(
         published.date,
         published.failure,
         published.quality,
+        published.context,
     )
 
 
@@ -514,29 +524,41 @@ def country_only_chart(
 
 
 def sources_table(
-    events: pd.DataFrame, quality: pd.DataFrame | None, published: list[str]
+    events: pd.DataFrame,
+    quality: pd.DataFrame | None,
+    listed: list[str],
+    context: dict[str, tuple[date, date] | None],
 ) -> pd.DataFrame:
+    """One row per listed source. A context source has no event: its Events cell
+    is empty, and its From and To are the first and the newest day of its table,
+    empty when its month files cannot be read. Events stays a number column."""
     dates = latest_dates(quality)
     rows = []
-    for name in published:
+    for name in listed:
         source = SOURCES[name]
         own = events[events["source"] == name]
+        if source.table == "context":
+            count, (first, last) = None, context.get(name) or (None, None)
+        else:
+            count = len(own)
+            first, last = own["date"].min().date(), own["date"].max().date()
         rows.append(
             {
                 "Source": source.title,
                 "Update": "Daily refresh"
                 if source.kind == "live"
                 else "Frozen snapshot",
-                "Events": len(own),
+                "Events": count,
                 "Downloaded": dates.get(name, ("", ""))[0],
                 "Updated by source": dates.get(name, ("", ""))[1],
-                "From": own["date"].min().date(),
-                "To": own["date"].max().date(),
+                "From": first,
+                "To": last,
                 "Licence": source.licence,
                 "Link": source.homepage,
             }
         )
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    return table.astype({"Events": "Int64"}) if rows else table
 
 
 st.set_page_config(page_title="Europe Hybrid Incidents Tracker", layout="wide")
@@ -545,10 +567,11 @@ dark = st.context.theme.type == "dark"
 surface = "#0e1117" if dark else "#ffffff"
 colors = dict(zip(DOMAIN_LABELS.values(), DARK_COLORS if dark else LIGHT_COLORS))
 
-all_events, data_revision, data_date, hub_failure, quality = load_events(
+all_events, data_revision, data_date, hub_failure, quality, context = load_events(
     configured_revision()
 )
 published = published_sources(all_events, list(SOURCES))
+listed_sources = published_sources(all_events, list(SOURCES), context)
 
 st.title("Europe Hybrid Incidents Tracker")
 st.caption(
@@ -861,7 +884,10 @@ st.download_button(
 
 st.subheader("Sources")
 st.dataframe(
-    sources_table(all_events, quality, published),
+    sources_table(all_events, quality, listed_sources, context),
+    # A missing value shows as a blank cell, not "None", and Events stays a
+    # number column, so it sorts as numbers.
+    placeholder="",
     hide_index=True,
     column_config={
         "Downloaded": st.column_config.TextColumn(
@@ -879,7 +905,9 @@ st.dataframe(
     },
 )
 st.caption(
-    " ".join(f"{SOURCES[name].citation} {SOURCES[name].licence}." for name in published)
+    " ".join(
+        f"{SOURCES[name].citation} {SOURCES[name].licence}." for name in listed_sources
+    )
 )
 revision_note = f"revision {data_revision[:7]}" + (
     f" of {data_date}" if data_date else ""

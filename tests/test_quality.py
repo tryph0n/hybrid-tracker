@@ -4,9 +4,10 @@ import json
 
 import pandas as pd
 import pytest
-from conftest import FIXTURES, recorded_payloads
+from conftest import EVENT_SOURCES, FIXTURES, recorded_payloads
+from test_stanford import DAY, FIXTURE, seed
 
-from tracker import cli, clock, ingest, quality, sources
+from tracker import cli, clock, ingest, quality, sources, stanford
 from tracker.schema import read_csv
 from tracker.store import LocalBackend, Payload, Store
 
@@ -38,6 +39,12 @@ def fixture_events(name: str) -> pd.DataFrame:
     return read_csv(FIXTURES / "events" / f"{name}.csv")
 
 
+def put_context(store: Store) -> None:
+    """Store a day of the context source and its month file, as a run does."""
+    seed(store, {DAY: FIXTURE})
+    stanford.write_months(store, {stanford.month_of(DAY)})
+
+
 @pytest.fixture(autouse=True)
 def fixed_clock(monkeypatch, tmp_path):
     set_clock(monkeypatch, START)
@@ -47,9 +54,10 @@ def fixed_clock(monkeypatch, tmp_path):
 @pytest.fixture
 def store(tmp_path) -> Store:
     store = Store(LocalBackend(tmp_path / "store"))
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         put_clean(store, name, fixture_events(name))
         fetch(store, name)
+    put_context(store)
     return store
 
 
@@ -69,14 +77,14 @@ def test_two_runs_give_one_row_per_source_for_each_run(store, out, monkeypatch):
     set_clock(monkeypatch, days_after(1))
     quality.run(store, out)
 
-    for table in [
-        master(store),
-        pd.read_parquet(out / "nc" / "quality.parquet"),
-        pd.read_parquet(out / "open" / "quality.parquet"),
+    for table, expected in [
+        (master(store), sources.SOURCES),
+        (pd.read_parquet(out / "nc" / "quality.parquet"), sources.SOURCES),
+        (pd.read_parquet(out / "open" / "quality.parquet"), EVENT_SOURCES),
     ]:
         counts = table.groupby("run_at")["source"].apply(sorted)
         assert len(counts) == 2
-        assert all(names == sorted(sources.SOURCES) for names in counts)
+        assert all(names == sorted(expected) for names in counts)
     assert list(master(store).columns) == quality.COLUMNS
 
 
@@ -84,6 +92,8 @@ def test_first_run_adds_every_row_and_removes_none(store, out):
     quality.run(store, out)
 
     for row in master(store).itertuples():
+        if row.source == stanford.SOURCE:
+            continue
         assert row.rows == len(fixture_events(row.source))
         assert row.rows_added == row.rows
         assert row.rows_removed == 0
@@ -247,7 +257,7 @@ def test_a_source_with_no_clean_table_keeps_a_row_with_its_cause(
     assert current.loc["leiden", "rows"] > 0
     assert pd.isna(current.loc["leiden", "cause"])
     published = pd.read_parquet(out / "open" / "quality.parquet")
-    assert set(published["source"]) == set(sources.SOURCES)
+    assert set(published["source"]) == set(EVENT_SOURCES)
     assert "`eodi`: no clean table" in summary.read_text()
 
 
@@ -270,21 +280,23 @@ def test_live_source_fetched_four_days_ago_is_reported_and_static_is_not(
     tmp_path, out, monkeypatch
 ):
     store = Store(LocalBackend(tmp_path / "store"))
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         put_clean(store, name, fixture_events(name))
     fetch(store, "eodi")
     fetch(store, "leiden")
+    put_context(store)
     set_clock(monkeypatch, days_after(4))
     current = quality.run(store, out)
 
     alerts = read_alerts(out)
-    assert list(alerts) == ["eodi"]
+    assert list(alerts) == ["eodi", "stanford"]
     assert alerts["eodi"][0].startswith("no successful fetch since")
     assert master(store)["run_at"].nunique() == 1
     assert len(current) == len(sources.SOURCES)
     assert (out / "open" / "quality.parquet").exists()
 
     fetch(store, "eodi")
+    put_context(store)
     quality.run(store, out)
     assert read_alerts(out) == {}
 
@@ -311,9 +323,10 @@ def test_live_source_without_a_successful_fetch_is_reported(tmp_path, out, monke
     summary = tmp_path / "summary.md"
     monkeypatch.setenv(quality.SUMMARY_VAR, str(summary))
     store = Store(LocalBackend(tmp_path / "store"))
-    for name in sources.SOURCES:
+    for name in EVENT_SOURCES:
         put_clean(store, name, fixture_events(name))
     fetch(store, "eodi", status=503)
+    put_context(store)
 
     quality.run(store, out)
 

@@ -1,5 +1,6 @@
 """Publish to the public datasets: one commit, read-back and tags, with a fake HfApi."""
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -42,6 +43,18 @@ class FakeHfApi:
         self.keep: str | None = None
         self.messages: list[str] = []
 
+    def get_paths_info(self, repo_id, paths, *, repo_type):
+        assert repo_type == "dataset"
+        files = self.main.get(repo_id, {})
+        return [
+            SimpleNamespace(
+                path=path,
+                lfs=SimpleNamespace(sha256=hashlib.sha256(files[path]).hexdigest()),
+            )
+            for path in paths
+            if path in files
+        ]
+
     def list_repo_files(self, repo_id, *, repo_type, revision=None):
         assert repo_type == "dataset"
         files = self.snapshots[revision] if revision else self.main.get(repo_id, {})
@@ -71,6 +84,7 @@ class FakeHfApi:
     def hf_hub_download(self, repo_id, filename, *, revision, repo_type, cache_dir):
         assert repo_type == "dataset"
         target = Path(cache_dir) / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(self.snapshots[revision][filename])
         return str(target)
 
@@ -322,3 +336,76 @@ def test_outside_a_run_the_commit_message_is_the_schema_line(api, build, monkeyp
     publish.run("open", build, api)
 
     assert api.messages == [f"data: publish schema {publish.SCHEMA_VERSION}"]
+
+
+MONTH_FILES = ("gnss_interference/2026-10.parquet", "gnss_interference/2026-11.parquet")
+
+
+def add_months(build, family="nc"):
+    (build / family / "gnss_interference").mkdir(exist_ok=True)
+    for name in MONTH_FILES:
+        (build / family / name).write_bytes(b"month " + name.encode())
+
+
+def sent_paths(api):
+    paths = []
+    create = api.create_commit
+
+    def spy(**kwargs):
+        paths.append([op.path_in_repo for op in kwargs["operations"]])
+        return create(**kwargs)
+
+    api.create_commit = spy
+    return paths
+
+
+def test_a_publish_sends_only_the_month_files_that_changed(api, build):
+    add_months(build)
+    paths = sent_paths(api)
+    publish.run("nc", build, api)
+    assert set(MONTH_FILES) <= set(paths[0])
+
+    (build / "nc" / MONTH_FILES[1]).write_bytes(b"november changed")
+    publish.run("nc", build, api)
+
+    assert [name for name in paths[1] if "/" in name] == [MONTH_FILES[1]]
+    assert api.main[NC][MONTH_FILES[0]] == b"month " + MONTH_FILES[0].encode()
+    assert api.main[NC][MONTH_FILES[1]] == b"november changed"
+
+
+def test_a_publish_with_no_month_change_sends_no_month_file(api, build):
+    add_months(build)
+    publish.run("nc", build, api)
+    paths = sent_paths(api)
+
+    publish.run("nc", build, api)
+
+    assert [name for name in paths[0] if "/" in name] == []
+    assert set(MONTH_FILES) <= set(api.main[NC])
+    card = api.main[NC]["README.md"].decode("utf-8")
+    assert "  - config_name: gnss_interference\n" in card
+    assert "        path: gnss_interference/*.parquet\n" in card
+
+
+def test_a_hidden_sub_folder_of_the_build_folder_is_not_sent(api, build):
+    add_months(build)
+    (build / "nc" / ".hidden").mkdir()
+    (build / "nc" / ".hidden" / "y.parquet").write_bytes(b"hidden")
+    paths = sent_paths(api)
+
+    publish.run("nc", build, api)
+
+    assert ".hidden/y.parquet" not in paths[0]
+    assert ".hidden/y.parquet" not in api.main[NC]
+
+
+def test_the_card_lists_all_the_month_files_of_the_table_with_one_pattern(api, build):
+    add_months(build)
+    publish.run("nc", build, api)
+    (build / "nc" / MONTH_FILES[1]).write_bytes(b"november changed")
+    publish.run("nc", build, api)
+
+    card = api.main[NC]["README.md"].decode("utf-8")
+    assert "  - config_name: gnss_interference\n" in card
+    assert "        path: gnss_interference/*.parquet\n" in card
+    assert set(MONTH_FILES) <= set(api.main[NC])

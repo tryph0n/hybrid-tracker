@@ -138,7 +138,10 @@ def test_the_check_fails_when_a_source_is_missing_from_a_card_where_it_must_be(
 def test_the_check_fails_when_an_nc_source_is_in_the_open_card(nc_source):
     card = render_card("nc", FILES)
 
-    assert card_problems("open", card) == ["example_nc must be absent"]
+    assert sorted(card_problems("open", card)) == [
+        "example_nc must be absent",
+        "stanford must be absent",
+    ]
 
 
 @pytest.mark.parametrize("family", FAMILIES)
@@ -255,8 +258,8 @@ def test_the_2_5_0_section_of_each_card_names_the_new_quality_column(family):
 
 
 @pytest.mark.parametrize("family", FAMILIES)
-def test_the_version_section_of_each_card_names_the_drone_presence(family):
-    section = version_section(family, SCHEMA_VERSION)
+def test_the_2_6_0_section_of_each_card_names_the_drone_presence(family):
+    section = version_section(family, "2.6.0")
 
     assert "`drone_presence`" in section
 
@@ -284,3 +287,51 @@ def test_the_nc_card_gets_no_threat_actors_config_or_section_from_a_stray_file()
 
     assert "threat_actors" not in [c["config_name"] for c in front_matter["configs"]]
     assert "Curated countries" not in text
+
+
+def test_the_nc_version_entry_names_the_new_table_and_the_open_one_says_same_data():
+    nc = " ".join(version_section("nc", SCHEMA_VERSION).split())
+    open_ = " ".join(version_section("open", SCHEMA_VERSION).split())
+
+    assert SCHEMA_VERSION == "2.7.0"
+    assert "`gnss_interference`" in nc
+    assert f"The tag `v{SCHEMA_VERSION}`" in nc
+    assert open_.startswith("The same data as 2.6.0.")
+    assert "gnss_interference" in open_ and "does not hold" in open_
+
+
+def test_the_nc_card_credits_stanford_states_the_area_and_the_seven_days():
+    nc = split(render_card("nc", FILES | {"gnss_interference/2026-11.parquet"}))
+    open_card = split(render_card("open", FILES))[1]
+    citation = SOURCES["stanford"].citation
+
+    assert citation in nc[1]
+    assert citation not in open_card
+    assert "latitude 34 to 72 and longitude -25 to 45" in nc[1]
+    assert "The last 7 days of the table may still change" in nc[1]
+    assert "aircraft-hours" in nc[1]
+    assert "GNSS interference" not in open_card
+
+
+def test_the_nc_card_says_which_sources_feed_events_and_which_the_context_table():
+    nc = split(render_card("nc", FILES))[1]
+    open_card = split(render_card("open", FILES))[1]
+
+    assert "`events` (one row per event, from EODI and Leiden)" in nc
+    assert (
+        "`gnss_interference` (month files, one row per cell and day, from Stanford"
+        in nc
+    )
+    assert "the sources listed in `sources`" not in nc
+    assert (
+        "`events` (one row per event, from the sources listed in `sources`)"
+        in open_card
+    )
+    assert "`gnss_interference` (month files" not in open_card
+
+
+def test_a_card_whose_published_sources_have_no_context_source_keeps_the_events_sentence():
+    nc = split(render_card("nc", FILES, published=["eodi", "leiden"]))[1]
+
+    assert "from the sources listed in `sources`" in nc
+    assert "`gnss_interference` (month files" not in nc

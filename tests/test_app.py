@@ -8,14 +8,17 @@ import json
 import logging
 import re
 import zipfile
+from datetime import date
 
 import numpy as np
 import pandas as pd
 import plotly.io as pio
+import pyarrow as pa
 import pytest
 import streamlit as st
 from conftest import (
     APP,
+    EVENT_SOURCES,
     FIXTURES,
     REVISION,
     REVISION_DATE,
@@ -29,7 +32,7 @@ from streamlit.elements.lib import policies
 from streamlit.runtime.caching import cache_utils
 from streamlit.testing.v1 import AppTest
 
-from tracker import actors, build, clock, geonames, hub, ingest, quality
+from tracker import actors, build, clock, geonames, hub, ingest, quality, stanford
 from tracker.clock import utc_today
 from tracker.schema import (
     ATTRIBUTIONS,
@@ -129,8 +132,8 @@ def test_counts_on_the_samples(sample_data_dir):
 def test_sources_filter_lists_every_source_all_selected(sample_data_dir):
     at = run_app()
     sources = at.multiselect(key="sources")
-    assert sources.options == [SOURCES[name].title for name in SOURCES]
-    assert sources.value == list(SOURCES)
+    assert sources.options == [SOURCES[name].title for name in EVENT_SOURCES]
+    assert sources.value == list(EVENT_SOURCES)
 
 
 def test_every_domain_is_a_filter_option(sample_data_dir):
@@ -253,11 +256,13 @@ def test_map_hover_of_an_unattributed_event_shows_the_data(sample_data_dir):
 
 def test_credits_every_source(sample_data_dir):
     at = run_app()
-    for source in SOURCES.values():
+    for source in EVENT_SOURCES.values():
         assert source.citation in captions(at)
     table = at.dataframe[-1].value
-    assert list(table["Source"]) == [source.title for source in SOURCES.values()]
-    assert list(table["Licence"]) == [source.licence for source in SOURCES.values()]
+    assert list(table["Source"]) == [source.title for source in EVENT_SOURCES.values()]
+    assert list(table["Licence"]) == [
+        source.licence for source in EVENT_SOURCES.values()
+    ]
 
 
 def test_empty_selection_stops_with_a_message(sample_data_dir):
@@ -772,7 +777,7 @@ def link_incidents(**changes):
     Brogel: EODI says `air` and Belgium, Leiden says `espionage`, Belgium and
     Sweden. `changes` maps an `event_id` to the fields to set on that row.
     """
-    eodi, leiden = (read_events(name) for name in SOURCES)
+    eodi, leiden = (read_events(name) for name in EVENT_SOURCES)
     for table in (eodi, leiden):
         for column in ("date", "end_date"):
             stamps = pd.to_datetime(table[column])
@@ -813,7 +818,7 @@ def link_incidents(**changes):
     for event_id, fields in changes.items():
         for column, value in fields.items():
             both.loc[both["event_id"] == event_id, column] = value
-    for name in SOURCES:
+    for name in EVENT_SOURCES:
         both[both["source"] == name].to_csv(events_path(name), index=False)
 
 
@@ -1161,7 +1166,7 @@ def test_the_table_has_a_link_column_for_each_selected_source(sample_data_dir):
     assert not at.exception
     assert link_columns(at) == {"link_eodi": "EODI"}
     assert links_of(at, BROGEL_TITLE) == {"link_eodi": rows.loc[BROGEL_EODI, "url"]}
-    at.multiselect(key="sources").set_value(list(SOURCES)).run()
+    at.multiselect(key="sources").set_value(list(EVENT_SOURCES)).run()
     assert not at.exception
     assert app_state(at) == default
 
@@ -1189,7 +1194,7 @@ def quality_rows(**dates):
             "downloaded_at": "2026-11-25T02:00:00+00:00",
             "updated_by_source": "2026-11-01",
         }
-        for name in SOURCES
+        for name in EVENT_SOURCES
     ]
     rows += [
         {"run_at": "2026-11-26T03:00:00+00:00", "source": name} | values
@@ -1241,7 +1246,7 @@ def test_sources_with_no_quality_table_show_empty_cells(sample_data_dir):
     table = at.dataframe[-1].value
     assert (table["Downloaded"] == "").all()
     assert (table["Updated by source"] == "").all()
-    assert len(table) == len(SOURCES)
+    assert len(table) == len(EVENT_SOURCES)
 
 
 def drop_source(name: str) -> None:
@@ -1591,3 +1596,106 @@ def test_most_affected_countries_says_that_it_counts_the_incidents_with_no_point
         "Counts every selected incident that names the country, with or without "
         "a point on the map."
     ) in captions(run_app())
+
+
+CONTEXT_TITLE = SOURCES[stanford.SOURCE].title
+CONTEXT_CITATION = SOURCES[stanford.SOURCE].citation
+
+
+def add_context_source(monkeypatch, tmp_path) -> None:
+    """Serve two month files of the context source from the Hub.
+
+    The oldest file starts on the 30th, not on the 1st, and the newest ends on
+    the 3rd: From and To must come from the days in the files.
+    """
+    heatmap = (FIXTURES / "stanford_heatmap.json").read_bytes()
+    files = {}
+    for month, days in (("2026-10", (30, 31)), ("2026-11", (2, 3))):
+        table = pd.concat(
+            [
+                stanford.reduce_day(date(*map(int, month.split("-")), day), heatmap)
+                for day in days
+            ]
+        )
+        path = tmp_path / f"{month}.parquet"
+        table.to_parquet(path, index=False)
+        files[f"{stanford.TABLE}/{month}.parquet"] = path
+    monkeypatch.setattr(hub, "fetch_month_ends", lambda commit, folder: files)
+
+
+def sources_sent(at: AppTest) -> tuple[pa.Schema, str | None]:
+    """The Arrow schema of the Sources section, as the app sends it to the
+    browser, and the text that the browser draws for a missing value (None:
+    the Streamlit default, "None")."""
+    proto = at.dataframe[-1].proto
+    schema = pa.ipc.open_stream(proto.arrow_data.data).schema
+    return schema, proto.placeholder if proto.HasField("placeholder") else None
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+def test_the_sources_section_lists_a_context_source_with_a_blank_events_cell(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    add_context_source(monkeypatch, tmp_path)
+    at = run_app()
+
+    table = at.dataframe[-1].value.set_index("Source")
+    schema, placeholder = sources_sent(at)
+    assert list(table.index) == [
+        SOURCES["eodi"].title,
+        SOURCES["leiden"].title,
+        CONTEXT_TITLE,
+    ]
+    assert pa.types.is_integer(schema.field("Events").type)
+    assert placeholder == ""
+    assert table.loc[SOURCES["eodi"].title, "Events"] == len(read_events("eodi"))
+    assert pd.isna(table.loc[CONTEXT_TITLE, "Events"])
+    assert str(table.loc[CONTEXT_TITLE, "From"]) == "2026-10-30"
+    assert str(table.loc[CONTEXT_TITLE, "To"]) == "2026-11-03"
+    assert CONTEXT_CITATION in captions(at)
+    assert at.multiselect(key="sources").options == [
+        SOURCES["eodi"].title,
+        SOURCES["leiden"].title,
+    ]
+    assert at.multiselect(key="sources").value == ["eodi", "leiden"]
+    assert link_columns(at) == {"link_eodi": "EODI", "link_leiden": "Leiden"}
+
+
+def refuse(*args):
+    raise ConnectionError("no network")
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+@pytest.mark.parametrize("cause", ["read error", "snapshot"])
+def test_a_context_source_whose_month_files_cannot_be_read_shows_blank_days(
+    sample_data_dir, monkeypatch, tmp_path, cause
+):
+    add_context_source(monkeypatch, tmp_path)
+    if cause == "snapshot":
+        folder = tmp_path / "snapshot"
+        folder.mkdir()
+        read_all_events().to_parquet(folder / hub.EVENTS_FILE)
+        monkeypatch.setenv(hub.SNAPSHOT_VARIABLE, str(folder))
+        monkeypatch.setattr(hub, "fetch", refuse)
+    else:
+        monkeypatch.setattr(hub, "fetch_month_ends", refuse)
+    at = run_app()
+
+    table = at.dataframe[-1].value.set_index("Source")
+    assert list(table.index)[-1] == CONTEXT_TITLE
+    assert table.loc[CONTEXT_TITLE, ["Events", "From", "To"]].isna().all()
+    assert sources_sent(at)[1] == ""
+    assert CONTEXT_CITATION in captions(at)
+    assert ("showing the snapshot" in captions(at)) == (cause == "snapshot")
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+def test_a_context_source_with_no_month_file_on_the_hub_is_not_listed(
+    sample_data_dir, monkeypatch, tmp_path
+):
+    add_context_source(monkeypatch, tmp_path)
+    monkeypatch.setattr(hub, "fetch_month_ends", lambda commit, folder: {})
+    at = run_app()
+
+    assert CONTEXT_TITLE not in set(at.dataframe[-1].value["Source"])
+    assert CONTEXT_CITATION not in captions(at)

@@ -10,6 +10,10 @@ The version number is set by hand in `pyproject.toml` only.
 
 ### Added
 
+- Schema 2.7.0: the NonCommercial dataset has a new context table,
+  `gnss_interference`, from Stanford GPS Lab (CC BY-NC 4.0): per day and H3 cell
+  of Europe, the aircraft with a low navigation integrity category and all
+  aircraft. It has no event. The open dataset has the same data as 2.6.0.
 - Schema 2.6.0: the column `drone_presence` (`confirmed`, `not_confirmed`,
   `not_substantiated`, `ruled_out`) holds the EODI field `presencia_dron`. It is
   empty for Leiden. The build reads a stored clean table that has no such column as

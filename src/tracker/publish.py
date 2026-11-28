@@ -8,10 +8,13 @@ Each dataset gets one atomic commit: the files of `<build>/<family>/`, a card
 generated from the source registry and from `cards/versions-<family>.md`, and
 the deletion of the legacy per-source CSV files. The commit is then read back
 from the Hub and each file is compared byte for byte (SHA-256) with the local
-file. The version tag `v<SCHEMA_VERSION>` is created when it does not exist. A
-tag is never moved, recreated or deleted. When the Hub refuses to create it,
-the run warns and writes the tag and the commit in the run summary: the owner
-creates the tag by hand.
+file. A table of month files is a folder of `<build>/<family>/` with one
+`<YYYY>-<MM>.parquet` file per month: the commit holds only the month files
+that differ from the Hub, because the history of the dataset keeps each version
+of each file sent. The version tag `v<SCHEMA_VERSION>` is created when it does
+not exist. A tag is never moved, recreated or deleted. When the Hub refuses to
+create it, the run warns and writes the tag and the commit in the run summary:
+the owner creates the tag by hand.
 """
 
 import hashlib
@@ -24,8 +27,8 @@ from typing import Any
 
 import pandas as pd
 
-from tracker import actors, provenance
-from tracker.build import CURATION_DIR, family_sources
+from tracker import actors, provenance, stanford
+from tracker.build import CONTEXT_TABLES, CURATION_DIR, family_sources
 from tracker.errors import UserError
 from tracker.quality import write_summary
 from tracker.schema import SCHEMA_VERSION
@@ -101,16 +104,81 @@ def credits(family: str, published: Iterable[str] | None = None) -> list[str]:
     return lines
 
 
+def join_names(names: list[str]) -> str:
+    """The names as text: "A", "A and B", "A, B and C"."""
+    return ", ".join(names[:-1]) + (" and " if len(names) > 1 else "") + names[-1]
+
+
+def tables_sentence(family: str, published: Iterable[str] | None) -> str:
+    """The sentence of the card that lists the tables.
+
+    It names the sources that feed `events` and, when the dataset holds a
+    context source, the one that feeds its table: a context source has a row in
+    `sources` and none in `events`.
+    """
+    held = family_sources(family, published)
+    context = [name for name in held if SOURCES[name].table == "context"]
+    events = "the sources listed in `sources`"
+    listed = "one row per published source"
+    extra = ""
+    if context:
+        names = [SOURCES[name].short_name for name in held if name not in context]
+        events = join_names(names)
+        extra = join_names(
+            [
+                f"`{CONTEXT_TABLES[name]}` (month files, one row per cell and day, "
+                f"from {SOURCES[name].short_name}; it has no event)"
+                for name in context
+            ]
+        )
+        listed += ", " + join_names([SOURCES[name].short_name for name in held])
+        extra += ", "
+    return (
+        f"Tables: `events` (one row per event, from {events}), {extra}`sources` "
+        f"({listed}), `quality` (one row per source and per run, when present) "
+        "and, in the open dataset, `threat_actors` (one row per threat group, "
+        "with its aliases and country). The data is updated by the pipeline of "
+        "the project."
+    )
+
+
+def context_section(family: str, published: Iterable[str] | None) -> list[str]:
+    """The card section on the GNSS interference table, empty when there is none."""
+    if stanford.SOURCE not in family_sources(family, published):
+        return []
+    lat, lon = stanford.LAT_RANGE, stanford.LON_RANGE
+    return [
+        "## GNSS interference",
+        "",
+        (
+            f"The table `{stanford.TABLE}` is a context table, not a list of events. "
+            "It has one row per H3 cell (resolution 4) and per day, for the cells "
+            f"whose centre is in latitude {lat[0]:.0f} to {lat[1]:.0f} and "
+            f"longitude {lon[0]:.0f} to {lon[1]:.0f}. A cell with no aircraft has "
+            "no row, so no row means no data, not no interference. The counts are "
+            "aircraft-hours, not distinct aircraft. The last 7 days of the table "
+            "may still change: the source says that recent results may be "
+            "incomplete or temporarily unavailable, and each run fetches these "
+            "days again. The columns are in the data dictionary."
+        ),
+        "",
+    ]
+
+
 def configs(files: set[str]) -> str:
     """The `configs` block of the card, for the Parquet files that are present.
 
-    `events.csv` is not listed: the viewer would show the events twice.
+    `events.csv` is not listed: the viewer would show the events twice. A table
+    of month files (`<table>/<YYYY>-<MM>.parquet`) is one config, with the
+    pattern `<table>/*.parquet`, which covers every month file.
     """
     entries = [("events", "events.parquet"), ("sources", "sources.parquet")]
     if "quality.parquet" in files:
         entries.append(("quality", "quality.parquet"))
     if "threat_actors.parquet" in files:
         entries.append(("threat_actors", "threat_actors.parquet"))
+    tables = sorted({name.split("/")[0] for name in files if "/" in name})
+    entries += [(table, f"{table}/*.parquet") for table in tables]
     lines = ["configs:"]
     for position, (name, path) in enumerate(entries):
         lines.append(f"  - config_name: {name}")
@@ -213,13 +281,7 @@ def render_card(
         "",
         INTRO[family],
         "",
-        (
-            "Tables: `events` (one row per event, from the sources listed in "
-            "`sources`), `sources` (one row per published source), `quality` (one row per source and per run, when "
-            "present) and, in the open dataset, `threat_actors` (one row per "
-            "threat group, with its aliases and country). The data is updated "
-            "by the pipeline of the project."
-        ),
+        tables_sentence(family, published),
         "",
         "- Code and pipeline: [github.com/tryph0n/hybrid-tracker](https://github.com/tryph0n/hybrid-tracker)",
         "- Live dashboard: [hybrid-tracker.onrender.com](https://hybrid-tracker.onrender.com)",
@@ -243,6 +305,7 @@ def render_card(
         ),
         "",
         *curated,
+        *context_section(family, published),
         versions.strip(),
         "",
     ]
@@ -281,6 +344,41 @@ def read_back(
                 problems.append(f"{name} differs on {repo_id}")
     if problems:
         raise UserError("Read-back failed: " + "; ".join(problems))
+
+
+def month_files(folder: Path) -> dict[str, bytes]:
+    """The month files of the tables of a build folder: `<table>/<file>` to bytes.
+
+    Only the Parquet files directly inside a sub-folder count; a sub-folder whose
+    name starts with a dot is left out.
+    """
+    return {
+        f"{table.name}/{path.name}": path.read_bytes()
+        for table in sorted(folder.iterdir())
+        if table.is_dir() and not table.name.startswith(".")
+        for path in sorted(table.glob("*.parquet"))
+    }
+
+
+def changed_files(api: Any, repo_id: str, files: dict[str, bytes]) -> dict[str, bytes]:
+    """The files that differ from the `main` branch of the dataset.
+
+    A file is the same when its SHA-256 equals the one that the Hub keeps for
+    the file (Parquet files are stored with LFS). A file that the Hub does not
+    have, or has without an LFS hash, counts as changed.
+    """
+    if not files:
+        return {}
+    known = {
+        info.path: info.lfs.sha256
+        for info in api.get_paths_info(repo_id, list(files), repo_type="dataset")
+        if info.lfs is not None
+    }
+    return {
+        name: content
+        for name, content in files.items()
+        if known.get(name) != digest(content)
+    }
 
 
 def tag_commit(api: Any, repo_id: str, tag: str, oid: str) -> str:
@@ -346,10 +444,12 @@ def publish_family(api: Any, family: str, folder: Path) -> list[str]:
     for required in ("events.parquet", "sources.parquet"):
         if required not in sent:
             raise UserError(f"{folder / required} not found, run `tracker build`")
+    months = month_files(folder)
     published = pd.read_parquet(io.BytesIO(sent["sources.parquet"]))["source"]
-    sent[CARD_FILE] = render_card(family, set(sent), published=list(published)).encode(
-        "utf-8"
-    )
+    sent[CARD_FILE] = render_card(
+        family, set(sent) | set(months), published=list(published)
+    ).encode("utf-8")
+    sent.update(changed_files(api, repo_id, months))
 
     on_hub = set(api.list_repo_files(repo_id, repo_type="dataset"))
     legacy = [name for name in LEGACY_FILES[family] if name in on_hub]

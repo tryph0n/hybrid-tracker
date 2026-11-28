@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from tracker import hub
+from tracker.errors import UserError
 
 pytestmark = pytest.mark.disable_socket
 
@@ -162,3 +163,69 @@ def test_a_missing_quality_table_does_not_fail_the_read(
     published = hub.load_published("main", snapshot)
     assert published.quality is None
     assert not published.from_snapshot
+
+
+def write_month(path, days, **options):
+    pd.DataFrame({"day": days, "h3_index": ["840000fffffffff"] * len(days)}).to_parquet(
+        path, index=False, **options
+    )
+
+
+def test_the_first_and_newest_day_come_from_the_statistics_of_the_end_files(tmp_path):
+    old, new = tmp_path / "old.parquet", tmp_path / "new.parquet"
+    write_month(old, [datetime.date(2026, 10, 31), datetime.date(2026, 10, 30)])
+    write_month(new, [datetime.date(2026, 11, 2), datetime.date(2026, 11, 3)])
+
+    first, last = hub.day_bounds({"t/2026-11.parquet": new, "t/2026-10.parquet": old})
+
+    assert (first, last) == (datetime.date(2026, 10, 30), datetime.date(2026, 11, 3))
+
+
+def test_a_month_file_with_no_row_has_no_bounds(tmp_path):
+    path = tmp_path / "empty.parquet"
+    write_month(path, [])
+
+    with pytest.raises(UserError, match="no statistics for day"):
+        hub.day_bounds({"t/2026-10.parquet": path})
+
+
+def test_a_month_file_with_rows_and_no_statistics_has_no_bounds(tmp_path):
+    """A reader of the rows would find the days: the bounds use the statistics."""
+    path = tmp_path / "rows.parquet"
+    write_month(path, [datetime.date(2026, 10, 30)], write_statistics=False)
+
+    assert len(pd.read_parquet(path)) == 1
+    with pytest.raises(UserError, match="no statistics for day"):
+        hub.day_bounds({"t/2026-10.parquet": path})
+
+
+def test_fetch_month_ends_downloads_the_oldest_and_the_newest_month_file(monkeypatch):
+    names = [
+        "events.parquet",
+        "t/2026-11.parquet",
+        "t/2026-09.parquet",
+        "t/2026-10.parquet",
+        "t/notes.parquet",
+        "other/2026-01.parquet",
+    ]
+    downloaded = []
+
+    class FakeApi:
+        def list_repo_files(self, repo_id, repo_type, revision):
+            assert (repo_id, repo_type, revision) == (hub.REPO_ID, "dataset", SHA)
+            return names
+
+    def download(repo_id, filename, repo_type, revision):
+        downloaded.append((filename, revision))
+        return f"/cache/{filename}"
+
+    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", download)
+
+    files = hub.fetch_month_ends(SHA, "t")
+
+    assert sorted(files) == ["t/2026-09.parquet", "t/2026-11.parquet"]
+    assert sorted(downloaded) == [
+        ("t/2026-09.parquet", SHA),
+        ("t/2026-11.parquet", SHA),
+    ]

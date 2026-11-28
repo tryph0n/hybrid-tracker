@@ -67,6 +67,19 @@ downloads that source again and stores `version.json` and the record. Each datas
 run in its message. No data file is committed to the
 repository: the raw store and the two public datasets hold the data.
 
+A context source (`Source.table` is `context`: Stanford) has no `extract()` or
+`normalize()` and no clean table `clean/<name>.parquet`. `tracker ingest stanford`
+fetches the days that the store lacks and the last 7 stored days again, saves
+them (brotli, as served), and writes one month file per calendar month,
+`clean/stanford/<YYYY>-<MM>.parquet`, with the record `clean/stanford.json`.
+`tracker rebuild stanford` writes the month files again from the stored days,
+and gives no event row. `--if-missing` finds the source by its month files. A
+fetch error (HTTP 500, a timeout, a TLS error) fails this source only, and the
+month files keep their last data. The server sends no intermediate certificate,
+so the fetch trusts the copy in `src/tracker/certs/`; the server certificate
+expires on 6 December 2026, and a TLS error after that date means that the
+intermediate certificate changed.
+
 The commands need a raw store. Set `TRACKER_STORE=local` and
 `TRACKER_STORE_DIR=<folder>` to work on a local folder, or `TRACKER_STORE=hf`
 for the private dataset (see `src/tracker/store.py`). From the repository
@@ -204,7 +217,11 @@ last refresh failed after a download, from the record of `tracker ingest`; it
 ends on the first run after a refresh that succeeds), `no row in the clean
 table`, and, for a live source, `no successful fetch` or no successful fetch
 for more than three days. The three-day rule uses `last_fetch_at`, not
-`downloaded_at`, and a static source skips it. The command fails, and writes
+`downloaded_at`, and a static source skips it. The Stanford source (a context
+table) also has the cause `no new day stored since <time> (more than 7 days)`:
+it opens when no run has stored a day for the first time for more than 7 days,
+and ends on the first run that stores one. A successful fetch of the days again
+does not end it. The command fails, and writes
 nothing, only when no source has a clean table.
 
 When a new version of a static source is published, follow the docstring of
@@ -501,7 +518,7 @@ A failed run shows a red job in Actions. Read the log of that job first.
 |---|---|---|
 | Lint | Style error | Run `uv run ruff check --fix . && uv run ruff format .` and commit. |
 | Data, refresh | The upstream format changed, an unknown label, the shrink guard, an outage | The source keeps its last clean table and the other sources go on: the run stays green and the run summary names the source with its error. Run `uv run tracker ingest <name>` locally and read the error. Fix the adapter, or wait for the upstream, then run the pipeline by hand. For a real correction, see [Sources and ingest](#sources-and-ingest). |
-| Data, a source alert | A cause of one source in the quality check: a failed refresh, no clean table, no row, or no successful fetch for more than three days. The run stays green. | Open the issue `Source alert: <source>` (label `source-alert`): it lists the causes of the last run. Fix each cause as in the row "Data, refresh". The issue closes by itself on the first run where the source has no cause. |
+| Data, a source alert | A cause of one source in the quality check: a failed refresh, no clean table, no row, no successful fetch for more than three days, or, for the Stanford source, no new day stored for more than 7 days. The run stays green. | Open the issue `Source alert: <source>` (label `source-alert`): it lists the causes of the last run. Fix each cause as in the row "Data, refresh". The issue closes by itself on the first run where the source has no cause. |
 | Data, build or tests | An adapter bug, or a published table that breaks the schema. The error usually names the column. | Find the cause, fix it, push. |
 | Docs, architecture | The page does not match the code | Run `uv run python scripts/architecture.py` and commit the page. |
 | Docs, build | A docstring or Markdown error, or a changed `schema.py` | Run the `uv run sphinx-build` command above and read the warning. |
@@ -531,7 +548,7 @@ Three signals tell the owner that the data does not refresh.
   `HEARTBEAT_URL`. A manual run does not ping. The monitor alerts the owner
   when no ping arrives for 48 hours. A run that GitHub drops or disables fails
   nothing and opens no issue: only this alert shows it.
-- A source with a cause in the quality check has its own issue, titled `Source alert: <source>`, with the label `source-alert`. The Source alerts job of a scheduled or manual run opens it, or comments on it when it is already open, with the causes of that run. It closes the issue only on the first run where the source has no cause: a source with two causes stays open until both end. A successful fetch ends only the cause "no successful fetch for more than three days". The job needs the Data job to succeed, and the Close failure job does not touch this label. The heartbeat pings after a green run even when a source has a cause: it shows that a run succeeded, not that each source is fresh.
+- A source with a cause in the quality check has its own issue, titled `Source alert: <source>`, with the label `source-alert`. The Source alerts job of a scheduled or manual run opens it, or comments on it when it is already open, with the causes of that run. It closes the issue only on the first run where the source has no cause: a source with two causes stays open until both end. A successful fetch ends only the cause "no successful fetch for more than three days", not "no new day stored" of the Stanford source, which ends when a run stores a new day. The job needs the Data job to succeed, and the Close failure job does not touch this label. The heartbeat pings after a green run even when a source has a cause: it shows that a run succeeded, not that each source is fresh.
 
 On a failure issue, open the linked run and follow the table above. On a
 heartbeat alert, check Actions: if the schedule is off, see "Schedule stops

@@ -18,12 +18,14 @@ Europe since 2022, from open datasets.
 
 ## Data
 
-The datasets hold the events of the sources, all with the same columns.
+The events come from the event sources, all with the same columns. Stanford gives a
+context table, in the NonCommercial dataset only.
 
 | Source | Content | Updates | Licence |
 |---|---|---|---|
 | [European Observatory of Drone Incidents](https://droneobservatory.eu) | Drone incidents in Europe | Daily refresh | CC BY 4.0 |
 | [Russian Operations Against Europe Dataset, 2022-2025](https://doi.org/10.7910/DVN/TQ0FMQ) | Operations that the author judges Russian | Frozen snapshot | CC BY 4.0 |
+| [Stanford GNSS interference](https://rfi.stanford.edu) | Daily share of aircraft with a low navigation integrity category, by H3 cell (a context table, in the NonCommercial dataset only). Source: Stanford GPS Lab, rfi.stanford.edu. | Daily refresh | CC BY-NC 4.0 |
 
 Each day at 04:17 UTC, the pipeline downloads each daily source again, checks every row,
 publishes the two datasets, then updates the dashboard. See the
@@ -48,7 +50,7 @@ attribution. Four fields keep these questions apart:
 `domain` groups the events (air, sabotage, violence, maritime, cyber,
 information, espionage, other), and `category` refines it.
 
-The data has a version, 2.6.0 today. The first version (1.0.0) used other
+The data has a version, 2.7.0 today. The first version (1.0.0) used other
 column names. It stays readable at the tag `v1.0.0` of the dataset, for example
 `pd.read_csv("hf://datasets/sam-bot/europe-hybrid-incidents@v1.0.0/eodi.csv")`.
 See the
