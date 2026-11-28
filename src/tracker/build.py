@@ -22,8 +22,9 @@ Nothing is written to `<out>` if a check fails.
 
 A context source (`Source.table`, see `tracker.stanford`) has no clean table with
 the event columns: its month files are copied to `<out>/<family>/<table>/`, for
-each family that holds its rows, and never enter `clean`, `events` or `sources`.
-It is left out when the clean store holds no month file of it.
+each family that holds its rows, and never enter `clean` or `events`. It has a
+row in `registry` and in the `sources` table of each such family. It is left
+out when the clean store holds no month file of it.
 
 A source with no clean table is left out: `build` returns its name, and the
 registry, the clusters, the row-count check and the `sources` table all use
@@ -35,7 +36,7 @@ import hashlib
 import logging
 import shutil
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from pathlib import Path
 
 import duckdb
@@ -274,11 +275,13 @@ def prepare(
     work: Path,
     geocode: pd.DataFrame,
     names: Sequence[str],
+    context: Collection[str],
 ) -> None:
     """Create the tables and the function that the SQL files read.
 
-    `names` are the sources that have a clean table: `clean` and `registry`
-    hold those only.
+    `names` are the sources that have a clean table: `clean` holds those only.
+    `registry` holds them and the context sources in `context`, which have
+    month files and no clean table.
 
     `clean` casts each column to its published type: pandas writes a column
     with no value as `double`, and the union must not inherit that. A column
@@ -319,7 +322,7 @@ def prepare(
                 "citation": source.citation,
             }
             for name, source in SOURCES.items()
-            if name in names
+            if name in names or name in context
         ]
     )
     con.register("registry_frame", registry)
@@ -420,13 +423,17 @@ def export(con: duckdb.DuckDBPyConnection, family: str, folder: Path) -> None:
     )
 
 
-def check(family: str, folder: Path, counts: dict[str, int]) -> None:
+def check(
+    family: str, folder: Path, counts: dict[str, int], context: Collection[str]
+) -> None:
     """Check the published files of one family.
 
     Args:
         family: One of `FAMILIES`.
         folder: Where `export` wrote the family.
         counts: Row count of the clean table of each built source.
+        context: The context sources that are built. They have no event row
+            and a row in `sources.parquet`.
 
     Raises:
         ValueError: The columns or types differ from the schema, `validate`
@@ -465,10 +472,11 @@ def check(family: str, folder: Path, counts: dict[str, int]) -> None:
     listed = pd.read_parquet(folder / "sources.parquet")
     if list(listed.columns) != SOURCE_COLUMNS:
         raise UserError(f"{family}: unexpected sources columns {list(listed.columns)}")
-    if sorted(listed["source"]) != sorted(expected):
+    names = sorted(family_sources(family, [*counts, *context]))
+    if sorted(listed["source"]) != names:
         raise UserError(
             f"{family}: sources.parquet lists {sorted(listed['source'])}, "
-            f"expected {sorted(expected)}"
+            f"expected {names}"
         )
 
 
@@ -509,7 +517,7 @@ def build(
         threat_actors = load_actors(store, curation_dir or CURATION_DIR)
         con = duckdb.connect(":memory:")
         try:
-            prepare(con, work, geocode, built)
+            prepare(con, work, geocode, built, context)
             for file in files:
                 logger.info("Running %s", file.name)
                 con.execute(file.read_text())
@@ -518,7 +526,7 @@ def build(
             staged = work / "out"
             for family in FAMILIES:
                 export(con, family, staged / family)
-                check(family, staged / family, counts)
+                check(family, staged / family, counts, context)
                 if family == ACTORS_FAMILY:
                     export_actors(threat_actors, staged / family)
                     check_actors(staged / family, threat_actors)

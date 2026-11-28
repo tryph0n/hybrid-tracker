@@ -4,10 +4,11 @@ The dashboard reads `events.parquet` of the NonCommercial dataset, which holds
 the rows of both licence families, and its `quality.parquet` for the dates of
 each source (blank when that file cannot be read). For a context source
 (`Source.table`), it reads the first and the newest day from the Parquet
-statistics of the oldest and the newest month file, not the rows. When the Hub
-cannot be reached, it reads a snapshot of the same file that the image build
-bundles in a folder, with the revision and the date of that snapshot in
-`snapshot.json`; the snapshot has no month file, so no context source shows.
+statistics of the oldest and the newest month file, not the rows (blank when
+those files cannot be read). When the Hub cannot be reached, it reads a
+snapshot of the same file that the image build bundles in a folder, with the
+revision and the date of that snapshot in `snapshot.json`; the snapshot has no
+month file, so the days of each context source are blank.
 
 This module has no Streamlit code: the app adds the cache.
 """
@@ -86,11 +87,13 @@ class Published:
     """The quality table at the same revision, or None when it cannot be read
     (the snapshot, a revision before the table had the date columns)."""
 
-    context: dict[str, tuple[datetime.date, datetime.date]] = field(
+    context: dict[str, tuple[datetime.date, datetime.date] | None] = field(
         default_factory=dict
     )
     """The first and the newest day of each context source that has month files
-    at the same revision. A source whose files cannot be read has no entry."""
+    at the same revision. None when its files cannot be read (a read error, or
+    the snapshot, which has no month file). A source with no month file at the
+    revision has no entry."""
 
 
 def configured_revision() -> str:
@@ -224,27 +227,38 @@ def day_bounds(files: Mapping[str, Path]) -> tuple[datetime.date, datetime.date]
     )
 
 
-def read_context(commit: str) -> dict[str, tuple[datetime.date, datetime.date]]:
+def context_sources() -> list[str]:
+    """The context sources of the registry that have a table folder."""
+    return [
+        name
+        for name in CONTEXT_TABLES
+        if name in SOURCES and SOURCES[name].table == "context"
+    ]
+
+
+def read_context(
+    commit: str,
+) -> dict[str, tuple[datetime.date, datetime.date] | None]:
     """The first and the newest day of each context source at a commit.
 
-    The table is optional for the dashboard, so an error is logged and the source
-    has no entry.
+    A source with no month file at the commit has no entry. The days are
+    optional for the dashboard, so a read error is logged and the source gets
+    None: it is listed with blank days.
     """
-    bounds = {}
-    for name, folder in CONTEXT_TABLES.items():
-        if name not in SOURCES or SOURCES[name].table != "context":
-            continue
+    bounds: dict[str, tuple[datetime.date, datetime.date] | None] = {}
+    for name in context_sources():
         try:
-            files = fetch_month_ends(commit, folder)
+            files = fetch_month_ends(commit, CONTEXT_TABLES[name])
             if files:
                 bounds[name] = day_bounds(files)
         except Exception:
             logger.warning(
-                "Could not read the month files of %s at %s, the source is not shown",
+                "Could not read the month files of %s at %s, its days are blank",
                 name,
                 commit,
                 exc_info=True,
             )
+            bounds[name] = None
     return bounds
 
 
@@ -264,6 +278,7 @@ def read_snapshot(folder: Path) -> Published:
         revision=info.get("revision") or "unknown",
         date=info.get("date", ""),
         from_snapshot=True,
+        context=dict.fromkeys(context_sources()),
     )
 
 

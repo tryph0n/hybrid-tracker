@@ -167,7 +167,7 @@ def load_events(
     str,
     str,
     pd.DataFrame | None,
-    dict[str, tuple[date, date]],
+    dict[str, tuple[date, date] | None],
 ]:
     """Load and prepare the published events: the Hub is read once an hour.
 
@@ -527,32 +527,38 @@ def sources_table(
     events: pd.DataFrame,
     quality: pd.DataFrame | None,
     listed: list[str],
-    context: dict[str, tuple[date, date]],
+    context: dict[str, tuple[date, date] | None],
 ) -> pd.DataFrame:
     """One row per listed source. A context source has no event: its Events cell
-    is blank, and its From and To are the first and the newest day of its table."""
+    is empty, and its From and To are the first and the newest day of its table,
+    empty when its month files cannot be read. Events stays a number column."""
     dates = latest_dates(quality)
     rows = []
     for name in listed:
         source = SOURCES[name]
         own = events[events["source"] == name]
-        first, last = context[name] if source.table == "context" else (None, None)
+        if source.table == "context":
+            count, (first, last) = None, context.get(name) or (None, None)
+        else:
+            count = len(own)
+            first, last = own["date"].min().date(), own["date"].max().date()
         rows.append(
             {
                 "Source": source.title,
                 "Update": "Daily refresh"
                 if source.kind == "live"
                 else "Frozen snapshot",
-                "Events": "" if source.table == "context" else str(len(own)),
+                "Events": count,
                 "Downloaded": dates.get(name, ("", ""))[0],
                 "Updated by source": dates.get(name, ("", ""))[1],
-                "From": first or own["date"].min().date(),
-                "To": last or own["date"].max().date(),
+                "From": first,
+                "To": last,
                 "Licence": source.licence,
                 "Link": source.homepage,
             }
         )
-    return pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
+    return table.astype({"Events": "Int64"}) if rows else table
 
 
 st.set_page_config(page_title="Europe Hybrid Incidents Tracker", layout="wide")
@@ -879,6 +885,9 @@ st.download_button(
 st.subheader("Sources")
 st.dataframe(
     sources_table(all_events, quality, listed_sources, context),
+    # A missing value shows as a blank cell, not "None", and Events stays a
+    # number column, so it sorts as numbers.
+    placeholder="",
     hide_index=True,
     column_config={
         "Downloaded": st.column_config.TextColumn(

@@ -673,6 +673,9 @@ def test_a_stored_table_without_a_required_column_fails_the_build(store, tmp_pat
         build_events(store, tmp_path)
 
 
+CONTEXT_CITATION = "Source: Fake context."
+
+
 def add_context_source(monkeypatch, store: Store, days: list[date]) -> None:
     """Register a `nc` context source and store its month files, as a run does."""
     monkeypatch.setitem(
@@ -681,6 +684,7 @@ def add_context_source(monkeypatch, store: Store, days: list[date]) -> None:
         dataclasses.replace(
             sources.SOURCES["eodi"],
             title="Fake context",
+            citation=CONTEXT_CITATION,
             licence="CC BY-NC 4.0",
             family="nc",
             table="context",
@@ -718,10 +722,28 @@ def test_a_context_table_is_in_the_nc_build_folder_only_and_not_in_the_events(
         events = pd.read_parquet(out / family / "events.parquet")
         assert stanford.SOURCE not in set(events["source"])
         assert len(events) == sum(len(fixture_events(name)) for name in fixture_names())
-        assert (
-            stanford.SOURCE
-            not in pd.read_parquet(out / family / "sources.parquet")["source"].tolist()
-        )
+
+
+def test_a_context_source_has_a_row_in_the_nc_sources_table_only(
+    store, tmp_path, monkeypatch
+):
+    build.build(store, tmp_path / "before")
+    add_context_source(monkeypatch, store, CONTEXT_DAYS)
+
+    build.build(store, tmp_path / "out")
+
+    before, out = tmp_path / "before", tmp_path / "out"
+    listed = pd.read_parquet(out / "nc" / "sources.parquet")
+    row = listed[listed["source"] == stanford.SOURCE]
+    assert row[["title", "licence", "citation"]].values.tolist() == [
+        ["Fake context", "CC BY-NC 4.0", CONTEXT_CITATION]
+    ]
+    others = listed[listed["source"] != stanford.SOURCE].reset_index(drop=True)
+    assert others.equals(pd.read_parquet(before / "nc" / "sources.parquet"))
+    credit_lines = "\n".join(publish.credits("nc", listed["source"]))
+    assert f"- {CONTEXT_CITATION} CC BY-NC 4.0." in credit_lines
+    open_sources = "open/sources.parquet"
+    assert (out / open_sources).read_bytes() == (before / open_sources).read_bytes()
 
 
 def fixture_names() -> list[str]:

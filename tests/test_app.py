@@ -13,6 +13,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 import plotly.io as pio
+import pyarrow as pa
 import pytest
 import streamlit as st
 from conftest import (
@@ -1326,7 +1327,7 @@ def test_a_source_that_keeps_its_last_data_shows_the_dates_of_its_accepted_downl
     )
     table = run_app().dataframe[-1].value.set_index("Source")
     leiden = table.loc[SOURCES["leiden"].title]
-    assert int(leiden["Events"]) == (published["source"] == "leiden").sum() > 0
+    assert leiden["Events"] == (published["source"] == "leiden").sum() > 0
     assert leiden["Downloaded"] == "2026-03-05 10:00 UTC"
     assert leiden["Updated by source"] == "2026-01-13 14:22 UTC"
     assert table.loc[SOURCES["eodi"].title, "Downloaded"] == "2026-03-06 10:00 UTC"
@@ -1632,6 +1633,16 @@ def add_context_source(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(hub, "fetch_month_ends", lambda commit, folder: files)
 
 
+def sources_sent(at: AppTest) -> tuple[pa.Schema, str | None]:
+    """The Arrow schema of the Sources section, as the app sends it to the
+    browser, and the text that the browser draws for a missing value (None:
+    the Streamlit default, "None")."""
+    proto = at.dataframe[-1].proto
+    schema = pa.ipc.open_stream(proto.arrow_data.data).schema
+    return schema, proto.placeholder if proto.HasField("placeholder") else None
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
 def test_the_sources_section_lists_a_context_source_with_a_blank_events_cell(
     sample_data_dir, monkeypatch, tmp_path
 ):
@@ -1639,18 +1650,19 @@ def test_the_sources_section_lists_a_context_source_with_a_blank_events_cell(
     at = run_app()
 
     table = at.dataframe[-1].value.set_index("Source")
+    schema, placeholder = sources_sent(at)
     assert list(table.index) == [
         SOURCES["eodi"].title,
         SOURCES["leiden"].title,
         CONTEXT_TITLE,
     ]
-    row = table.loc[CONTEXT_TITLE]
-    assert row["Events"] == ""
-    assert str(row["From"]) == "2026-10-30"
-    assert str(row["To"]) == "2026-11-03"
-    assert "None" not in table.astype(str).to_string()
+    assert pa.types.is_integer(schema.field("Events").type)
+    assert placeholder == ""
+    assert table.loc[SOURCES["eodi"].title, "Events"] == len(read_events("eodi"))
+    assert pd.isna(table.loc[CONTEXT_TITLE, "Events"])
+    assert str(table.loc[CONTEXT_TITLE, "From"]) == "2026-10-30"
+    assert str(table.loc[CONTEXT_TITLE, "To"]) == "2026-11-03"
     assert CONTEXT_CITATION in captions(at)
-    assert table.loc[SOURCES["eodi"].title, "Events"] != ""
     assert at.multiselect(key="sources").options == [
         SOURCES["eodi"].title,
         SOURCES["leiden"].title,
@@ -1659,15 +1671,40 @@ def test_the_sources_section_lists_a_context_source_with_a_blank_events_cell(
     assert link_columns(at) == {"link_eodi": "EODI", "link_leiden": "Leiden"}
 
 
-def test_a_context_source_whose_month_files_cannot_be_read_is_not_listed(
+def refuse(*args):
+    raise ConnectionError("no network")
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+@pytest.mark.parametrize("cause", ["read error", "snapshot"])
+def test_a_context_source_whose_month_files_cannot_be_read_shows_blank_days(
+    sample_data_dir, monkeypatch, tmp_path, cause
+):
+    add_context_source(monkeypatch, tmp_path)
+    if cause == "snapshot":
+        folder = tmp_path / "snapshot"
+        folder.mkdir()
+        read_all_events().to_parquet(folder / hub.EVENTS_FILE)
+        monkeypatch.setenv(hub.SNAPSHOT_VARIABLE, str(folder))
+        monkeypatch.setattr(hub, "fetch", refuse)
+    else:
+        monkeypatch.setattr(hub, "fetch_month_ends", refuse)
+    at = run_app()
+
+    table = at.dataframe[-1].value.set_index("Source")
+    assert list(table.index)[-1] == CONTEXT_TITLE
+    assert table.loc[CONTEXT_TITLE, ["Events", "From", "To"]].isna().all()
+    assert sources_sent(at)[1] == ""
+    assert CONTEXT_CITATION in captions(at)
+    assert ("showing the snapshot" in captions(at)) == (cause == "snapshot")
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+def test_a_context_source_with_no_month_file_on_the_hub_is_not_listed(
     sample_data_dir, monkeypatch, tmp_path
 ):
     add_context_source(monkeypatch, tmp_path)
-
-    def refuse(commit, folder):
-        raise ConnectionError("no network")
-
-    monkeypatch.setattr(hub, "fetch_month_ends", refuse)
+    monkeypatch.setattr(hub, "fetch_month_ends", lambda commit, folder: {})
     at = run_app()
 
     assert CONTEXT_TITLE not in set(at.dataframe[-1].value["Source"])

@@ -165,9 +165,9 @@ def test_a_missing_quality_table_does_not_fail_the_read(
     assert not published.from_snapshot
 
 
-def write_month(path, days):
+def write_month(path, days, **options):
     pd.DataFrame({"day": days, "h3_index": ["840000fffffffff"] * len(days)}).to_parquet(
-        path, index=False
+        path, index=False, **options
     )
 
 
@@ -185,6 +185,16 @@ def test_a_month_file_with_no_row_has_no_bounds(tmp_path):
     path = tmp_path / "empty.parquet"
     write_month(path, [])
 
+    with pytest.raises(UserError, match="no statistics for day"):
+        hub.day_bounds({"t/2026-10.parquet": path})
+
+
+def test_a_month_file_with_rows_and_no_statistics_has_no_bounds(tmp_path):
+    """A reader of the rows would find the days: the bounds use the statistics."""
+    path = tmp_path / "rows.parquet"
+    write_month(path, [datetime.date(2026, 10, 30)], write_statistics=False)
+
+    assert len(pd.read_parquet(path)) == 1
     with pytest.raises(UserError, match="no statistics for day"):
         hub.day_bounds({"t/2026-10.parquet": path})
 
