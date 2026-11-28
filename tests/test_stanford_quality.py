@@ -74,7 +74,10 @@ def test_a_404_for_a_day_not_published_is_a_successful_fetch(store, monkeypatch)
     fetched = quality.last_fetch(store, stanford.SOURCE)
     assert fetched == START + pd.Timedelta(days=1)
     now = clock.utc_now()
-    assert quality.causes(stanford.SOURCE, pd.Series([1]), fetched, None, now) == []
+    assert (
+        quality.causes(stanford.SOURCE, pd.DataFrame({"day": [1]}), fetched, None, now)
+        == []
+    )
     assert stanford.SOURCE not in read_alerts(store)
 
 

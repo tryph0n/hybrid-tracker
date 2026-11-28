@@ -402,7 +402,7 @@ def write_months(store: Store, months: Collection[str]) -> list[str]:
     return sorted(written)
 
 
-def table_days(store: Store) -> pd.Series | None:
+def table_days(store: Store) -> pd.DataFrame | None:
     """The `day` column of the month files in the clean store, None when none exists.
 
     Reads only that column, for the quality check.
@@ -412,7 +412,7 @@ def table_days(store: Store) -> pd.Series | None:
     for month in months:
         content = store.backend.read(month_path(month))
         if content is not None:
-            columns.append(pd.read_parquet(io.BytesIO(content), columns=["day"])["day"])
+            columns.append(pd.read_parquet(io.BytesIO(content), columns=["day"]))
     return pd.concat(columns, ignore_index=True) if columns else None
 
 

@@ -184,7 +184,7 @@ def source_row(
 
 def context_row(
     name: str,
-    days: pd.Series,
+    days: pd.DataFrame,
     fetched: pd.Timestamp | None,
     run_at: str,
     causes: Sequence[str] = (),
@@ -193,7 +193,7 @@ def context_row(
 
     Args:
         name: Key of `SOURCES`.
-        days: The `day` column of its month files.
+        days: A frame with the `day` column of its month files.
         fetched: Time of its last successful fetch. The manifest gives each
             download, also of an identical file, so it is also `downloaded_at`.
         run_at: Time of this run, ISO format.
@@ -210,7 +210,7 @@ def context_row(
     }
     row.update({f"empty_{column}": None for column in KEY_COLUMNS})
     fetched_at = None if fetched is None else fetched.isoformat()
-    row["latest_event_date"] = None if days.empty else str(days.max())
+    row["latest_event_date"] = None if days.empty else str(days["day"].max())
     row["last_fetch_at"] = fetched_at
     row["downloaded_at"] = fetched_at
     row["updated_by_source"] = None
@@ -238,7 +238,7 @@ def typed(table: pd.DataFrame) -> pd.DataFrame:
 
 def causes(
     name: str,
-    events: pd.DataFrame | pd.Series | None,
+    events: pd.DataFrame | None,
     fetched: pd.Timestamp | None,
     failure: Mapping[str, Any] | None,
     now: pd.Timestamp,
@@ -249,7 +249,7 @@ def causes(
     Args:
         name: Key of `SOURCES`.
         events: Its clean table, None when it has none. For a context source,
-            its `day` column.
+            a frame with its `day` column.
         fetched: Time of its last successful fetch.
         failure: The record of its last refresh error, None when it succeeded.
         now: Time of this run.
@@ -379,7 +379,7 @@ def run(store: Store, out: Path) -> pd.DataFrame:
         if found:
             alerts[name] = found
         if context:
-            days = pd.Series([], dtype="object") if events is None else events
+            days = pd.DataFrame({"day": []}) if events is None else events
             rows.append(context_row(name, days, fetched, run_at, found))
             continue
         if events is None:
