@@ -392,6 +392,10 @@ def write_months(store: Store, months: Collection[str]) -> list[str]:
     files. Its `downloaded_at` is the time of the newest download of the days of
     these months, which `tracker quality` copies.
 
+    The record covers the months of this run only: its `rows` and `payloads` are
+    those of these months, not of the whole table. Code that reads the record
+    must not take `rows` as the size of the table.
+
     Args:
         store: The raw store, which holds the clean store.
         months: The months to build, as `fetched_months` returns them.

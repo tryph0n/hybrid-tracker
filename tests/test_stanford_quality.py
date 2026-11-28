@@ -9,7 +9,7 @@ import pytest
 from test_alerts import FakeGh
 from test_stanford import FIXTURE, changed, fetcher, seed
 
-from tracker import alerts, cli, clock, quality, stanford
+from tracker import alerts, cli, clock, ingest, quality, stanford
 from tracker.errors import UserError
 from tracker.sources import SOURCES, no_date
 from tracker.store import LocalBackend, Store
@@ -125,20 +125,6 @@ def test_the_quality_row_gives_the_newest_stored_day_and_a_blank_update_date(
     assert stanford.SOURCE not in read_alerts(store)
 
 
-def test_a_run_that_fetches_the_same_files_moves_downloaded_and_not_the_newest_day(
-    store, monkeypatch
-):
-    run_day(store, monkeypatch, 1, DAYS)
-    run_day(store, monkeypatch, 2, DAYS)
-    table = quality.read_table(store, quality.QUALITY_PATH)
-    rows = table[table["source"] == stanford.SOURCE]
-
-    assert list(rows["downloaded_at"]) == [
-        (START + pd.Timedelta(days=n)).isoformat() for n in (1, 2)
-    ]
-    assert list(rows["latest_event_date"]) == ["2026-11-22"] * 2
-
-
 def test_the_alert_opens_after_seven_days_with_no_new_day_and_closes_on_a_new_one(
     store, monkeypatch
 ):
@@ -185,7 +171,9 @@ def test_a_download_that_the_mapping_refuses_moves_last_fetch_and_not_downloaded
     assert month.read_bytes() == before
 
 
-def test_an_accepted_download_of_the_same_files_moves_downloaded(store, monkeypatch):
+def test_an_accepted_download_of_the_same_files_moves_downloaded_and_not_the_newest_day(
+    store, monkeypatch
+):
     run_day(store, monkeypatch, 1, DAYS)
     month = store.backend.root / stanford.month_path(stanford.month_of(LAST))
     before = month.read_bytes()
@@ -195,7 +183,33 @@ def test_an_accepted_download_of_the_same_files_moves_downloaded(store, monkeypa
     assert list(rows["downloaded_at"]) == [
         (START + pd.Timedelta(days=n)).isoformat() for n in (1, 2)
     ]
+    assert list(rows["latest_event_date"]) == ["2026-11-22"] * 2
     assert month.read_bytes() == before
+
+
+def test_the_record_and_the_changed_month_files_go_in_one_commit(store, monkeypatch):
+    seed(store, {LAST: changed(4)})
+    commits = []
+    real = store.backend.commit
+    monkeypatch.setattr(
+        store.backend,
+        "commit",
+        lambda files, message: (commits.append(set(files)), real(files, message))[1],
+    )
+    written = stanford.write_months(store, {stanford.month_of(LAST)})
+
+    assert written == [stanford.month_path(stanford.month_of(LAST))]
+    assert commits == [{*written, ingest.lineage_path(stanford.SOURCE)}]
+
+
+def test_downloaded_is_blank_when_the_source_has_no_record(store):
+    (store.backend.root / ingest.lineage_path(stanford.SOURCE)).unlink()
+    cli.main(["quality", "--out", str(store.backend.root.parent / "out")])
+    rows = quality_rows(store)
+
+    assert ingest.read_lineage(stanford.SOURCE, store) is None
+    assert rows["downloaded_at"].isna().all()
+    assert list(rows["latest_event_date"]) == ["2026-11-22"]
 
 
 def test_a_changed_file_of_a_day_already_held_does_not_reset_the_seven_day_clock(
