@@ -19,7 +19,7 @@ import json
 import logging
 import ssl
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -260,13 +260,41 @@ def catch_up(
     return lines
 
 
-def decoded_files(store: Store) -> dict[str, bytes]:
+def month_of(day: date) -> str:
+    """The calendar month of a day, as `YYYY-MM`."""
+    return f"{day:%Y-%m}"
+
+
+def month_path(month: str) -> str:
+    """Path of the month file of the context table in the clean store."""
+    return f"clean/{SOURCE}/{month}.parquet"
+
+
+def changed_months(lines: Sequence[Mapping[str, Any]]) -> list[str]:
+    """The months of the days that a run stored (the manifest lines of `catch_up`).
+
+    A day fetched again with the same decoded file has `stored` false: its
+    month is not in the result.
+    """
+    return sorted({month_of(day_of(line["name"])) for line in lines if line["stored"]})
+
+
+def decoded_files(
+    store: Store, months: Collection[str] | None = None
+) -> dict[str, bytes]:
     """The newest payload of each stored day, decoded: payload name to file.
 
     These are the files for `context_table` and for `ingest.lineage`.
+
+    Args:
+        store: The raw store.
+        months: Read only the days of these months (`YYYY-MM`), so that a run
+            does not read each stored day. Default: every stored day.
     """
     files = {}
     for day in stored_days(store):
+        if months is not None and month_of(day) not in months:
+            continue
         name = payload_name(day)
         content = store.latest(SOURCE, name)
         if content is None:
@@ -342,3 +370,32 @@ def context_table(files: Mapping[str, bytes]) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame(columns=COLUMNS)
     return pd.concat(frames, ignore_index=True)
+
+
+def write_months(store: Store, months: Collection[str]) -> list[str]:
+    """Write the month files of the context table in the clean store.
+
+    Each month is built from the stored days of that month only. A month file
+    whose bytes do not change is not written. The files go in one commit.
+
+    Args:
+        store: The raw store, which holds the clean store.
+        months: The months to build, as `changed_months` returns them.
+
+    Returns:
+        The paths written, sorted.
+    """
+    written: dict[str, bytes] = {}
+    for month in sorted(months):
+        table = context_table(decoded_files(store, {month}))
+        content = io.BytesIO()
+        table.to_parquet(content, index=False)
+        path = month_path(month)
+        if store.backend.read(path) != content.getvalue():
+            written[path] = content.getvalue()
+    if written:
+        store.backend.commit(
+            written, f"clean: {SOURCE} table, {len(written)} month file(s)"
+        )
+    logger.info("stanford: %d month file(s) written", len(written))
+    return sorted(written)

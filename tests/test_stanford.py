@@ -440,3 +440,79 @@ def test_the_lineage_takes_the_decoded_files_and_refuses_the_stored_bytes(
     stored = (tmp_path / entry["path"]).read_bytes()
     with pytest.raises(UserError, match="not in the manifest"):
         lineage(stanford.SOURCE, {"heatmap-2026-11-22.json.br": stored}, local, rows=4)
+
+
+def fetcher(days: dict[date, bytes]):
+    """A fetch function that serves `days` and leaves out the others (404)."""
+
+    def fetch(requested):
+        return [
+            stanford.make_payload(day, URL, 200, brotli.compress(days[day]), "br")
+            for day in requested
+            if day in days
+        ]
+
+    return fetch
+
+
+def month_table(store, month: str) -> pd.DataFrame:
+    return pd.read_parquet(store.backend.root / stanford.month_path(month))
+
+
+@pytest.mark.disable_socket
+def test_the_clean_store_holds_one_file_per_month_and_a_run_rewrites_only_its_months(
+    local,
+):
+    days = [date(2026, 10, 30) + timedelta(days=n) for n in range(3)]
+    seed(local, {day: FIXTURE for day in days})
+    assert stanford.write_months(local, ["2026-10", "2026-11"]) == [
+        "clean/stanford/2026-10.parquet",
+        "clean/stanford/2026-11.parquet",
+    ]
+    assert set(month_table(local, "2026-10")["day"]) == set(days[:2])
+    assert set(month_table(local, "2026-11")["day"]) == {days[2]}
+    october = (local.backend.root / "clean/stanford/2026-10.parquet").read_bytes()
+
+    served_days = {days[0]: FIXTURE, days[1]: FIXTURE, days[2]: changed(4)}
+    lines = stanford.catch_up(local, date(2026, 11, 2), fetcher(served_days))
+    assert stanford.changed_months(lines) == ["2026-11"]
+    assert stanford.write_months(local, stanford.changed_months(lines)) == [
+        "clean/stanford/2026-11.parquet"
+    ]
+    october_path = local.backend.root / "clean/stanford/2026-10.parquet"
+    assert october_path.read_bytes() == october
+    november = month_table(local, "2026-11")
+    cell = november[november["h3_index"] == "842da2dffffffff"]
+    assert cell["low_quality_count"].tolist() == [4]
+
+
+@pytest.mark.disable_socket
+def test_a_recheck_with_no_change_and_a_month_with_the_same_bytes_write_nothing(local):
+    days = {DAY: FIXTURE}
+    stanford.catch_up(local, DAY, fetcher(days))
+    stanford.write_months(local, ["2026-11"])
+    commits = []
+    commit = local.backend.commit
+    local.backend.commit = lambda files, message: (
+        commits.append(sorted(files)),
+        commit(files, message),
+    )
+    lines = stanford.catch_up(local, DAY, fetcher(days))
+    assert stanford.changed_months(lines) == []
+    assert stanford.write_months(local, ["2026-11"]) == []
+    assert not [path for files in commits for path in files if "clean/" in path]
+
+
+@pytest.mark.disable_socket
+def test_the_month_build_reads_the_stored_days_of_its_months_only(local):
+    days = [date(2026, 10, 31) + timedelta(days=n) for n in range(3)]
+    seed(local, {day: FIXTURE for day in days})
+    reads = []
+    latest = local.latest
+    local.latest = lambda source, name: (reads.append(name), latest(source, name))[1]
+    files = stanford.decoded_files(local, {"2026-11"})
+    assert sorted(files) == [
+        "heatmap-2026-11-01.json.br",
+        "heatmap-2026-11-02.json.br",
+    ]
+    assert sorted(reads) == sorted(files)
